@@ -1,0 +1,9 @@
+services:
+  db:
+    image: postgres:latest
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: anypasswordhere
+      POSTGRES_DB: budmon
+    ports:
+      - "9001:5432"
