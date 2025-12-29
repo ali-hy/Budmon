@@ -9,4 +9,8 @@ usersRouter.get("/", async (req, res) => {
   res.json(allUsers);
 });
 
+usersRouter.post("/", async (req, res) => {
+
+})
+
 export { usersRouter };

@@ -12,13 +12,33 @@ const paginationParamsSchema = z.object({
 
 type PaginationOptions = z.infer<typeof paginationParamsSchema>;
 
-type Paginated<T> = {
+type Paginated<T> = PaginationOptions & {
   items: T[];
-  totalCount: number;
-  pageCount: number;
+  totalItems: number;
+  totalPages: number;
+  hasNext: boolean;
+  hasPrev: boolean;
 };
 
-function getPaginatedResponse<T>(items: T[]) {}
+type QueryPaginationParams = {
+  limit: number;
+  offset: number;
+}
 
-export { paginationParamsSchema };
-export type { PaginationOptions, Paginated };
+function paginationInfo(options: PaginationOptions & Pick<Paginated<unknown>, "totalItems">) {
+  const totalPages = Math.floor(options.totalItems / options.pageSize);
+  return [
+    {
+      limit: options.pageSize,
+      offset: (options.page - 1) * options.pageSize
+    }, {
+      ...options,
+      totalPages,
+      hasNext: options.page < totalPages,
+      hasPrev: options.page <= totalPages && options.page > 1,
+    } satisfies Omit<Paginated<unknown>, "items">
+  ] as const
+}
+
+export { paginationParamsSchema, paginationInfo };
+export type { PaginationOptions, Paginated, QueryPaginationParams };

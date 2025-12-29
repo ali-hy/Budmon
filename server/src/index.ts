@@ -21,6 +21,7 @@ async function main() {
     name: "Admin User",
     email: "adminstrator@localhost.com",
   };
+
   try {
     const [result] = await db
       .select({
