@@ -1,20 +1,17 @@
 import { date, integer, pgTable, varchar } from "drizzle-orm/pg-core";
-import { createInsertSchema } from "drizzle-zod";
-import z from "zod";
+import { refreshTokensTable } from "./refreshTokens.js";
+import { relations } from "drizzle-orm/relations";
+import { accountOwnersTable } from "./account.js";
 
-export const users = pgTable("users", {
+export const usersTable = pgTable("users", {
   id: integer().primaryKey().generatedAlwaysAsIdentity(),
   name: varchar({ length: 255 }).notNull(),
   dob: date(),
   email: varchar({ length: 255 }).unique().notNull(),
-  passwordHash: varchar({ length: 255 }).notNull()
+  passwordHash: varchar({ length: 255 }).notNull(),
 });
 
-export const registrationSchema = createInsertSchema(users)
-  .omit({
-    passwordHash: true
-  })
-  .extend(z.object({
-    password: z.string
-  }));
-
+export const userRefreshRelationship = relations(usersTable, ({ many }) => ({
+  refreshTokens: many(refreshTokensTable),
+  userAccounts: many(accountOwnersTable),
+}));

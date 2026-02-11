@@ -5,6 +5,7 @@ import z from "zod";
 const env_schema = z.object({
   DATABASE_URL: z.string(),
   PORT: z.coerce.number().min(1).max(65535),
+  JWT_SECRET: z.string().min(8)
 });
 
 type EnvType = z.infer<typeof env_schema>;

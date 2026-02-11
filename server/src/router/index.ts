@@ -1,12 +1,18 @@
 import e from "express";
-import { usersRouter } from "./users.js";
+import { usersRouter } from "../users/usersRouter.js";
+import { authRouter } from "../auth/authRouter.js";
+import { router } from "../trpc.js";
 
-const router: e.Router = e.Router();
+const expressRouter: e.Router = e.Router();
 
-router.use("/users", usersRouter);
+expressRouter.use("/auth", authRouter);
+expressRouter.use("/users", usersRouter);
 
-router.get("/", (req, res) => {
+expressRouter.get("/", (req, res) => {
   res.send("Hello World!");
 });
 
-export { router };
+/* tRPC router */
+const appRouter = router({});
+
+export { expressRouter as expressRouter };
