@@ -1,6 +1,6 @@
 ---
 doc: spec-summary
-version: 0.3
+version: 0.4
 updated: 2026-10-04
 ---
 
@@ -24,6 +24,7 @@ Based on the [project brief](./project-brief.md), the user's [initial descriptio
 | 0.1     | 2026-10-04 | Initial draft (interview round 1) |
 | 0.2     | 2026-10-04 | Round 2 answers folded in. MVP reaches stage B (R2-Q3). `budgets` written as a core MVP module: conditions, amount or percentage, nesting, overlap, custom periods (R2-Q2). Native Android first (R2-Q3). Shared-account roles admin, member and viewer (R2-Q4). Per-account currency, daily rates, cross-currency transfers with fees and the actual rate applied (R2-Q5). No hard-coded bank list (R2-Q5). Unreviewed captures count in balances, flagged, with a review-status filter (R2-Q6). Review teaches sender-name-to-payee and payee-to-purpose links (R2-Q6). Auto-confirmation for known single-purpose payees, never for new payees (R2-Q6). AI provider rollout (R2-Q7). Raw messages not kept after processing, plus an opt-in raw-data donation setting (R2-Q7). Build order and MVP cut updated. |
 | 0.3     | 2026-10-04 | Audience decided (R2-Q1): a small invited group first; going public is a hoped-for goal, not a commitment. `identity` sign-up is invite-only (IDN-US-1, new IDN-US-9, IDN-BR-3). Gmail stays in Google's testing mode; public-launch work is Later. A5 replaced by the decision. |
+| 0.4     | 2026-10-04 | Round 3 answers folded in. SMS in the MVP; AI right after it (R3-Q2: SRC-US-2, SRC-US-5, CAP-US-2). Templates made by highlighting and labelling (R3-Q2: CAP-US-1). Budgets: percentage bases (R3-Q3, BUD-US-3), own conditions only plus chosen accounts, alerts only, rollover later (R3-Q4: BUD-US-1, 4, 8, 9, BUD-BR-7, 8). Shared-account vocabulary (R3-Q5: ACC-BR-7, CLS-US-4, 5, CLS-BR-3, PAY-US-6). Transfer fees and conversion rates (R3-Q6: XC-3, TXN-US-5, TXN-BR-3). Offline entry (R3-Q7: XC-22, TXN-US-10). |
 
 ## 1. Users and roles
 
@@ -75,7 +76,7 @@ No administrator or support role for Budmon itself is defined. [NEEDS INPUT, lat
 
 - **XC-1** Amounts are exact. No rounding drift; each currency is shown with its own number of decimals.
 - **XC-2** (Decided, R2-Q5) Each account has its own currency. Each user has a base currency for totals.
-- **XC-3** (Decided, R2-Q5) The backend fetches market exchange rates daily; more frequent updates come later. [NEEDS INPUT: Which rate converts a past transaction into base currency for reports and budgets: the rate on the transaction's date, or today's rate? See question 6.]
+- **XC-3** (Decided, R2-Q5) The backend fetches market exchange rates daily; more frequent updates come later. (Decided, R3-Q6) Reports and budgets convert a transaction at the market rate on its date. Net worth and current balance totals use today's rate.
 - **XC-4** (Decided, R2-Q6) An account's balance includes every transaction, whether *Confirmed*, *Auto-confirmed* or *Needs review*. Transactions that need review are visibly flagged, and the balance shows how much of it is unreviewed *(assumption A16 on the display)*. [NEEDS INPUT, later round: are future-dated transactions excluded until their date? Proposal: yes.]
 
 ### 3.2 Time, periods and time zones
@@ -103,7 +104,7 @@ No administrator or support role for Budmon itself is defined. [NEEDS INPUT, lat
 - **XC-19** (Decided, R2-Q3) The first platforms are the backend, the web app and a **native Android app**. More platforms (iOS, desktop via Electron) come later.
 - **XC-20** (Decided) Everything, including automation setup, can be done from both the web app and the Android app. [NEEDS INPUT, later round: any feature that is web-first or Android-first? SMS is Android-only by nature.]
 - **XC-21** (Decided, R2-Q3) Android first; iOS later.
-- **XC-22** [NEEDS INPUT: must the Android app work offline? See question 7.]
+- **XC-22** (Decided, R3-Q7) The Android app lets the user record **new** transactions (including transfers) offline; they sync when the connection returns. Everything else (editing, review, budgets) needs a connection in the first version. Full offline use, including review, may come later. [NEEDS INPUT, later round: are offline entries shown in balances on the device before they sync? Proposal: yes, marked as "not yet synced".]
 - **XC-23** Recording a manual transaction is fast: at most [NEEDS INPUT, later round: e.g. 4] taps after opening the app. Confirming a captured transaction that needs no change takes one action.
 - **XC-24** [NEEDS INPUT, later round: languages and right-to-left layouts; accessibility target (proposal: WCAG 2.2 AA on web, Android accessibility guidelines); tone (proposal: calm and plain, never guilt-inducing).]
 
@@ -189,7 +190,7 @@ Twelve modules:
 | ACC-BR-4 | People on a shared account see only that account, never each other's other accounts. |
 | ACC-BR-5 | (Decided, R2-Q4, from the example) A member may transfer from a shared account to one of their own personal accounts. The other people on the shared account see the shared side, with the destination shown only as "<person>'s account" *(assumption A14)*. |
 | ACC-BR-6 | Balances are never edited directly; corrections create adjustment transactions. |
-| ACC-BR-7 | [NEEDS INPUT: on a shared account, whose purposes and tags (and payees) are used? See question 5.] |
+| ACC-BR-7 | (Decided, R3-Q5) A shared account has its own vocabulary of purposes, tags, payees and payee aliases, managed by its admins. When the account becomes shared, the vocabulary starts as a copy of the creating admin's set. Admins can copy in items that other members have marked as shared. Entries on the account use only the account's vocabulary. A personal account uses its owner's personal set *(assumption A21)*. |
 
 ### 4.3 `classification`: Purposes and tags (prefix `CLS`)
 
@@ -205,6 +206,8 @@ Twelve modules:
 | CLS-US-1 | new user | default purposes and tags | I can start without setup | Created at sign-up, including the "subscription" and "tip" tags *(assumption A6 for "tip")*. [NEEDS INPUT, later round: the default purpose list.] | MVP |
 | CLS-US-2 | user | to create, rename and archive purposes and tags | they fit my life | Renaming applies everywhere, including budget conditions; archived items are hidden from pickers but stay on history and in budgets. | MVP |
 | CLS-US-3 | user | to merge two purposes or two tags | duplicates go away | Uses, including budget conditions, move to the survivor. | Later |
+| CLS-US-4 | user | to mark items of my personal vocabulary (purposes, tags, payees) as shared/visible | admins of accounts I'm on can reuse them (decided, R3-Q5) | Hidden by default *(assumption A22)*; visible only to people who share at least one account with me *(assumption A23)*. | MVP *(A11)* |
+| CLS-US-5 | admin of a shared account | to manage the account's own vocabulary | entries on the account are classified consistently (decided, R3-Q5) | Seeded from the creating admin's set; admins add, rename and archive items; admins can copy items that members have marked as shared (CLS-US-4); members and viewers can't change it. [NEEDS INPUT, later round: can members create a new purpose or tag inline while entering a transaction?] | MVP *(A11)* |
 
 **Business rules**
 
@@ -212,6 +215,7 @@ Twelve modules:
 | -- | ---- |
 | CLS-BR-1 | Names are unique per vocabulary, ignoring case. |
 | CLS-BR-2 | Purposes are either income or expense purposes *(assumption A7)*. Tags apply to both. |
+| CLS-BR-3 | (Decided, R3-Q5) A vocabulary belongs either to a user (personal) or to a shared account. A copied item is independent of its original once copied *(assumption A24; see question 7)*. |
 
 ### 4.4 `payees`: Payees, aliases and payee behaviour (prefix `PAY`)
 
@@ -232,6 +236,7 @@ Twelve modules:
 | PAY-US-2 | user | several aliases per payee | "AMZN Mktp EG" and "Amazon.eg" both mean "Amazon" | Aliases are managed on the payee screen and added from review (REV-US-3); an alias belongs to one payee. | MVP |
 | PAY-US-3 | user | to merge payees | duplicates from automation are cleaned up | Transactions and aliases move to the survivor; its single/multi-purpose setting is kept. | MVP |
 | PAY-US-4 | user | a payee's defaults to pre-fill new transactions | entry and review are faster | Pre-filled, and still editable. | MVP |
+| PAY-US-6 | admin of a shared account | the account's own payees and aliases | captures on the account resolve consistently (decided, R3-Q5) | Follows CLS-US-5: seeded from the creating admin's payees, extendable by copying members' shared payees. | MVP *(A11)* |
 | PAY-US-5 | user | to mark a payee as single-purpose or multi-purpose, and change it later | auto-confirmation follows how predictable the payee is (decided, R2-Q6: "cuz sometimes stuff change") | A toggle on the payee; a single-purpose payee must have a default purpose; changing it affects only future captures. [NEEDS INPUT, later round: does Budmon also suggest "single-purpose" after N reviews of a payee with the same purpose? Is the default for new payees multi-purpose?] | MVP |
 
 **Business rules**
@@ -265,10 +270,11 @@ Twelve modules:
 | TXN-US-2 | user with rights on the account | to edit or delete a transaction | I can fix mistakes | Rights per ACC-BR-2; balances and budgets recalculate; deleting a refunded or refunding transaction removes only the link. | MVP |
 | TXN-US-3 | user | to split a transaction into lines | a mixed order counts against different purposes (decided) | Lines with amount, purpose, tags and note must add up to the total before saving; payee, account and date are shared *(assumption A8)*. | MVP |
 | TXN-US-4 | user | to mark part of a payment as a tip | I learn what I spend on tips (decided) | A split line tagged "tip" (A6). [NEEDS INPUT, later round: a one-tap "add tip" shortcut?] | MVP |
-| TXN-US-5 | user | to record a transfer between two accounts I can use | moving money isn't spending (decided) | From account, to account, date and note. Same currency: one amount. Different currencies: sent amount and received amount, with the applied rate shown alongside the market rate for that day; optional fee (decided, R2-Q5; fee model per question 6). Allowed from a shared account to my personal account (ACC-BR-5). | MVP |
+| TXN-US-5 | user | to record a transfer between two accounts I can use | moving money isn't spending (decided) | From account, to account, date and note. Same currency: one amount. Different currencies: sent amount and received amount, with the applied rate shown alongside the market rate for that day. An optional fee is recorded as a separate expense line on the source account under a "Fees" purpose. The gap between the applied rate and the market rate is also shown as an implied cost (decided, R2-Q5 and R3-Q6). [NEEDS INPUT, later round: does the implied cost count as spending in reports and budgets, or is it information only? Proposal: information only, so the fee isn't counted twice.] Allowed from a shared account to my personal account (ACC-BR-5). | MVP |
 | TXN-US-6 | user | to record a cash withdrawal | my cash account is right | A transfer from a bank account to a cash account, with an optional fee; triggers NTF-US-3. | MVP |
 | TXN-US-7 | user | to record a refund linked to the original purchase (decided) | spending reflects what I kept | Pick the original expense or split line; amount defaults to the remaining refundable amount; both sides show the link. | MVP |
 | TXN-US-8 | user | to search and filter transactions | I find things quickly | Date range, account, payee, purpose, tag, amount, note text, created-by (shared accounts), and **review status** (decided, R2-Q6). | MVP |
+| TXN-US-10 | Android user | to record a new transaction or transfer offline | I can log cash spending without a signal (decided, R3-Q7) | Saved on the device and synced when back online; marked "not yet synced" until then; after syncing it goes through the duplicate check against captures (CAP-US-6). | MVP |
 | TXN-US-9 | user | to see where a transaction came from | I trust my ledger | Origin (manual, captured, adjustment); for captured ones, sender, received time, extracted fields, and a link to open the original at the source (A12). No raw content is shown from Budmon's storage (XC-13). | MVP |
 
 **Business rules**
@@ -277,7 +283,7 @@ Twelve modules:
 | -- | ---- |
 | TXN-BR-1 | Amounts are positive; direction comes from the type. |
 | TXN-BR-2 | (Decided) Split lines add up exactly to the total. |
-| TXN-BR-3 | A transfer is never income or expense. A transfer fee is an expense (model per question 6). |
+| TXN-BR-3 | A transfer is never income or expense. (Decided, R3-Q6) A transfer fee is a separate expense line; the implied exchange-rate cost is shown alongside it. |
 | TXN-BR-4 | (Decided) A refund links to one earlier expense or split line; refunds can't exceed the original amount in total. |
 | TXN-BR-5 | A refund reduces spending under the original purpose in the period the refund falls in *(assumption A9)*. |
 | TXN-BR-6 | (Decided, R2-Q6) Every transaction has a review status. *Needs review* transactions count in balances, budgets and reports like any other, and are flagged wherever they appear. |
@@ -317,7 +323,7 @@ Twelve modules:
 - **Purpose:** letting users plan spending in whatever structure fits them: from one simple limit to "80% of my salary, of which 30% goes on food" (decided, R2-Q2).
 - **In scope:**
   - budgets defined by conditions over purposes and tags, combined with AND, OR and NOT (decided);
-  - amounts that are fixed or a percentage (decided), where the base of the percentage is the user's choice (decided; the options are in question 3);
+  - amounts that are fixed or a percentage (decided), where the base of the percentage is the user's choice: a parent budget, actual matching income, or an amount the user enters (decided, R3-Q3);
   - nested budgets (decided);
   - one transaction counting toward several budgets (decided);
   - custom periods (decided);
@@ -330,16 +336,16 @@ Twelve modules:
 
 | ID | As a… | I want… | So that… | Acceptance criteria | MVP? |
 | -- | ----- | ------- | -------- | ------------------- | ---- |
-| BUD-US-1 | user | to create a budget for transactions matching conditions I define | I can budget food, subscriptions, or anything else (decided) | Conditions on purposes and tags, combined with AND, OR and NOT, for example "purpose Food AND NOT tag groceries" (decided). [NEEDS INPUT, later round: can conditions also use payees, accounts or amount ranges?] The matching transactions are previewed while I edit. | MVP |
+| BUD-US-1 | user | to create a budget for transactions matching conditions I define | I can budget food, subscriptions, or anything else (decided) | Conditions on purposes and tags, combined with AND, OR and NOT, for example "purpose Food AND NOT tag groceries" (decided). The budget also lists which accounts it draws from, including shared accounts I'm on (decided, R3-Q4). [NEEDS INPUT, later round: can conditions also use payees or amount ranges?] The matching transactions are previewed while I edit. | MVP |
 | BUD-US-2 | user | a budget with a fixed amount | I set a simple limit | Amount in base currency *(assumption A18)*. | MVP |
-| BUD-US-3 | user | a budget set as a percentage | it follows my income or a parent budget (decided) | The percentage base is chosen by the user (decided); the base options are in question 3. | MVP |
-| BUD-US-4 | user | to nest budgets | "food is 30% of the 80% of my salary I plan to spend" (decided) | A child budget's amount can be a percentage of its parent's amount; the effective share of the root is shown (for example "≈24% of salary"). How spending rolls up from child to parent is in question 4. | MVP |
+| BUD-US-3 | user | a budget set as a percentage | it follows my income or a parent budget (decided) | (Decided, R3-Q3) The base is one of: (i) the parent budget's amount; (ii) the actual income in the same period matching conditions I set (for example purpose Salary), using an expected amount I enter until the income actually arrives; (iii) an amount I enter. [NEEDS INPUT, later round: for (ii), if more or less income arrives than expected, does the budget follow the actual figure once anything arrives, or only once the total reaches the expected amount? Proposal: the actual figure once anything has arrived, with the expected amount shown alongside.] | MVP |
+| BUD-US-4 | user | to nest budgets | "food is 30% of the 80% of my salary I plan to spend" (decided) | A child budget's amount can be a percentage of its parent's amount; the effective share of the root is shown (for example "≈24% of salary"). (Decided, R3-Q4) Each budget's spent amount comes only from its own conditions and accounts; children's spending isn't added to the parent automatically. Budmon warns when a child's conditions or accounts aren't covered by its parent's *(assumption A25)*. | MVP |
 | BUD-US-5 | user | one transaction to count toward every budget it matches | "food" and "subscription" budgets both see a food subscription (decided) | Each budget's spent amount includes all matching transactions; no exclusivity between budgets. | MVP |
 | BUD-US-6 | user | to choose each budget's period | budgets fit my life (decided: custom) | [NEEDS INPUT, later round: which kinds of custom period? Proposal: monthly starting on a chosen day, weekly, every N days/weeks/months from a start date, and a one-off date range.] | MVP |
 | BUD-US-7 | user | to see each budget's progress | I know where I stand | Budgeted, spent, remaining, and time left in the period; the part of "spent" that still needs review is shown separately (TXN-BR-6); the nested structure is shown as a tree. | MVP |
-| BUD-US-8 | user | alerts as I approach or exceed a budget | I can adjust in time | Thresholds per budget (proposal: 80% and 100%), via `notifications`. Exceeding is allowed and never blocks entry *(proposal; question 4)*. | MVP |
-| BUD-US-9 | user | unspent (or overspent) amounts to carry into the next period | [NEEDS INPUT: wanted? See question 4.] | | TBD |
-| BUD-US-10 | user | budgets that include shared-account transactions | household budgets work | [NEEDS INPUT, later round: does my budget count everything on a shared account, only entries I created, or is that a per-budget choice? Can a budget itself be shared?] | TBD |
+| BUD-US-8 | user | alerts as I approach or exceed a budget | I can adjust in time | Thresholds per budget (proposal: 80% and 100%; [NEEDS INPUT, later round: confirm the defaults]), via `notifications`. (Decided, R3-Q4) Exceeding only triggers alerts; nothing is ever blocked. | MVP |
+| BUD-US-9 | user | unspent and overspent amounts to carry into the next period, optionally per budget | my plan reflects past periods (decided, R3-Q4) | Future work; to be specified. | Later |
+| BUD-US-10 | user | budgets that include shared-account transactions | household budgets work | A shared account can be chosen as one of the budget's accounts (BUD-US-1). Conditions on that account use the account's vocabulary (ACC-BR-7); see question 7. [NEEDS INPUT, later round: does my budget count everything on the shared account, or only entries I created? Can a budget itself be shared with the account's members?] | MVP |
 
 **Business rules**
 
@@ -350,6 +356,8 @@ Twelve modules:
 | BUD-BR-3 | Refunds matching a budget reduce its spent amount (consistent with TXN-BR-5). Transfers and loans never count *(assumption A10)*. |
 | BUD-BR-4 | Amounts in other currencies are converted to base currency per XC-3. |
 | BUD-BR-5 | A nested child's amount is derived from its parent's amount when set as a percentage, and changes when the parent's does. |
+| BUD-BR-7 | (Decided, R3-Q4) A budget counts only transactions on its chosen accounts that match its own conditions. |
+| BUD-BR-8 | (Decided, R3-Q3) A percentage-of-income budget uses the expected amount until matching income arrives in the period. |
 | BUD-BR-6 | Budgets can be nested to any depth *(assumption A19; [NEEDS INPUT, later round: a depth limit?])*. A budget can't be its own ancestor. |
 
 ### 4.8 `reports`: Insights (prefix `RPT`)
@@ -374,7 +382,7 @@ Twelve modules:
 | ID | Rule |
 | -- | ---- |
 | RPT-BR-1 | (Decided, R2-Q6) Reports include transactions that need review by default, and can be filtered by review status. |
-| RPT-BR-2 | Amounts in other currencies are converted per XC-3. |
+| RPT-BR-2 | (Decided, R3-Q6) Amounts in other currencies are converted at the market rate on each transaction's date; net worth uses today's rate (XC-3). |
 | RPT-BR-3 | [NEEDS INPUT, later round: do my reports include shared-account entries created by others? Proposal: yes, with a filter.] |
 
 ### 4.9 `debts`: Debts and loans (prefix `DEBT`)
@@ -410,7 +418,7 @@ Twelve modules:
 ### 4.10 `sources`: Message sources and scan scope (prefix `SRC`)
 
 - **Purpose:** connecting where messages arrive, and the user's rules for what may be read.
-- **In scope:** Gmail accounts (several allowed); Android SMS ([NEEDS INPUT: in the MVP? See question 2]); scan-scope modes; senders and roles; linking senders to accounts and payees; AI sender discovery (opt-in); initial backfill; the raw-data donation setting (decided, R2-Q7).
+- **In scope:** Gmail accounts (several allowed); Android SMS (decided in the MVP, R3-Q2); scan-scope modes; senders and roles; linking senders to accounts and payees; AI sender discovery (opt-in); initial backfill; the raw-data donation setting (decided, R2-Q7).
 - **Out of scope:** extracting fields (`capture`).
 - **Depends on:** `identity`, `accounts`, `payees`.
 
@@ -419,10 +427,10 @@ Twelve modules:
 | ID | As a… | I want… | So that… | Acceptance criteria | MVP? |
 | -- | ----- | ------- | -------- | ------------------- | ---- |
 | SRC-US-1 | user | to connect one or more Gmail accounts | transaction emails are captured | Google consent; status and last check time shown; scanning starts only after the scope is set. | MVP (decided, R2-Q3) |
-| SRC-US-2 | Android user | to connect my phone's SMS | bank SMS are captured | Permission with an explanation; same scope rules; messages processed on arrival. | TBD (question 2) |
+| SRC-US-2 | Android user | to connect my phone's SMS | bank SMS are captured | Permission with an explanation; same scope rules; messages processed on arrival. | MVP (decided, R3-Q2) |
 | SRC-US-3 | user | to choose a scan scope per source | only what I allow is read (decided) | Only listed senders / everything except excluded (for SMS, with an option to exclude all contacts except my exceptions) / everything; explained in plain language. | MVP |
 | SRC-US-4 | user | to add senders manually with a role | setup works without AI (decided) | Email address or domain, or SMS sender ID; *financial institution* senders are linked to one or more accounts; *vendor* senders to a payee. | MVP |
-| SRC-US-5 | user who opted into AI | sender suggestions | setup is quick | Only in-scope messages examined; suggestions need my confirmation. | TBD (question 2) |
+| SRC-US-5 | user who opted into AI | sender suggestions | setup is quick | Only in-scope messages examined; suggestions need my confirmation. | Later: right after the MVP (decided, R3-Q2) |
 | SRC-US-6 | user | to choose how far back to scan | past transactions are captured | XC-30; results arrive as *Needs review*. | MVP |
 | SRC-US-7 | user | a prompt to link senders when I create an account | capture covers it | Optional step after creating a bank or wallet account. | MVP |
 | SRC-US-8 | user | to pause or disconnect a source | I stay in control | Pause stops reading; disconnect revokes access (XC-14). | MVP |
@@ -459,8 +467,8 @@ Twelve modules:
 
 | ID | As a… | I want… | So that… | Acceptance criteria | MVP? |
 | -- | ----- | ------- | -------- | ------------------- | ---- |
-| CAP-US-1 | user | to build a template from one sample message by marking its fields | similar messages are read automatically (decided) | Choose the type (debit, credit, card payment, cash withdrawal, refund, other); mark amount, currency, payee name, date and time, account identifier, and optionally balance after; preview extraction on other recent messages from the sender; the sample's content is discarded once the template is saved (XC-13). | MVP |
-| CAP-US-2 | user who opted into AI | AI to propose the template or extract fields | I don't mark fields myself (decided as an option) | Proposal shown for confirmation like CAP-US-1; third-party provider first (XC-12). [NEEDS INPUT, later round: does AI propose templates, extract directly when no template matches, or both?] | TBD (question 2) |
+| CAP-US-1 | user | to build a template from a real message by highlighting and labelling its parts | similar messages are read automatically (decided) | (Decided, R3-Q2) Templates aren't written from scratch. I open a real message from the sender, choose its type (debit, credit, card payment, cash withdrawal, refund, other), select a part of the text, and pick which field it represents: amount, currency, payee name, date and time, account identifier, and optionally balance after. The UI is left to design (R3-Q2: "we will get to how this part of the ui is built later on"). Works the same on web and Android, for email and SMS; preview extraction on other recent messages from the sender; the sample's content is discarded once the template is saved (XC-13). | MVP |
+| CAP-US-2 | user who opted into AI | AI to propose the template or extract fields | I don't mark fields myself (decided as an option) | Proposal shown for confirmation in the same highlight-and-label view as CAP-US-1; third-party provider first (XC-12). [NEEDS INPUT, later round: does AI propose templates, extract directly when no template matches, or both?] | Later: right after the MVP (decided, R3-Q2) |
 | CAP-US-3 | user | every in-scope message matching a template to become a transaction straight away | I get analysis without doing anything (decided, R2-Q6) | The transaction goes into the ledger with status *Needs review* (or *Auto-confirmed* per REV-US-8), with type, amount, account, date, payee, the payee's default purpose and tags, and the message reference. | MVP |
 | CAP-US-4 | user | a bank message and a vendor message about one payment to become one transaction | no duplicates (decided) | Matched on amount, a time window [NEEDS INPUT, later round: proposal 30 minutes] and a sender/payee link; the bank wins on amount, date and account; the vendor adds detail. | MVP |
 | CAP-US-5 | user | the payee resolved through aliases | my names are used (decided) | Known alias → payee; unknown → new payee (PAY-BR-2). | MVP |
@@ -547,11 +555,11 @@ flowchart LR
 | 7 | `budgets` | A core feature (R2-Q2); needs transactions and notifications. | MVP |
 | 8 | `reports` | Small once the ledger exists. | MVP |
 | 9 | `debts` | Off-system debts only; user-to-user loans later. | MVP (partial) |
-| 10 | `sources` | Gmail (and SMS if question 2 says so). | MVP |
+| 10 | `sources` | Gmail and Android SMS (R3-Q2). | MVP |
 | 11 | `capture` | Templates, merging and resolution. | MVP |
 | 12 | `review` | Refinement and auto-confirmation; designed together with `capture`. | MVP |
 
-**Later (stage C):** going public, if it happens (open sign-up IDN-US-10, Gmail verification and security assessment, Play Store SMS compliance); iOS; Electron; a Budmon-hosted AI model, then a user-hosted endpoint; more frequent exchange rates; per-viewer visibility; user-to-user loans; subscription detection; purpose suggestions; other email providers; raw-data donation (SRC-US-10). SMS and AI-assisted capture move here or into the MVP depending on question 2.
+**Later (stage C):** going public, if it happens (open sign-up IDN-US-10, Gmail verification and security assessment, Play Store SMS compliance); iOS; Electron; a Budmon-hosted AI model, then a user-hosted endpoint; more frequent exchange rates; per-viewer visibility; user-to-user loans; subscription detection; purpose suggestions; other email providers; raw-data donation (SRC-US-10); budget rollover (BUD-US-9); full offline use. **First after the MVP:** AI-assisted capture (SRC-US-5, CAP-US-2; decided, R3-Q2).
 
 ## 6. External integrations
 
@@ -593,6 +601,11 @@ Not evaluated yet. The user will ask for this separately.
 | A18 | Budget amounts are in the user's base currency. |
 | A19 | Budgets can be nested to any depth. |
 | A20 | Captures of the same payment from different people's sources on a shared account are merged. |
+| A21 | A personal (unshared) account uses its owner's personal vocabulary. |
+| A22 | Personal vocabulary items are hidden from others until marked shared/visible. |
+| A23 | Items marked shared are visible only to people who share at least one account with the owner. |
+| A24 | A vocabulary item copied into a shared account isn't linked to its original. |
+| A25 | Budmon warns, but doesn't prevent, when a child budget's conditions or accounts aren't covered by its parent's. |
 
 ## 9. Open questions
 

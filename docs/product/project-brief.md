@@ -1,6 +1,6 @@
 ---
 doc: project-brief
-version: 0.3
+version: 0.4
 updated: 2026-10-04
 ---
 
@@ -15,6 +15,7 @@ Sources: the user's initial description ([`notes/2026-10-04-initial-idea.md`](./
 | 0.1     | 2026-10-04 | Initial draft (interview round 1) |
 | 0.2     | 2026-10-04 | Round 2 answers folded in. The MVP now includes Gmail capture and review (R2-Q3). Budgets are a core MVP feature with a flexible, nested, overlapping model (R2-Q2). Native Android comes first (R2-Q3). Sharing is per account with admin, member and viewer roles (R2-Q4). Accounts are multi-currency, with daily exchange rates (R2-Q5). Raw messages aren't kept after processing (R2-Q7). AI rolls out in three stages: a third-party service, then Budmon-hosted, then the user's own endpoint (R2-Q7). |
 | 0.3     | 2026-10-04 | Audience decided (R2-Q1): the first version is for a small invited group, built so that going public later stays possible. Going public is a hoped-for goal, not a commitment. Gmail stays in Google's testing mode for now. Public launch requirements moved to Later. |
+| 0.4     | 2026-10-04 | Round 3 answers folded in. SMS capture is in the MVP, and AI-assisted capture comes right after it (R3-Q2). Templates are made by highlighting and labelling parts of a real message (R3-Q2). Budget percentage bases (R3-Q3). Budgets count only their own conditions and chosen accounts, alert only, and get rollover later (R3-Q4). Shared accounts have their own vocabulary (R3-Q5). Transfer fees plus implied cost, and rate-by-date conversion (R3-Q6). Offline entry of new transactions on Android (R3-Q7). |
 
 ## 1. The problem
 
@@ -89,10 +90,15 @@ Proposed measures, all pending your confirmation. [NEEDS INPUT: confirm, change 
 - Reports.
 - Reminders.
 - Gmail capture: scan scope, manual sender setup, templates built per user, merging, payee resolution, a review queue, a reviewed/unreviewed filter, and auto-confirmation for known single-purpose payees (R2-Q6).
-- [NEEDS INPUT: Are SMS capture on Android and AI-assisted capture in the first version too? Question 2.]
+- SMS capture on Android, with the same scope rules and templates as Gmail (decided, R3-Q2).
+- Templates are made by highlighting parts of a real message and labelling each selection with the field it holds (decided, R3-Q2). There is no AI in the first version.
+- Offline entry of new transactions on Android, synced when back online (decided, R3-Q7).
 
 ### 5.2 Later
 
+- **Right after the MVP:** AI-assisted capture through a third-party LLM service: sender suggestions, proposed templates and extraction (decided, R3-Q2).
+- Budget rollover of unspent and overspent amounts, optional per budget (decided as future work, R3-Q4).
+- Full offline use on Android, including review (R3-Q7: "may come later").
 - Going public (a hoped-for goal, not a commitment; R2-Q1): open sign-up, Google's restricted-scope verification and annual security assessment for Gmail access, Play Store compliance for SMS access, and public-grade support and operations.
 - iOS and other platforms ("try to cover more as we go", R2-Q3). A desktop (Electron) app based on the web app.
 - AI hosted by Budmon, then AI through an endpoint the user hosts (R2-Q7).
@@ -151,10 +157,11 @@ What Budmon intends to do differently, from your description:
 | Unreviewed data counts straight away | A wrong captured amount distorts balances and budgets until it's reviewed. | Clear "needs review" flags, filters, and a review nudge; bank message is the source of truth. |
 | Auto-confirmation errors | A single-purpose payee that starts selling other things gets mis-classified silently. | New payees are never auto-confirmed; the user can switch a payee back to multi-purpose at any time (R2-Q6); auto-confirmed items stay identifiable. |
 | No raw-message retention | Changing a template can't be re-applied to past messages from stored data, and users can't see the original text in Budmon. | Keep a reference to the message (for example the Gmail message ID) so it can be re-fetched from the source or opened there (assumption A12). |
-| Budget model complexity | Overlapping, nested and percentage budgets with custom periods are much bigger than "a limit per category". | Settle the semantics (questions 3 and 4) before design; the planner may slice the module. |
+| Budget model complexity | Overlapping, nested and percentage budgets with custom periods are much bigger than "a limit per category". | Semantics settled in R3-Q3 and R3-Q4; rollover deferred; the planner may slice the module. |
 | Third-party AI and privacy | Message content leaves Budmon when the user opts into AI. | Opt-in only, in-scope messages only, provider disclosed; Budmon-hosted model and user-hosted endpoint later (R2-Q7). |
 | Built-for-public drift | Building for a public launch that may never happen adds cost now; ignoring it makes going public expensive later. | Keep choices compatible with going public (no hard-wired single-tenant shortcuts), but don't build public-only features (open sign-up, verification) yet. |
-| Scope size | Every MVP module is substantial, and the MVP includes automated capture. | Strict build order; Stage C items stay out. |
+| Offline entry and sync | Even entry-only offline support means syncing, resolving conflicts and handling duplicates against captures that arrived in the meantime. | Limited to new transactions (R3-Q7); offline entries go through the same duplicate check as captures (CAP-US-6). |
+| Scope size | Every MVP module is substantial, and the MVP includes Gmail and SMS capture. | Strict build order; Stage C items stay out. |
 
 ## 9. Assumptions
 
