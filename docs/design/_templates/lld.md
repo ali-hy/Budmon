@@ -37,59 +37,83 @@ Implements [HLD](./hld.md) v<x.y>.
 ## 3. Database
 
 ### 3.1 Table definitions
-<!-- Exact Drizzle definitions: types, nullability, defaults, unique and check constraints,
-     indexes, foreign keys with onDelete. -->
+<!-- Exact definitions in the project's ORM: types, nullability, defaults, unique and check
+     constraints, indexes, foreign keys with onDelete. -->
 
 ### 3.2 Changes to existing tables
 
 ### 3.3 Migration and seed data
 
-## 4. API contract
+## 4. Function catalog
+<!-- Every function, method, handler and frontend component/hook the module introduces or changes.
+     Signatures must be concrete enough to write tests against before the code exists. -->
+
+### F-1: `<name>`
+- **File:**
+- **Layer:** router / service / repo / validator / component / hook / …
+- **Signature:**
+- **Behaviour:** <!-- preconditions, result per kind of input, side effects, transaction boundary -->
+- **Errors:** <!-- each error and when -->
+- **Calls:** <!-- F-n or existing code; mark which are injected (fakeable in unit tests) -->
+
+### 4.x Dependency graph
+
+```mermaid
+flowchart TD
+```
+
+## 5. API contract
 <!-- Repeat per endpoint/procedure. -->
 
-### <METHOD /path> or <trpc.procedure>
+### <METHOD /path> or <procedure name>
 - **Transport:** REST / tRPC query / tRPC mutation / …
+- **Handler:** F-n
 - **Auth:**
-- **Request (zod):**
+- **Request schema:**
 - **Response:**
 - **Errors:**
 
 | Error key | Status | When |
 | --------- | ------ | ---- |
 
-## 5. Service logic
-<!-- Per function: signature, validation, algorithm, transaction boundary, authorization
-     checks, edge cases. -->
-
 ## 6. Error catalog
 
-| Class | Key | Status | Thrown when |
-| ----- | --- | ------ | ----------- |
+| Class | Key | Status | Thrown by (F-n) | When |
+| ----- | --- | ------ | --------------- | ---- |
 
 ## 7. Integrations
 <!-- Payloads, auth, retries/backoff, idempotency, timeouts, schedules. "None" if not applicable. -->
 
 ## 8. Frontend
-<!-- Routes, components, state and data fetching, form validation, error display.
+<!-- Routes, component tree, state and data fetching, form fields and validation messages,
+     and how each UX state and feedback behaviour from HLD §4 is implemented.
      "None" if not applicable. -->
 
-## 9. Test plan
+## 9. Slices
+<!-- Build order. One story/journey per slice, end to end (data → logic → API → UI),
+     covering its happy path and unhappy scenarios. S-0 may hold shared foundations. -->
 
-### 9.1 Tooling
+### S-1: <story title> (US-n)
+- **Depends on:** none
+- **Functions:** F-n, …
+- **Scenarios:**
+
+| Scenario | Happy / unhappy | Expected | Tests |
+| -------- | --------------- | -------- | ----- |
+
+- **Acceptance criteria:**
+- **Status:** <!-- not started | tests written | implemented | reviewed | QA passed -->
+
+## 10. Test plan
+
+### 10.1 Tooling
 <!-- Only if not already set up in the repo: framework, test location, `test` script,
-     and how integration tests get a database and reset it. -->
+     fixtures/factories, and how integration tests get a database and reset it. -->
 
-### 9.2 Cases
+### 10.2 Cases
 
-| ID | Type (unit / integration) | Target | Case | Expected |
-| -- | ------------------------- | ------ | ---- | -------- |
-
-## 10. Implementation tasks
-<!-- Ordered. Each task: small, independently verifiable, with acceptance criteria. -->
-
-- [ ] **T-1: <title>**
-  - Depends on: none
-  - Acceptance criteria:
+| ID | Slice | Type (unit / integration / e2e) | Target (F-n / endpoint / screen) | Setup | Input / action | Expected |
+| -- | ----- | ------------------------------- | -------------------------------- | ----- | -------------- | -------- |
 
 ## 11. Open questions
 <!-- Must be empty before approval. -->

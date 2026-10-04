@@ -18,15 +18,16 @@ approved_on:
 
 ## 1. Context and requirements
 
-### 1.1 Business requirements
-<!-- The requirements as given, restated clearly. Number them: R-1, R-2, ... -->
+### 1.1 Requirements
+<!-- The module's requirements from docs/product/spec-summary.md, citing its IDs. -->
 
 ### 1.2 Goals
 
 ### 1.3 Non-goals
 
-## 2. Actors and use cases
-<!-- User stories: "As a <actor>, I want <action> so that <outcome>." Reference R-n. -->
+## 2. Actors and stories
+<!-- US-n: "As a <actor>, I want <action> so that <outcome>." Cite the spec summary's IDs.
+     Each story becomes a slice in the LLD. -->
 
 ## 3. Data model
 
@@ -47,8 +48,9 @@ erDiagram
 ## 4. User experience
 
 ### 4.1 User journeys
-<!-- Step by step, from the user's point of view: where they start, what they see, what they do,
-     and how they know it worked. Include the first-time (no data) experience. -->
+<!-- One per story (US-n), step by step from the user's point of view: where they start, what
+     they see, what they do, and how they know it worked. Include the first-time (no data)
+     experience. For each journey, list what can go wrong and what the user experiences. -->
 
 ### 4.2 Screens
 
