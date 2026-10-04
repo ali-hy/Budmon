@@ -1,6 +1,6 @@
 ---
 doc: project-brief
-version: 0.5
+version: 0.6
 updated: 2026-10-04
 ---
 
@@ -17,6 +17,7 @@ Sources: the user's initial description ([`notes/2026-10-04-initial-idea.md`](./
 | 0.3     | 2026-10-04 | Audience decided (R2-Q1): the first version is for a small invited group, built so that going public later stays possible. Going public is a hoped-for goal, not a commitment. Gmail stays in Google's testing mode for now. Public launch requirements moved to Later. |
 | 0.4     | 2026-10-04 | Round 3 answers folded in. SMS capture is in the MVP, and AI-assisted capture comes right after it (R3-Q2). Templates are made by highlighting and labelling parts of a real message (R3-Q2). Budget percentage bases (R3-Q3). Budgets count only their own conditions and chosen accounts, alert only, and get rollover later (R3-Q4). Shared accounts have their own vocabulary (R3-Q5). Transfer fees plus implied cost, and rate-by-date conversion (R3-Q6). Offline entry of new transactions on Android (R3-Q7). |
 | 0.5     | 2026-10-04 | Round 4 answers folded in. Sign-in by email + password and by Google, optional two-step verification, sessions lasting about a month (R4-Q1). Any user can invite, invitations expire after 7 days, and the number of users is capped. A product-owner admin portal is added to the MVP (R4-Q2). Deleting a Budmon account has a 7-day grace period; export is in the MVP (R4-Q3). Credit cards are their own account type (R4-Q4). Balance corrections are for admins only (R4-Q5). Purposes are flat in the MVP (the analyst's reading, to be confirmed) and tips are split lines (R4-Q6). Personal and shared vocabularies stay unlinked; budgets cover all accounts by default (R4-Q7). |
+| 0.6     | 2026-10-04 | Round 5 answers folded in. The admin portal shows account details only, with no financial data; the owner can delete, ban (by email) and invite users, and set per-user invite allowances and feature switches (R5-Q1). Budget rules match purposes by name (R5-Q2). Purposes have two levels in the MVP, with unlimited nesting later (R5-Q3). Only amount, account and date are required; future-dated entries are allowed; receipts later (R5-Q4). Google sign-in links automatically to an existing account with the same email (R5-Q5). |
 
 ## 1. The problem
 
@@ -85,7 +86,8 @@ Proposed measures, all pending your confirmation. [NEEDS INPUT: confirm, change 
 - Audience: a small invited group; sign-up is by invitation only (R2-Q1).
 - Users, sign-in (email + password, and Google), optional two-step verification, profile and preferences (R4-Q1).
 - Any user can invite people; there's a hard cap on the number of users (R4-Q2).
-- A product-owner admin portal for managing users, permissions and invitations, and the user cap (decided, R4-Q2).
+- A product-owner admin portal (decided, R4-Q2 and R5-Q1). It shows account details only, never financial data. From it the owner can invite, delete and ban users (a ban is by email and also deletes the user), set each user's invite allowance (a number, or unlimited up to the cap), switch features on or off per user, and set the user cap.
+- Purposes with two levels, for example Food > Sweets (decided, R5-Q3).
 - Export of all of a user's data (CSV + JSON), and account deletion with a 7-day grace period (R4-Q3).
 - Accounts of type bank, online wallet, cash, credit card and other, each in its own currency (R2-Q5, R4-Q4).
 - Shared accounts with admin, member and viewer roles (R2-Q4). Sharing being in the first version is inferred from the household example (assumption A11).
@@ -103,7 +105,7 @@ Proposed measures, all pending your confirmation. [NEEDS INPUT: confirm, change 
 ### 5.2 Later
 
 - Credit-card statement cycles and due-date reminders; loans and mortgages as account types (R4-Q4).
-- Nested purposes (R4-Q6, to be confirmed). Linking purposes or tags across personal and shared vocabularies (R4-Q7).
+- Unlimited nesting of purposes (R5-Q3). Receipt photos on transactions (R5-Q4). Linking purposes or tags across personal and shared vocabularies (R4-Q7).
 - **Right after the MVP:** AI-assisted capture through a third-party LLM service: sender suggestions, proposed templates and extraction (decided, R3-Q2).
 - Budget rollover of unspent and overspent amounts, optional per budget (decided as future work, R3-Q4).
 - Full offline use on Android, including review (R3-Q7: "may come later").
