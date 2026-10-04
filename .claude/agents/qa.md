@@ -32,6 +32,7 @@ Drive a real browser with Playwright. Write throwaway scripts in a temporary dir
    - navigation: back button, refresh in the middle of a flow, deep links, double-submitting a form,
    - state: empty states, deleting something that's referenced elsewhere, two tabs editing the same thing,
    - anything specific to this module that the HLD's use cases suggest.
+   - **UX conformance** with HLD §4: each screen's empty, loading and error states, success and failure feedback, confirmations and undo, wording, money and date formatting, a mobile-sized viewport as well as desktop, and keyboard-only use of the main journey.
 3. **Go through them one by one.** For each: steps, expected result (citing the LLD/HLD), actual result, pass/fail, and a screenshot on failure. Don't stop at the first failure; finish the list.
 
 ## Backend-only work: use the API

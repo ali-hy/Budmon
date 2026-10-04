@@ -53,7 +53,18 @@ The HLD captures the **big, expensive-to-reverse decisions** for the module. A r
 - **Context and requirements.** The business requirements restated in your own words, goals, and explicit **non-goals**.
 - **Actors and use cases.** Who uses the module and what they're trying to do, written as user stories.
 - **Data model (tables).** Every new or changed table: its purpose, its key columns (not every column), what owns it, and how it relates to other tables, with a Mermaid `erDiagram`. Also data lifecycle: what happens on delete (cascade, soft delete, block), and any history or audit needs.
-- **Screens.** Every screen the user would expect: its purpose, the key information and actions on it, and the navigation between screens (a Mermaid flowchart is good). Include empty, error and loading states when they matter to the product.
+- **User experience.** This section decides how good the product feels, so give it as much weight as the data model. A reviewer should be able to picture using the module from the HLD alone. Cover:
+  - **User journeys:** step-by-step walkthroughs of the main use cases from the user's point of view: where they start, what they see, what they do, and how they know it worked. Include the first-time experience (no data yet) as well as day-to-day use.
+  - **Screens:** every screen the user would expect, with its purpose, its **information hierarchy** (what the user needs to see first, what comes second, what can be hidden), and its key actions (which one is primary). Add a low-fidelity wireframe (ASCII is fine) for each key screen.
+  - **Navigation:** how screens connect and where the module sits in the app's overall navigation (a Mermaid flowchart is good).
+  - **States:** for each screen, what the user sees when it's empty, loading, or failed, when there's partial data, and when there's a lot of data (long lists, big numbers, long names).
+  - **Interaction and feedback:** how users know an action succeeded or failed, which actions need confirmation, which can be undone, and how validation errors are shown (inline, on submit). Also what updates immediately versus after the server responds.
+  - **Effort on frequent tasks:** how many steps the most common actions take (for Budmon, typically adding a transaction or checking a balance). Use sensible defaults, remember recent choices, and keep the path short.
+  - **Presentation of data:** how money (currency symbol, decimals, negatives, positive/negative colouring), dates and relative times, and progress (such as a budget used versus remaining) are displayed.
+  - **Platform and accessibility:** the target devices and screen sizes, how the layout adapts, keyboard and screen-reader support, and colour contrast. Don't rely on colour alone to show meaning.
+  - **Wording:** the key labels, button names, empty-state messages and error messages, in plain language.
+
+  If the requirements or an existing UX guideline (e.g. `docs/design/ux-guidelines.md`) define the platform, design system or tone, follow them. If nothing defines them yet, raise that as an open question in the first HLD that has screens, rather than inventing a design language.
 - **Interfaces, protocols and integrations.** How clients and other systems talk to the module. Be explicit and justify the choice, especially for anything other than request/response over HTTP: tRPC vs. Express REST (the project has both), WebSockets/SSE for live updates, background jobs or schedulers, webhooks, file import/export (e.g. CSV/OFX bank statements), email or push notifications, and third-party APIs (bank aggregators, FX-rate providers, …). For each integration, cover failure modes and what happens when it's down.
 - **Key flows.** Mermaid sequence diagrams for the flows that matter most or are least obvious.
 - **Cross-cutting concerns** that apply to this module:
@@ -80,7 +91,7 @@ It must cover:
 - **Service logic.** Function signatures and the behaviour of each: validation rules, the algorithm, transaction boundaries, authorization checks, and edge cases (empty, zero, negative, concurrent edits, deleted references).
 - **Error catalog.** Every new error class, its key, its status, and when it is thrown.
 - **Integrations.** Exact payloads, auth, retries/backoff, idempotency keys, timeouts, and job schedules.
-- **Frontend** (when the module has screens): routes, components, the state and data-fetching approach per screen, form validation, and how errors are shown.
+- **Frontend** (when the module has screens): routes, the component tree, the state and data-fetching approach per screen, form fields with their validation rules and messages, and how every UX state and feedback behaviour from the HLD (empty, loading, error, success, confirmation, undo, responsive layout, accessibility) is implemented. Each behaviour must be specific enough to test.
 - **Test plan.** Concrete test cases (`TP-n`) per function or endpoint, split into unit and integration, including edge and failure cases. If the repo has no test tooling yet, the LLD specifies it: the framework, where the tests live, the `test` script, and how integration tests get a database and reset it between tests.
 - **Implementation tasks.** An ordered checklist of small tasks, each with clear acceptance criteria and its dependencies. This is what the software engineer works through, so each task should be completable and verifiable on its own.
 - **Open questions.** Must be empty before the LLD can be approved.

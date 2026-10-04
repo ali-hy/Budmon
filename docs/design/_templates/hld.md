@@ -44,16 +44,45 @@ erDiagram
 ### 3.3 Data lifecycle
 <!-- What happens on delete (cascade / soft delete / blocked)? History, audit, retention. -->
 
-## 4. Screens
+## 4. User experience
 
-| Screen | Purpose | Key information | Key actions |
-| ------ | ------- | --------------- | ----------- |
+### 4.1 User journeys
+<!-- Step by step, from the user's point of view: where they start, what they see, what they do,
+     and how they know it worked. Include the first-time (no data) experience. -->
 
-### 4.1 Navigation
+### 4.2 Screens
+
+| Screen | Purpose | Information hierarchy (first → last) | Primary action | Other actions |
+| ------ | ------- | ------------------------------------ | -------------- | ------------- |
+
+<!-- A low-fidelity wireframe (ASCII is fine) for each key screen. -->
+
+### 4.3 Navigation
 
 ```mermaid
 flowchart LR
 ```
+
+### 4.4 States
+
+| Screen | Empty | Loading | Error | Partial / a lot of data |
+| ------ | ----- | ------- | ----- | ----------------------- |
+
+### 4.5 Interaction and feedback
+<!-- Success/failure feedback, confirmations, undo, validation display,
+     what updates immediately versus after the server responds. -->
+
+### 4.6 Effort on frequent tasks
+<!-- Steps for the most common actions, defaults, remembered choices. -->
+
+### 4.7 Presentation of data
+<!-- Money (currency, decimals, negatives, colouring), dates, progress. -->
+
+### 4.8 Platform and accessibility
+<!-- Target devices and screen sizes, responsive behaviour, keyboard, screen reader, contrast. -->
+
+### 4.9 Wording
+<!-- Key labels, button names, empty-state messages and error messages. -->
 
 ## 5. Interfaces, protocols and integrations
 <!-- tRPC vs REST, real-time (WebSocket/SSE), background jobs, webhooks, file import/export,
