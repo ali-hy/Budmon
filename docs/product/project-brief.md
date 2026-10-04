@@ -1,6 +1,6 @@
 ---
 doc: project-brief
-version: 0.4
+version: 0.5
 updated: 2026-10-04
 ---
 
@@ -16,6 +16,7 @@ Sources: the user's initial description ([`notes/2026-10-04-initial-idea.md`](./
 | 0.2     | 2026-10-04 | Round 2 answers folded in. The MVP now includes Gmail capture and review (R2-Q3). Budgets are a core MVP feature with a flexible, nested, overlapping model (R2-Q2). Native Android comes first (R2-Q3). Sharing is per account with admin, member and viewer roles (R2-Q4). Accounts are multi-currency, with daily exchange rates (R2-Q5). Raw messages aren't kept after processing (R2-Q7). AI rolls out in three stages: a third-party service, then Budmon-hosted, then the user's own endpoint (R2-Q7). |
 | 0.3     | 2026-10-04 | Audience decided (R2-Q1): the first version is for a small invited group, built so that going public later stays possible. Going public is a hoped-for goal, not a commitment. Gmail stays in Google's testing mode for now. Public launch requirements moved to Later. |
 | 0.4     | 2026-10-04 | Round 3 answers folded in. SMS capture is in the MVP, and AI-assisted capture comes right after it (R3-Q2). Templates are made by highlighting and labelling parts of a real message (R3-Q2). Budget percentage bases (R3-Q3). Budgets count only their own conditions and chosen accounts, alert only, and get rollover later (R3-Q4). Shared accounts have their own vocabulary (R3-Q5). Transfer fees plus implied cost, and rate-by-date conversion (R3-Q6). Offline entry of new transactions on Android (R3-Q7). |
+| 0.5     | 2026-10-04 | Round 4 answers folded in. Sign-in by email + password and by Google, optional two-step verification, sessions lasting about a month (R4-Q1). Any user can invite, invitations expire after 7 days, and the number of users is capped. A product-owner admin portal is added to the MVP (R4-Q2). Deleting a Budmon account has a 7-day grace period; export is in the MVP (R4-Q3). Credit cards are their own account type (R4-Q4). Balance corrections are for admins only (R4-Q5). Purposes are flat in the MVP (the analyst's reading, to be confirmed) and tips are split lines (R4-Q6). Personal and shared vocabularies stay unlinked; budgets cover all accounts by default (R4-Q7). |
 
 ## 1. The problem
 
@@ -37,6 +38,8 @@ Some things that matter to people are also badly served by typical budgeting too
 ## 2. Target users
 
 **Primary:** an individual who wants an accurate picture of their own money but won't keep up with manual entry. They pay mostly by card and online, receive bank and vendor notifications by email and/or SMS, and also handle some cash. They care about privacy and want control over what the app reads and what is kept.
+
+**Product owner (operator):** you. You run Budmon for the invited group and manage users and permissions through your own admin portal (decided, R4-Q2).
 
 **Secondary:** the people they share money with. Housemates or family members share accounts such as "house money" (R2-Q4). Someone who has moved out keeps view-only access. Friends lend or borrow money and may also use Budmon.
 
@@ -80,8 +83,11 @@ Proposed measures, all pending your confirmation. [NEEDS INPUT: confirm, change 
 
 - Platforms: backend, web app and a **native Android app** (R2-Q3).
 - Audience: a small invited group; sign-up is by invitation only (R2-Q1).
-- Users, sign-in, profile and preferences.
-- Accounts of every type, each in its own currency (R2-Q5).
+- Users, sign-in (email + password, and Google), optional two-step verification, profile and preferences (R4-Q1).
+- Any user can invite people; there's a hard cap on the number of users (R4-Q2).
+- A product-owner admin portal for managing users, permissions and invitations, and the user cap (decided, R4-Q2).
+- Export of all of a user's data (CSV + JSON), and account deletion with a 7-day grace period (R4-Q3).
+- Accounts of type bank, online wallet, cash, credit card and other, each in its own currency (R2-Q5, R4-Q4).
 - Shared accounts with admin, member and viewer roles (R2-Q4). Sharing being in the first version is inferred from the household example (assumption A11).
 - Purposes and tags, payees and payee aliases, and single-purpose/multi-purpose payees (R2-Q6).
 - Transactions, splits, transfers, cross-currency transfers with fees and the actual rate applied (R2-Q5), refunds, and tips.
@@ -96,6 +102,8 @@ Proposed measures, all pending your confirmation. [NEEDS INPUT: confirm, change 
 
 ### 5.2 Later
 
+- Credit-card statement cycles and due-date reminders; loans and mortgages as account types (R4-Q4).
+- Nested purposes (R4-Q6, to be confirmed). Linking purposes or tags across personal and shared vocabularies (R4-Q7).
 - **Right after the MVP:** AI-assisted capture through a third-party LLM service: sender suggestions, proposed templates and extraction (decided, R3-Q2).
 - Budget rollover of unspent and overspent amounts, optional per budget (decided as future work, R3-Q4).
 - Full offline use on Android, including review (R3-Q7: "may come later").
@@ -131,7 +139,7 @@ Proposed measures, all pending your confirmation. [NEEDS INPUT: confirm, change 
 - **AI provider rollout (decided, R2-Q7):** a third-party LLM service first, then a Budmon-hosted model, then an endpoint the user hosts.
 - **Exchange rates (decided, R2-Q5):** fetched by the backend daily, more often later.
 - **Third-party access rules:**
-  - Gmail read access is a Google "restricted scope". While Budmon is invite-only, it stays in Google's testing mode, with no verification or annual security assessment for now (decided, R2-Q1). Testing mode allows only a limited number of named test users, and their access has to be renewed periodically. A public launch would require verification and an annual third-party security assessment, which is later work.
+  - Gmail read access is a Google "restricted scope". While Budmon is invite-only, it stays in Google's testing mode, with no verification or annual security assessment for now (decided, R2-Q1). Testing mode allows only a limited number of named test users, and their access has to be renewed periodically. **Operational step (acknowledged, R4-Q2):** each tester's Google address may have to be added to Budmon's Google project by hand. The user cap stays below the test-user limit (decided, R4-Q2). A public launch would require verification and an annual third-party security assessment, which is later work.
   - Google Play restricts apps that request SMS permissions. While the app is invite-only, it can be given to the group directly rather than through the Play Store. Store compliance is later work.
 - **Budget, timeline, hosting, regulations:** [NEEDS INPUT: Is there a deadline, a hosting budget, or an AI usage budget? Any data-residency or financial regulation to respect?]
 
@@ -152,7 +160,7 @@ What Budmon intends to do differently, from your description:
 
 | Risk | Why it matters | Mitigation to consider |
 | ---- | -------------- | ---------------------- |
-| Gmail testing-mode limits | Testing mode caps the number of named test users, and users may need to re-authorise periodically. Going public would need verification plus a yearly security assessment (cost and time). | Decided: invite-only in testing mode for now (R2-Q1). Keep the invited group under the cap. Make reconnection easy. Treat verification as a prerequisite of any public launch. |
+| Gmail testing-mode limits | Testing mode caps the number of named test users, and users may need to re-authorise periodically. Going public would need verification plus a yearly security assessment (cost and time). | Decided: invite-only in testing mode for now (R2-Q1), with a hard user cap below the limit (R4-Q2). Add testers to the Google project by hand (an operational step; the admin portal should remind the owner). Make reconnection easy. Treat verification as a prerequisite of any public launch. |
 | Google Play SMS permission policy | Apps that read SMS must qualify for an exception or may be rejected from the store. | Not blocking while invite-only: the app can be given to the group directly. Before any public launch, check eligibility or use a notification-listener or share-into-app fallback. |
 | Unreviewed data counts straight away | A wrong captured amount distorts balances and budgets until it's reviewed. | Clear "needs review" flags, filters, and a review nudge; bank message is the source of truth. |
 | Auto-confirmation errors | A single-purpose payee that starts selling other things gets mis-classified silently. | New payees are never auto-confirmed; the user can switch a payee back to multi-purpose at any time (R2-Q6); auto-confirmed items stay identifiable. |
