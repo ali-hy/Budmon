@@ -1,6 +1,6 @@
 ---
 doc: project-brief
-version: 0.2
+version: 0.3
 updated: 2026-10-04
 ---
 
@@ -14,6 +14,7 @@ Sources: the user's initial description ([`notes/2026-10-04-initial-idea.md`](./
 | ------- | ---- | ------ |
 | 0.1     | 2026-10-04 | Initial draft (interview round 1) |
 | 0.2     | 2026-10-04 | Round 2 answers folded in. The MVP now includes Gmail capture and review (R2-Q3). Budgets are a core MVP feature with a flexible, nested, overlapping model (R2-Q2). Native Android comes first (R2-Q3). Sharing is per account with admin, member and viewer roles (R2-Q4). Accounts are multi-currency, with daily exchange rates (R2-Q5). Raw messages aren't kept after processing (R2-Q7). AI rolls out in three stages: a third-party service, then Budmon-hosted, then the user's own endpoint (R2-Q7). |
+| 0.3     | 2026-10-04 | Audience decided (R2-Q1): the first version is for a small invited group, built so that going public later stays possible. Going public is a hoped-for goal, not a commitment. Gmail stays in Google's testing mode for now. Public launch requirements moved to Later. |
 
 ## 1. The problem
 
@@ -40,7 +41,7 @@ Some things that matter to people are also badly served by typical budgeting too
 
 **Geography:** not limited to one country or set of banks. Templates are built per user for whatever banks they use, so the product must not depend on a hard-coded bank list (R2-Q5).
 
-[NEEDS INPUT: Is Budmon a product for the public (anyone can sign up), for you and a small invited group, or for you alone at first? This changes security, compliance (Gmail access in particular, see Risks), hosting and onboarding. Re-asked as question 1.]
+**Audience (decided, R2-Q1):** "small invited group first, with the goal of hopefully maybe making it public in the future". The first version is invite-only, for the user and people they invite. It's built so that opening it to the public later stays possible, but going public is a hoped-for future goal, not a commitment.
 
 ## 3. The product in one paragraph
 
@@ -77,6 +78,7 @@ Proposed measures, all pending your confirmation. [NEEDS INPUT: confirm, change 
 ### 5.1 In the first version (decided: the MVP reaches "stage B", R2-Q3)
 
 - Platforms: backend, web app and a **native Android app** (R2-Q3).
+- Audience: a small invited group; sign-up is by invitation only (R2-Q1).
 - Users, sign-in, profile and preferences.
 - Accounts of every type, each in its own currency (R2-Q5).
 - Shared accounts with admin, member and viewer roles (R2-Q4). Sharing being in the first version is inferred from the household example (assumption A11).
@@ -91,6 +93,7 @@ Proposed measures, all pending your confirmation. [NEEDS INPUT: confirm, change 
 
 ### 5.2 Later
 
+- Going public (a hoped-for goal, not a commitment; R2-Q1): open sign-up, Google's restricted-scope verification and annual security assessment for Gmail access, Play Store compliance for SMS access, and public-grade support and operations.
 - iOS and other platforms ("try to cover more as we go", R2-Q3). A desktop (Electron) app based on the web app.
 - AI hosted by Budmon, then AI through an endpoint the user hosts (R2-Q7).
 - Exchange rates updated more often than daily (R2-Q5).
@@ -122,8 +125,8 @@ Proposed measures, all pending your confirmation. [NEEDS INPUT: confirm, change 
 - **AI provider rollout (decided, R2-Q7):** a third-party LLM service first, then a Budmon-hosted model, then an endpoint the user hosts.
 - **Exchange rates (decided, R2-Q5):** fetched by the backend daily, more often later.
 - **Third-party access rules:**
-  - Gmail read access is a Google "restricted scope". A public app needs Google verification and an annual third-party security assessment.
-  - Google Play restricts apps that request SMS permissions.
+  - Gmail read access is a Google "restricted scope". While Budmon is invite-only, it stays in Google's testing mode, with no verification or annual security assessment for now (decided, R2-Q1). Testing mode allows only a limited number of named test users, and their access has to be renewed periodically. A public launch would require verification and an annual third-party security assessment, which is later work.
+  - Google Play restricts apps that request SMS permissions. While the app is invite-only, it can be given to the group directly rather than through the Play Store. Store compliance is later work.
 - **Budget, timeline, hosting, regulations:** [NEEDS INPUT: Is there a deadline, a hosting budget, or an AI usage budget? Any data-residency or financial regulation to respect?]
 
 ## 7. Alternatives
@@ -143,13 +146,14 @@ What Budmon intends to do differently, from your description:
 
 | Risk | Why it matters | Mitigation to consider |
 | ---- | -------------- | ---------------------- |
-| Gmail restricted-scope verification | A public app that reads Gmail needs Google verification plus a yearly security assessment (cost and time). | Start invite-only or in testing mode; also support forwarding emails to a Budmon address. Depends on question 1. |
-| Google Play SMS permission policy | Apps that read SMS must qualify for an exception or may be rejected from the store. | Check eligibility early; distribute outside the Play Store during the invite phase; use a notification-listener or share-into-app fallback. |
+| Gmail testing-mode limits | Testing mode caps the number of named test users, and users may need to re-authorise periodically. Going public would need verification plus a yearly security assessment (cost and time). | Decided: invite-only in testing mode for now (R2-Q1). Keep the invited group under the cap. Make reconnection easy. Treat verification as a prerequisite of any public launch. |
+| Google Play SMS permission policy | Apps that read SMS must qualify for an exception or may be rejected from the store. | Not blocking while invite-only: the app can be given to the group directly. Before any public launch, check eligibility or use a notification-listener or share-into-app fallback. |
 | Unreviewed data counts straight away | A wrong captured amount distorts balances and budgets until it's reviewed. | Clear "needs review" flags, filters, and a review nudge; bank message is the source of truth. |
 | Auto-confirmation errors | A single-purpose payee that starts selling other things gets mis-classified silently. | New payees are never auto-confirmed; the user can switch a payee back to multi-purpose at any time (R2-Q6); auto-confirmed items stay identifiable. |
 | No raw-message retention | Changing a template can't be re-applied to past messages from stored data, and users can't see the original text in Budmon. | Keep a reference to the message (for example the Gmail message ID) so it can be re-fetched from the source or opened there (assumption A12). |
 | Budget model complexity | Overlapping, nested and percentage budgets with custom periods are much bigger than "a limit per category". | Settle the semantics (questions 3 and 4) before design; the planner may slice the module. |
 | Third-party AI and privacy | Message content leaves Budmon when the user opts into AI. | Opt-in only, in-scope messages only, provider disclosed; Budmon-hosted model and user-hosted endpoint later (R2-Q7). |
+| Built-for-public drift | Building for a public launch that may never happen adds cost now; ignoring it makes going public expensive later. | Keep choices compatible with going public (no hard-wired single-tenant shortcuts), but don't build public-only features (open sign-up, verification) yet. |
 | Scope size | Every MVP module is substantial, and the MVP includes automated capture. | Strict build order; Stage C items stay out. |
 
 ## 9. Assumptions

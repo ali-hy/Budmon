@@ -1,6 +1,6 @@
 ---
 doc: spec-summary
-version: 0.2
+version: 0.3
 updated: 2026-10-04
 ---
 
@@ -23,6 +23,7 @@ Based on the [project brief](./project-brief.md), the user's [initial descriptio
 | ------- | ---- | ------ |
 | 0.1     | 2026-10-04 | Initial draft (interview round 1) |
 | 0.2     | 2026-10-04 | Round 2 answers folded in. MVP reaches stage B (R2-Q3). `budgets` written as a core MVP module: conditions, amount or percentage, nesting, overlap, custom periods (R2-Q2). Native Android first (R2-Q3). Shared-account roles admin, member and viewer (R2-Q4). Per-account currency, daily rates, cross-currency transfers with fees and the actual rate applied (R2-Q5). No hard-coded bank list (R2-Q5). Unreviewed captures count in balances, flagged, with a review-status filter (R2-Q6). Review teaches sender-name-to-payee and payee-to-purpose links (R2-Q6). Auto-confirmation for known single-purpose payees, never for new payees (R2-Q6). AI provider rollout (R2-Q7). Raw messages not kept after processing, plus an opt-in raw-data donation setting (R2-Q7). Build order and MVP cut updated. |
+| 0.3     | 2026-10-04 | Audience decided (R2-Q1): a small invited group first; going public is a hoped-for goal, not a commitment. `identity` sign-up is invite-only (IDN-US-1, new IDN-US-9, IDN-BR-3). Gmail stays in Google's testing mode; public-launch work is Later. A5 replaced by the decision. |
 
 ## 1. Users and roles
 
@@ -30,7 +31,7 @@ Sharing is **per account** (decided, R2-Q4). A "household" is simply a group of 
 
 | Role | Who | Can see and do |
 | ---- | --- | -------------- |
-| **User** | Anyone with a Budmon login. | Everything for their own accounts, payees, purposes, tags, transactions, debts, budgets, sources and settings. Nothing of another user's unless it's shared with them. |
+| **User** | Anyone with a Budmon login. In the first version, only people who have been invited (decided, R2-Q1). | Everything for their own accounts, payees, purposes, tags, transactions, debts, budgets, sources and settings. Nothing of another user's unless it's shared with them. |
 | **Account admin** (decided, R2-Q4) | Usually the creator of the account; an admin can make other members admins. | Any change to the account: settings, sharing, roles, archiving. Creates entries, and edits or deletes anyone's entries, including other admins'. |
 | **Account member** (decided, R2-Q4) | A user invited with the member role. | Sees the account and its entries. Creates transactions and transfers on it. Edits and deletes only the entries they created *(assumption A13: "edit" includes delete)*. |
 | **Account viewer** (decided, R2-Q4) | For example, someone who has moved out of the household. | View only. What a viewer sees may differ per viewer; that refinement is later (R2-Q4). In the first version, a viewer sees the whole account *(assumption A15)*. |
@@ -130,7 +131,7 @@ Twelve modules:
 ### 4.1 `identity`: Users, sign-in and profile (prefix `IDN`)
 
 - **Purpose:** who the user is, how they sign in, their preferences, and their control over their own data.
-- **In scope:** sign-up, sign-in and sign-out, sessions, profile (name, base currency, time zone, language), finding another user, data export, account deletion.
+- **In scope:** invite-only sign-up (decided, R2-Q1), invitations, sign-in and sign-out, sessions, profile (name, base currency, time zone, language), finding another user, data export, account deletion.
 - **Out of scope:** money accounts and roles (`accounts`); notification preferences (`notifications`); sources and the raw-data donation setting (`sources`).
 - **Depends on:** none.
 
@@ -138,7 +139,7 @@ Twelve modules:
 
 | ID | As a… | I want… | So that… | Acceptance criteria | MVP? |
 | -- | ----- | ------- | -------- | ------------------- | ---- |
-| IDN-US-1 | visitor | to create a Budmon user | I can start | Sign-up with [NEEDS INPUT, later round: email + password, Google sign-in, or both]; choose base currency and time zone; land on an empty state that tells me to add my first account. | MVP |
+| IDN-US-1 | invited person | to create a Budmon user from my invitation | I can start | Sign-up works only with a valid, unused, unexpired invitation (decided, R2-Q1); without one, the sign-up page explains that Budmon is invite-only. Sign-up with [NEEDS INPUT, later round: email + password, Google sign-in, or both]; choose base currency and time zone; land on an empty state that tells me to add my first account. | MVP |
 | IDN-US-2 | user | to stay signed in on web and Android | I don't log in every time | Sessions persist; I can see and sign out my active sessions. | MVP |
 | IDN-US-3 | user | to edit my profile and preferences | totals and dates make sense to me | Name, base currency, time zone and language; changing the time zone doesn't move existing transactions in time. | MVP |
 | IDN-US-4 | user | to reset a forgotten password | I can get back in | Reset link by email; expires; other sessions are signed out. | MVP |
@@ -146,6 +147,8 @@ Twelve modules:
 | IDN-US-6 | user | to export all my data | I own my data | See XC-17. | TBD |
 | IDN-US-7 | user | to delete my Budmon user and data | I can leave completely | Confirmation; follows XC-16; disconnects all sources. | MVP |
 | IDN-US-8 | user | two-factor authentication | my data is safer | See XC-18. | TBD |
+| IDN-US-9 | [NEEDS INPUT, later round: any user, or only you as the product owner?] | to invite someone to Budmon by email | they can join the invited group (decided, R2-Q1) | The invitation is sent by email and expires after [NEEDS INPUT, later round: e.g. 7 days]; it can be revoked before use. Inviting someone to a shared account (ACC-US-4) also sends a Budmon invitation if they aren't a user yet. [NEEDS INPUT, later round: should the total number of users be capped to stay within Gmail testing-mode limits?] | MVP |
+| IDN-US-10 | visitor | to sign up without an invitation | Budmon can grow | Later, and only if Budmon goes public, which is a hoped-for goal, not a commitment (R2-Q1). | Later |
 
 **Business rules**
 
@@ -153,6 +156,7 @@ Twelve modules:
 | -- | ---- |
 | IDN-BR-1 | One login identity (email) per Budmon user. |
 | IDN-BR-2 | Users can't be found by partial search. |
+| IDN-BR-3 | (Decided, R2-Q1) In the first version, a Budmon user can only be created from a valid invitation. Nothing in the design should prevent switching to open sign-up later. |
 
 ### 4.2 `accounts`: Money accounts and sharing (prefix `ACC`)
 
@@ -547,14 +551,14 @@ flowchart LR
 | 11 | `capture` | Templates, merging and resolution. | MVP |
 | 12 | `review` | Refinement and auto-confirmation; designed together with `capture`. | MVP |
 
-**Later (stage C):** iOS; Electron; a Budmon-hosted AI model, then a user-hosted endpoint; more frequent exchange rates; per-viewer visibility; user-to-user loans; subscription detection; purpose suggestions; other email providers; raw-data donation (SRC-US-10). SMS and AI-assisted capture move here or into the MVP depending on question 2.
+**Later (stage C):** going public, if it happens (open sign-up IDN-US-10, Gmail verification and security assessment, Play Store SMS compliance); iOS; Electron; a Budmon-hosted AI model, then a user-hosted endpoint; more frequent exchange rates; per-viewer visibility; user-to-user loans; subscription detection; purpose suggestions; other email providers; raw-data donation (SRC-US-10). SMS and AI-assisted capture move here or into the MVP depending on question 2.
 
 ## 6. External integrations
 
 | Integration | Why | Notes |
 | ----------- | --- | ----- |
-| Gmail API (Google OAuth) | Read in-scope transaction emails. | Restricted scope; verification and a yearly security assessment for public use (question 1). Messages can be re-fetched by ID (A12). |
-| Android SMS access | Read in-scope bank SMS. | Google Play restricts SMS permissions; distribution path depends on question 1. |
+| Gmail API (Google OAuth) | Read in-scope transaction emails. | Restricted scope. Decided (R2-Q1): stays in Google's testing mode while invite-only (limited named test users; no verification or annual assessment for now). Verification and assessment are later, needed only if Budmon goes public. Messages can be re-fetched by ID (A12). |
+| Android SMS access | Read in-scope bank SMS. | Google Play restricts SMS permissions. While invite-only, the app can be given to the group directly; store compliance is later. |
 | LLM provider | Opt-in sender discovery and extraction. | Decided (R2-Q7): a third-party service first; Budmon-hosted later; user-hosted endpoint later. |
 | Exchange-rate provider | Daily market rates (decided, R2-Q5). | More frequent updates later. |
 | Push notifications (FCM) | Android reminders and alerts. | APNs later with iOS. |
@@ -573,7 +577,7 @@ Not evaluated yet. The user will ask for this separately.
 | A2 | *(Confirmed in R2-Q5: each account has its own currency. Now recorded as a decision.)* |
 | A3 | Budmon never moves money at a bank. |
 | A4 | "System one models" means small, specialised models; the templates-only path needs no AI. |
-| A5 | The first user is the product owner; others can sign up (scope depends on question 1). |
+| A5 | *(Replaced by a decision in R2-Q1: the first version is for a small invited group, built so going public later stays possible.)* |
 | A6 | "Tip" is a default tag, so a tip line keeps the purpose of what it was for. |
 | A7 | Purposes are either income or expense purposes. |
 | A8 | Split lines share the transaction's payee, account and date. |
