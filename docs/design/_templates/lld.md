@@ -19,6 +19,13 @@ Implements [HLD](./hld.md) v<x.y>.
 | ------- | ---- | ------ |
 | 0.1     |      | Initial draft |
 
+## Amendments
+<!-- Added by the planner during implementation, when the approved LLD didn't define a case.
+     Kind: "planner decision" or "needs user confirmation". -->
+
+| ID | Question (raised by) | Resolution | Sections changed | HLD change | Kind |
+| -- | -------------------- | ---------- | ---------------- | ---------- | ---- |
+
 ## 1. Deviations from the HLD
 <!-- "None", or each deviation with its reason. Each one must be accepted by the reviewer. -->
 
@@ -68,8 +75,14 @@ Implements [HLD](./hld.md) v<x.y>.
 
 ## 9. Test plan
 
-| ID | Target | Case | Expected |
-| -- | ------ | ---- | -------- |
+### 9.1 Tooling
+<!-- Only if not already set up in the repo: framework, test location, `test` script,
+     and how integration tests get a database and reset it. -->
+
+### 9.2 Cases
+
+| ID | Type (unit / integration) | Target | Case | Expected |
+| -- | ------------------------- | ------ | ---- | -------- |
 
 ## 10. Implementation tasks
 <!-- Ordered. Each task: small, independently verifiable, with acceptance criteria. -->
