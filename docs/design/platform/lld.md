@@ -1,0 +1,3186 @@
+---
+module: platform
+doc: lld
+status: draft # draft | in-review | approved
+version: 0.1
+hld_version: 1.0
+author: planner
+approved_by:
+approved_on:
+---
+
+# Platform: Low-Level Design
+
+Implements [HLD](./hld.md) v1.0 (approved 2026-10-05). Decisions are cited as **D-n** and journeys as **J-n** from the HLD; this document doesn't restate their rationale.
+
+## Scope boundary
+
+This LLD covers **everything modules build on, plus infrastructure stage 0** (HLD D-29: the owner alone on one VM).
+
+**In scope:**
+- the shared server libraries;
+- the platform-owned tables;
+- the contract package and client generation;
+- the monorepo and the clean-up (D-34);
+- the web and Android skeletons;
+- test tooling and CI;
+- the development database workflow and the release-migration tooling the first release needs;
+- the stage-0 deployment (images, deploy bundles, the bootstrap with its trust anchors, Compose for `HOST_ROLE=main,capture`, SOPS per deployment, `budmon-boot`, pgBackRest, Alloy, alerts, the first restore drill);
+- the release rehearsal (D-41), including its stage-0 overlay run.
+
+**In scope because the stage rule requires them from day one** (D-29 rules 1 to 3), even though stage 1 uses them:
+- proxy support wired into every client (§4.8);
+- worker-capture's own `capture-db` network with TLS `verify-full` to `db.budmon.internal`;
+- the Postgres image's boot safeguards;
+- strict host-role secret separation and SCRAM verifiers;
+- the gate commands (`budmonctl secrets rotate-role`, the `api-secrets` re-wrap, `restore:verify`, `erasure:replay`);
+- the stage-1 Compose files, egress-proxy configuration and capture deploy-bundle content, because the release rehearsal runs the stage-1 topology from the first release (D-29 rule 3 (c), D-41).
+
+**Out of scope (a separate stage-1 LLD, written before the first invitation):**
+- the dedicated capture VM and its cloud-init, the Hetzner private network and its OpenTofu;
+- D-40 encryption at rest (LUKS volume, `budmonctl unlock`, the unlock procedure);
+- host nftables / `DOCKER-USER` rules and the host-level egress allowlists (Docker daemon, apt, Alloy);
+- the capture-side SSH forced command and the main-to-capture deploy channel;
+- the stage-1 alert rules (gate item 6) and the 12 stage-1 gate procedures.
+
+Nothing in that list changes application code (D-29 rule 2).
+
+## Changelog
+
+| Version | Date | Change |
+| ------- | ---- | ------ |
+| 0.1     | 2026-10-05 | Initial draft. |
+
+## Amendments
+
+| ID | Question (raised by) | Resolution | Sections changed | HLD change | Kind |
+| -- | -------------------- | ---------- | ---------------- | ---------- | ---- |
+
+## 1. Deviations from the HLD, and decisions the HLD left open
+
+**Deviations** (each needs the reviewer's acceptance):
+
+| # | HLD says | LLD does | Why |
+| - | -------- | -------- | --- |
+| DV-1 | D-24/D-25: "Alloy's dropped-attribute and dropped-label counters are exported, and any drop alerts". | Alloy enforces the allowlist for logs, spans and metrics. It **counts** drops only for logs (`loki.process` `stage.metrics`). Span-attribute and metric-label drops are counted where they're enforced first, in the application: `telemetry_attributes_dropped_total{signal}` (F-40, F-41). The alert fires on either counter. | Alloy's OTLP processors (`otelcol.processor.transform`) can delete attributes but expose no per-drop counter. The application layer sees every attribute first, so counting there catches the same bugs. The rehearsal canary scan still checks Alloy's exported output (D-41). |
+| DV-2 | D-20: `APP_ENV` is `development`, `test` or `production`; production refuses the local key provider. D-41: the rehearsal uses a local key provider with production-shaped configuration. | A fourth value, **`APP_ENV=rehearsal`**. Every production rule applies, except that `KMS_PROVIDER=local` is accepted. `db:reset` refuses it like production. | Otherwise the rehearsal could either not use a local KMS stand-in or not apply production's validation. It's an environment, not a stage setting: it never selects topology (D-29 rule 3 (a)). |
+| DV-3 | D-7 table: a Kobalte vs Ark UI spike decides the primitives library. | **Kobalte** (`@kobalte/core` 0.13.14). The spike (dialog, combobox, date field, menu) is acceptance criterion AC-11.4 of S-11; if it fails, an amendment switches to Ark UI. | An LLD can't leave a dependency open; Kobalte is the HLD's primary choice. |
+| DV-5 | HLD §3.1 convention: every table has `created_at` and `updated_at`. | `rate_limit_counters` has neither (§3.1). | Unlogged, short-lived counters (expired every 10 minutes); the timestamps would add a write per sensitive request and serve no story. |
+| DV-4 | D-25: `capture_connections{…}` and `capture_connections_stale{…}` gauges are computed by a worker-general job. | The platform provides the metric registry, the label allowlist (including `source_kind`, `connection_status`, `age_bucket`) and observable gauges (F-41). **The gauge job itself is specified in the `sources` LLD**, which owns the connection tables. | The platform can't query tables that don't exist yet. |
+
+**Decisions the HLD left open, made here** (planner decisions):
+- Exact package versions (§2.4), environment variables (§4.2), the error-envelope JSON (§5.1), the envelope byte format (§4.8), the cursor format (§4.7), job retry policies (§4.6), and the FX parsing and conversion rules (§4.9).
+- **Readiness window:** at most **one** applied migration that the code doesn't know (§4.4 F-57). Each release or hotfix carries at most one migration (D-12), so this equals "at most one later release".
+- **Release sequence number:** the count of `v*` tags in the repository at tag time (§4.15).
+- **Web build number:** that same sequence number, baked into the web image and sent as `X-Budmon-Client: web/<n>`.
+- **Database role creation:** `budmon_migrator` has `CREATEROLE`, and is granted `SET` on `budmon_queue` so the schema step can act as the queue owner without holding its password. The superuser `budmon_admin` is reachable only through the container's Unix socket.
+- **Payload safety:** job payload strings must match a short-token pattern (§4.6), which enforces D-10's "IDs, enums, dates, counts" at runtime.
+- **The web image is Caddy:** upstream `caddy` plus the built SPA. `alloy` and `egress-proxy` (Squid) are the only third-party images.
+
+## 2. File plan
+
+### 2.1 Removed (D-34)
+
+| Path | Action |
+| ---- | ------ |
+| `server/` (whole directory, including `dist/`, `src/**`, `drizzle.config.ts`, `tsconfig.json`, `package.json`, `pnpm-lock.yaml`, `.env.example`, `.gitignore`) | Delete. Replaced by `apps/server/` and the root workspace. |
+| `compose.yaml` (root) | Delete. Replaced by `infra/compose.yaml`. |
+| `code-bites.md` | Delete. |
+| `.prettierrc` | Delete. Replaced by `prettier.config.js`. |
+| `README.md` (empty) | Rewrite (layout, prerequisites, commands, environments). |
+| `.zed/settings.json` | Keep. |
+
+### 2.2 Created: root and packages
+
+| File | Responsibility |
+| ---- | -------------- |
+| `package.json` | Private workspace root. Scripts: `dev`, `check`, `check:all`, `test`, `lint`, `format`, `typecheck`, `db:reset`, `db:seed`, `db:release-migration`, `db:pending-report`, `db:check-migrations`, `db:check-risky`, `contract:openapi`. `packageManager: pnpm@10.x` (pinned), `engines.node: ">=24 <25"`. |
+| `pnpm-workspace.yaml` | Workspaces: `apps/server`, `apps/web`, `packages/*`, `infra/budmonctl`, `tools/*`. |
+| `.nvmrc` | `24`. |
+| `.gitignore` | `node_modules/`, `dist/`, `build/`, `.data/`, `.env*` except `.env.example`, `coverage/`, `playwright-report/`, `test-results/`, Android `build/`, `.gradle/`, `local.properties`. |
+| `.editorconfig`, `prettier.config.js`, `eslint.config.js`, `stylelint.config.js` | Root configs; the last three import from `@budmon/config`. |
+| `.env.example` | Every variable in §4.2 with safe development values. |
+| `README.md` | Layout, prerequisites, commands, environments, the stage model (link to the HLD). |
+| `.github/workflows/ci.yml` | CI steps 1 to 6 (D-27), plus calls to `rehearsal.yml` (§4.17). |
+| `.github/workflows/rehearsal.yml` | Reusable release rehearsal (D-41). |
+| `.github/workflows/release.yml` | Tag pipeline: build, sign, rehearse, approval, deploy (D-27 step 7). |
+| `packages/config/` (`@budmon/config`) | `tsconfig/base.json`, `tsconfig/node.json`, `tsconfig/web.json`; `eslint/index.js` (F-1); `eslint/rules/*.js` (custom rules F-2 to F-4); `prettier/index.js`; `stylelint/index.js`. |
+| `packages/shared/` (`@budmon/shared`) | `src/money/*`, `src/time/*`, `src/ids/*`, `src/i18n/*`, `src/json/canonical.ts`, `src/index.ts`, `test-vectors/*.json` (S-1). |
+| `packages/contract/` (`@budmon/contract`) | `src/common/{money,dates,ids,cursor,errors,create,version}.ts`, `src/meta/metaContract.ts`, `src/index.ts`, `src/rules/contractRules.ts`, `scripts/emitOpenapi.ts`, `openapi.json` (S-4). |
+| `infra/budmonctl/` (`@budmon/budmonctl`) | The owner-side CLI in TypeScript (`src/cli.ts`, `src/scram.ts`, `src/secrets.ts`), plus `host/budmonctl` (bash, host-side commands) (S-15). |
+| `tools/ci/` (`@budmon/tools-ci`) | `checkMigrationFiles.ts`, `checkApiMinor.ts`, `checkCatalogs.ts`, `checkEnvExample.ts`, `releaseSequence.ts` (S-0, S-2, S-4, S-11, S-16). |
+| `tools/rehearsal/` (`@budmon/tools-rehearsal`) | Rehearsal harness: `src/run.ts`, `src/fakeGoogle.ts`, `src/fakeFx.ts`, `src/scan.ts`, `src/stage0Overlay.ts` (S-16). |
+
+### 2.3 Created: applications, images and infrastructure
+
+| Path | Responsibility |
+| ---- | -------------- |
+| `apps/server/package.json`, `tsconfig.json`, `drizzle.config.ts`, `drizzle/` (empty until the first release) | Server workspace. |
+| `apps/server/src/main/{api,worker,migrate,cli,dbReset,dev}.ts` | Process entry points (F-90 to F-95). |
+| `apps/server/src/platform/config/{schema,loadConfig}.ts` | F-10, F-11. |
+| `apps/server/src/platform/db/{types,client,transaction,clusterBootstrap,roles,grants,schemaPush,migrations,schemaStep,referenceData,reset,seed}.ts`, `sql/cluster-bootstrap.sql` | F-12 to F-23. |
+| `apps/server/src/platform/observability/{safeFields,logger,redaction,sanitize,sentry,otel,metrics,requestLog,errorReporter}.ts` | F-30 to F-38, F-40 to F-42. |
+| `apps/server/src/platform/errors/{BudmonError,platformErrors,interceptor}.ts` | F-50 to F-52. |
+| `apps/server/src/platform/http/{context,procedures,server,clientVersion,health,meta,devObjects}.ts` | F-53 to F-58, F-145. |
+| `apps/server/src/platform/security/{headers,rateLimiter,rateLimitRepo,hashing}.ts` | F-61 to F-66. |
+| `apps/server/src/platform/queue/{jobs,registry,payloadSafety,jobQueue,queueSchema,queueSync,wrapper,workers,deadLetter,heartbeat}.ts` | F-70 to F-79. |
+| `apps/server/src/platform/maintenance/maintenanceJobs.ts` | F-80. |
+| `apps/server/src/platform/idempotency/{idempotency,idempotencyRepo}.ts` | F-100 to F-102. |
+| `apps/server/src/platform/pagination/cursor.ts` | F-103 to F-105. |
+| `apps/server/src/platform/crypto/{envelope,captureSealer,captureUnsealer,apiSecrets,sealedColumns,rewrap,oauth,egress,proxy}.ts` | F-110 to F-122. |
+| `apps/server/src/platform/fx/{decimal,fxRepo,fxService,providers,fxJobs,iso4217.json}` | F-130 to F-138. |
+| `apps/server/src/platform/storage/{objectStore,s3ObjectStore,fsObjectStore,memoryObjectStore,exportsPurge,erasureLog}.ts` | F-140 to F-146. |
+| `apps/server/src/platform/ops/{restoreVerify,erasureReplay}.ts` | F-150, F-151. |
+| `apps/server/src/platform/container.ts` | F-96 (composition root). |
+| `apps/server/src/db/schema/{currencies,exchangeRates,idempotencyRecords,rateLimitCounters,index}.ts` | §3.1. |
+| `apps/server/src/i18n/{messages/en.json,render.ts}` | F-160 (server-side message rendering for emails and pushes; no messages until `identity`/`notifications`). |
+| `apps/server/test/**` | Test-architect's (§10.1). |
+| `apps/web/` | SolidJS SPA (§8.1, F-200 to F-221). |
+| `apps/android/` | Gradle project: `app/`, `lint-rules/`, `gradle/libs.versions.toml` (§8.2, F-250 to F-263). |
+| `images/server/Dockerfile` | Server image (api, worker, migrate, cli entry points). |
+| `images/web/Dockerfile` | Upstream `caddy` plus the built SPA. |
+| `images/postgres/{Dockerfile,budmon-entrypoint.sh,postgresql.base.conf}` | Postgres 18 plus pgBackRest, with the boot safeguards (F-170). |
+| `infra/compose.yaml` | Local development: Postgres (same image as production) and Mailpit (D-28). |
+| `infra/deploy/main/` | `compose.stage0.yaml` (main project on the stage-0 VM), `compose.stage1.yaml`, `Caddyfile`, `alloy/config.alloy`, `postgres/pg_hba.prod-s0.conf`, `postgres/pg_hba.prod-s1.conf`, `postgres/pg_hba.dryrun.conf`, `postgres/postgresql.conf`, `pgbackrest/pgbackrest.conf`, `steps/deploy.sh`. |
+| `infra/deploy/capture/` | `compose.stage0.yaml` (capture project on the stage-0 VM), `compose.stage1.yaml`, `squid/squid.conf` (stage 1), `alloy/config.alloy` (stage 1), `steps/deploy.sh`. |
+| `infra/deploy/deployments/{prod-s0,prod-s1,dryrun}.env` | Per-deployment, non-secret values: `INFRA_STAGE`, `DOMAIN`, image registry path, fixed addresses (F-175). |
+| `infra/deploy/bootstrap/budmon-deploy` | The bootstrap (bash, F-171). |
+| `infra/deploy/bootstrap/lib/*.sh` | Bootstrap functions (F-172 to F-174). |
+| `infra/deploy/trust/{identity.regex,issuer,trusted_root.json}` | Trust anchors for the release workflow (F-171). |
+| `infra/deploy/bundle.Dockerfile` | Builds a deploy-bundle image per host role (`FROM scratch`). |
+| `infra/deploy/rehearsal/{compose.rehearsal.yaml,trust/}` | Rehearsal overlay and rehearsal trust anchors (S-16). |
+| `infra/cloud-init/stage0-single.yaml` | Stage-0 host (S-15). |
+| `infra/systemd/{budmon-boot.service,pgbackrest-full.timer,pgbackrest-diff.timer,pgbackrest-*.service,budmon-backup-metrics.timer,budmon-backup-metrics.service}` | Host units (S-15). |
+| `infra/secrets/<deployment>/<host-role>/<service>.sops.yaml`, `infra/secrets/.sops.yaml` | Secret files (D-20); `.sops.yaml` holds the creation rules mapping each `<deployment>/<host-role>` path to its age recipients. |
+| `infra/tofu/{main.tf,hetzner.tf,gcp.tf,b2.tf,grafana.tf,variables.tf,stage0.tfvars}` | OpenTofu for stage 0 (S-15). |
+| `infra/runbooks/{restore-drill.md,first-deploy.md,rotate-role-password.md}` | Runbooks (S-15). |
+
+### 2.4 Pinned versions
+
+Versions were checked against npm and Maven Central on 2026-10-05. Exact versions are pinned in lockfiles. Anything listed here as "latest stable" is pinned when the slice that adds it is built, and recorded in `gradle/libs.versions.toml` or the lockfile.
+
+| Area | Packages (exact) |
+| ---- | ---------------- |
+| Runtime | Node 24 LTS (`.nvmrc`), pnpm 10, TypeScript **5.9.3** (typescript-eslint 8.71 supports `<6.1`; TypeScript 7 is excluded until typescript-eslint supports it) |
+| Server | `fastify` 5.12.5, `@fastify/helmet` 13.1.1, `@fastify/rate-limit` 11.2.0, `@fastify/cookie` 11.1.2, `@orpc/server`/`@orpc/contract`/`@orpc/openapi`/`@orpc/zod`/`@orpc/client`/`@orpc/openapi-client` 1.15.4, `zod` 4.6.5, `drizzle-orm` 0.45.3, `drizzle-kit` 0.31.11 (dev only), `pg` 8.23.1, `pg-boss` 12.36.0, `pino` 10.4.0, `@sentry/node` 11.4.0, `@opentelemetry/sdk-node` 0.222.0 (with the matching `@opentelemetry/auto-instrumentations-node`), `@google-cloud/kms` 6.2.1, `@node-rs/argon2` 2.2.1, `@aws-sdk/client-s3` and `@aws-sdk/s3-request-presigner` 3.1146.0, `undici` 8.11.2, `uuid` 14.0.2, `@js-temporal/polyfill` 0.5.1 |
+| Web | `solid-js` 1.9.15, `vite` 8.3.2, `vite-plugin-solid` 2.11.14, `@tanstack/solid-router` 1.170.38, `@tanstack/solid-query` 5.104.1, `@orpc/tanstack-query` 1.15.4, `@tanstack/solid-table` 9.2.x, `@tanstack/solid-virtual` 3.13.x, `@tanstack/solid-form` 1.33.x, `@kobalte/core` 0.13.14, `@formatjs/intl` 6.1.2, `@sentry/solid` 11.4.0, `tailwindcss` 4.3.3 |
+| Lint | `eslint` 10.12.0, `typescript-eslint` 8.71.0, `eslint-plugin-formatjs` (latest 5.x), `eslint-plugin-jsx-a11y` (latest 6.x), `eslint-plugin-solid` (latest), `stylelint` 17.16.0, `stylelint-use-logical` 2.1.3, `prettier` 3.x |
+| Tests | `vitest` 5.0.3, `testcontainers` and `@testcontainers/postgresql` 12.2.0, `@playwright/test` 1.63.0, `@axe-core/playwright` 4.13.0, `msw` 3.0.2, `@solidjs/testing-library` 0.8.10, `node-pty` 1.1.0 (release tooling) |
+| Android | Kotlin 2.x latest stable (not a pre-release), AGP latest stable, Compose BOM latest stable, Room, WorkManager and Paging 3 latest stable, Hilt 2.60.1, OkHttp 5.5.0, Retrofit 3.0.0, kotlinx.serialization (latest stable), OpenAPI Generator Gradle plugin 7.14.0, Sentry Android 8.59.0, Robolectric 4.17, MockK 1.14.11, Turbine 1.2.1, ktlint 1.8.0 |
+| Infrastructure | Postgres **18** (image pinned by digest), pgBackRest 2.x from PGDG apt, Caddy 2.x, Grafana Alloy 1.x, Squid 6.x (`ubuntu/squid`), cosign 2.x, crane, sops 3.x, age 1.x, OpenTofu 1.10+ (all pinned by version and checksum in cloud-init and CI) |
+
+## 3. Database
+
+### 3.1 Table definitions
+
+Drizzle, `casing: "snake_case"` (TypeScript properties camelCase, columns snake_case), schema `public`. Every table is registered in `apps/server/src/db/schema/index.ts` and has a row in `tableGrants` (F-16).
+
+```ts
+// apps/server/src/db/schema/currencies.ts
+export const currenciesTable = pgTable("currencies", {
+  code: char({ length: 3 }).primaryKey(),
+  name: text().notNull(),
+  minorUnits: smallint().notNull(),
+  isActive: boolean().notNull().default(true),
+  createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  check("currencies_code_format", sql`${t.code} ~ '^[A-Z]{3}$'`),
+  check("currencies_minor_units_range", sql`${t.minorUnits} BETWEEN 0 AND 4`),
+]);
+
+// apps/server/src/db/schema/exchangeRates.ts
+export const exchangeRatesTable = pgTable("exchange_rates", {
+  currencyCode: char({ length: 3 }).notNull()
+    .references(() => currenciesTable.code, { onDelete: "restrict", onUpdate: "restrict" }),
+  rateDate: date({ mode: "string" }).notNull(),
+  unitsPerUsd: numeric({ precision: 24, scale: 12 }).notNull(),
+  provider: text().notNull(),
+  fetchedAt: timestamp({ withTimezone: true }).notNull(),
+  createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  primaryKey({ columns: [t.currencyCode, t.rateDate] }),
+  index("exchange_rates_rate_date_idx").on(t.rateDate),
+  check("exchange_rates_positive", sql`${t.unitsPerUsd} > 0`),
+  check("exchange_rates_provider", sql`${t.provider} IN ('openexchangerates', 'fawazahmed0', 'fixed')`),
+]);
+
+// apps/server/src/db/schema/idempotencyRecords.ts
+export const idempotencyRecordsTable = pgTable("idempotency_records", {
+  userId: uuid().notNull(),              // FK to identity's users table, declared in identity's schema (HLD §3.1)
+  idempotencyKey: uuid().notNull(),
+  procedure: text().notNull(),           // contract path, e.g. "transactions.create"
+  requestHash: bytea().notNull(),        // 32 bytes, SHA-256 of canonical input
+  responseStatus: smallint(),            // null until the create completes in the same transaction
+  result: jsonb().$type<{ id: string; createdAt: string }>(),
+  createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  expiresAt: timestamp({ withTimezone: true }).notNull(),
+}, (t) => [
+  primaryKey({ columns: [t.userId, t.idempotencyKey] }),
+  index("idempotency_records_expires_at_idx").on(t.expiresAt),
+  check("idempotency_records_hash_len", sql`octet_length(${t.requestHash}) = 32`),
+]);
+
+// apps/server/src/db/schema/rateLimitCounters.ts  (UNLOGGED: see below)
+export const rateLimitCountersTable = pgTable("rate_limit_counters", {
+  bucketKey: text().notNull(),           // "<limiter>:<base64url HMAC-SHA-256(subject)>"
+  windowStart: timestamp({ withTimezone: true }).notNull(),
+  hits: integer().notNull(),
+  expiresAt: timestamp({ withTimezone: true }).notNull(),
+}, (t) => [
+  primaryKey({ columns: [t.bucketKey, t.windowStart] }),
+  index("rate_limit_counters_expires_at_idx").on(t.expiresAt),
+]);
+```
+
+- `bytea` is a custom Drizzle type (`customType<{ data: Buffer }>`) in `apps/server/src/db/schema/types.ts`.
+- **`UNLOGGED`:** Drizzle has no flag for it. The push step (F-17) and the baseline release migration run `ALTER TABLE rate_limit_counters SET UNLOGGED` immediately after creation. The release migration notes (§3.4) carry this. `rate_limit_counters` has no `created_at`/`updated_at`, a documented exception to HLD §3.1's convention: rows are short-lived counters.
+- `exchange_rates.provider = 'fixed'` exists only in development and test data; production's FX config refuses the fixed provider (§4.2).
+- `idempotency_records.user_id` has no foreign key until `identity` creates its users table. `identity`'s LLD adds the FK with `onDelete: cascade` in its schema, and it ships in the same baseline release migration.
+
+**Non-Drizzle stores:**
+- `pgboss` schema: owned by `budmon_queue`, installed by F-74.
+- `drizzle.__drizzle_migrations`: Drizzle's migrator, deployed and release-path databases only.
+- Buckets `exports` and `erasure-log` (F-140), and `backups` (pgBackRest, §7.6).
+
+### 3.2 Changes to existing tables
+
+The existing `users`, `accounts`, `account_owners`, `refresh_tokens` and `currencies` (integer id) tables are deleted with `server/` (D-34). No database holds data that must survive (spec §7 item 1), so there's no data migration.
+
+### 3.3 Roles, grants and reference data
+
+**Login roles** are created by the schema step (F-15), except `budmon_admin` and `budmon_migrator`, which cluster bootstrap creates (F-14).
+
+| Role | Attributes | Used by | Privileges |
+| ---- | ---------- | ------- | ---------- |
+| `budmon_admin` | SUPERUSER, LOGIN | Owner, via `docker exec … psql` over the container's Unix socket only (`pg_hba`: `local all budmon_admin scram-sha-256`; no `host` line) | All. |
+| `budmon_migrator` | LOGIN, CREATEROLE, NOINHERIT | `migrate` container; dev/test schema step | Owns database `budmon` and schema `public`. Granted `budmon_queue` `WITH SET TRUE, INHERIT FALSE`. Has ADMIN on the roles it creates. |
+| `budmon_app` | LOGIN, NOINHERIT | api, worker-general (domain writes) | Per `tableGrants` (F-16). On `pgboss`: `USAGE` on the schema, `SELECT, INSERT, UPDATE` on its tables and `EXECUTE` on its functions, through `ALTER DEFAULT PRIVILEGES FOR ROLE budmon_queue IN SCHEMA pgboss`. |
+| `budmon_capture` | LOGIN, NOINHERIT | worker-capture | Per `tableGrants`. On `pgboss`: the same as `budmon_app`; pg-boss runs with maintenance and scheduling off (F-77). |
+| `budmon_queue` | LOGIN, NOINHERIT | worker-general's pg-boss connections | Owns schema `pgboss`. |
+| `budmon_monitor` | LOGIN, member of `pg_monitor` | Alloy's postgres exporter | `CONNECT` only. |
+
+`REVOKE CREATE ON SCHEMA public FROM PUBLIC` and `REVOKE ALL ON DATABASE budmon FROM PUBLIC` are applied by F-15.
+
+**Platform table grants** (`tableGrants`, F-16):
+
+| Table | `budmon_app` | `budmon_capture` | Credential table? |
+| ----- | ------------ | ---------------- | ----------------- |
+| `currencies` | SELECT | SELECT | no |
+| `exchange_rates` | SELECT, INSERT | SELECT | no |
+| `idempotency_records` | SELECT, INSERT, UPDATE, DELETE | none | no |
+| `rate_limit_counters` | SELECT, INSERT, UPDATE, DELETE | none | no |
+
+`currencies` writes happen only in the schema step as `budmon_migrator`.
+
+**Reference data:** `apps/server/src/platform/fx/iso4217.json` is an array of `{ "code": "EGP", "name": "Egyptian Pound", "minorUnits": 2, "active": true }`.
+- It contains every currency in ISO 4217 table A.1 (as published by SIX on the date the slice is built), plus currencies withdrawn since 2000-01-01 (table A.3) with `active: false`.
+- It excludes metals (XAU, XAG, XPT, XPD), XDR, the bond-market units XBA to XBD, XSU, XUA, the testing and "no currency" codes XTS and XXX, and every fund code (BOV, CHE, CHW, CLF, COU, MXV, USN, UYI, UYW).
+- Names are the English ISO names. The file is loaded by F-21.
+
+### 3.4 Migration and seed data
+
+- **Development and test:** no migration files. Databases are built by the schema step in `push` mode onto an empty database (F-17, F-20).
+- **First release:** `pnpm db:release-migration v0.1.0` (F-180) generates `apps/server/drizzle/0000_v0.1.0.sql`, the baseline.
+- **Release migration notes** (the platform's part of every release until this LLD amends them):
+
+| Release | Note |
+| ------- | ---- |
+| Baseline (first release) | Creates the four platform tables. The software-engineer appends `ALTER TABLE "rate_limit_counters" SET UNLOGGED;` after its `CREATE TABLE` (the generator omits it). No data to preserve. The upgrade test is skipped for the baseline (no previous release, F-183). |
+
+- **Seed data (development only):** the seed framework (F-23) runs registered seeders in registration order. The platform's seeder inserts `exchange_rates` for the 30 days before today (UTC) for USD, EUR, GBP, EGP, JPY, KWD and SAR, with provider `fixed`, using the fixed provider's rates (F-133).
+
+## 4. Function catalog
+
+### 4.0 Conventions for this catalog
+
+- Paths are relative to the repository root. Server paths are under `apps/server/src/`; the catalog writes `platform/...` for `apps/server/src/platform/...`.
+- **Injectable dependencies** (fakeable in unit tests) are marked **[inj]**. They're passed through constructor or factory parameters, never imported as singletons (D-31).
+- `Temporal` always comes from `@budmon/shared` (F-310).
+- "Throws `X`" means an exception. "Returns" means a normal result.
+- Platform `BudmonError`s are listed in §6. Errors that aren't `BudmonError` become `INTERNAL` at the API boundary (F-52).
+- **Shared types** used across the catalog:
+
+```ts
+// platform/db/types.ts
+import type { NodePgDatabase } from "drizzle-orm/node-postgres";
+import type * as schema from "../../db/schema/index.js";
+export type Schema = typeof schema;
+export type Executor = NodePgDatabase<Schema>;
+export interface SqlResult { rows: Record<string, unknown>[]; rowCount: number }
+export interface DbHandle {
+  readonly db: Executor;                        // drizzle bound to the pool or to the open transaction
+  executeSql(text: string, values?: readonly unknown[]): Promise<SqlResult>;
+  readonly inTransaction: boolean;
+}
+export interface Database { readonly handle: DbHandle; readonly pool: import("pg").Pool; close(): Promise<void> }
+export interface CommitTracker { readonly committed: boolean; markCommitted(): void }
+
+// platform/http/context.ts
+export interface Principal { readonly userId: string; readonly isOwner: boolean }
+export type ClientKind = "android" | "web" | "other";
+export interface RequestContext {
+  readonly requestId: string;                   // = trace id (32 hex) when a trace is active, else UUIDv7 without dashes
+  readonly principal: Principal | null;
+  readonly clientKind: ClientKind;
+  readonly clientVersion: number | null;
+  readonly ip: string;
+  readonly headers: Readonly<Record<string, string | undefined>>; // lower-cased names
+  readonly responseHeaders: Headers;            // oRPC ResponseHeadersPlugin
+  readonly commitTracker: CommitTracker;
+  readonly logger: Logger;
+  readonly container: ApiContainer;
+}
+```
+
+### 4.1 Repository tooling (S-0)
+
+#### F-1: `createBudmonEslintConfig`
+- **File:** `packages/config/eslint/index.js` · **Layer:** config
+- **Signature:** `export function createBudmonEslintConfig(options: { tsconfigRootDir: string }): import("eslint").Linter.Config[]`
+- **Behaviour:** returns a flat config with typescript-eslint `strictTypeChecked`, Prettier compatibility, and these rules, all `error`:
+  1. **Layering** (`no-restricted-imports`):
+     - files `apps/server/src/*/*Router.ts` may not import `drizzle-orm*`, `pg`, `**/db/**` or `**/*Repo.js`;
+     - files `*Service.ts` may not import `drizzle-orm*`, `pg` or `**/db/client.js`;
+     - files under `apps/server/src/platform/http/**` may not import `**/*Repo.js`.
+  2. **Logging:** `pino` may be imported only under `apps/server/src/platform/observability/**`. `no-console` everywhere except `apps/server/src/main/**` and `tools/**`.
+  3. **Money**, in `apps/server/src`, `packages/shared/src` and `apps/web/src`:
+     - `no-restricted-globals: ["parseFloat"]`;
+     - `no-restricted-syntax` with `CallExpression[callee.name='Number']` ("Number() conversion is forbidden; use the money helpers or Number.parseInt with a reason") and `CallExpression[callee.name='bigint'] ObjectExpression > Property[key.name='mode'][value.value='number']`.
+
+     A line may opt out with `// eslint-disable-next-line … -- <reason>` (the `eslint-comments/require-description` rule enforces the reason).
+  4. **Web** (`apps/web/src/**`): `formatjs/enforce-default-message`, `formatjs/enforce-id`, `formatjs/no-literal-string-in-jsx`; `budmon/no-physical-tailwind` (F-2); `budmon/icon-from-registry` (F-3); and the **blocking** accessibility rules (D-39, HLD Q-1 (a)): `jsx-a11y/alt-text`, `jsx-a11y/control-has-associated-label`, `jsx-a11y/label-has-associated-control`, `jsx-a11y/aria-props`, `jsx-a11y/aria-proptypes`, `jsx-a11y/aria-role`, `jsx-a11y/role-has-required-aria-props`, `jsx-a11y/tabindex-no-positive`. Every other `jsx-a11y` rule is `off` (D-39: report-only checks happen in Playwright).
+- **Errors:** none (pure).
+- **Calls:** F-2, F-3.
+
+#### F-2: `budmon/no-physical-tailwind` (ESLint rule)
+- **File:** `packages/config/eslint/rules/no-physical-tailwind.js` · **Layer:** lint rule
+- **Signature:** `export default { meta: { type: "problem", messages: { physical: string } }, create(context): RuleListener }`
+- **Behaviour:**
+  - Inspects string literals and template-literal quasis in JSX `class`/`classList` attributes and in calls to `cn(...)`/`clsx(...)`.
+  - Splits them on whitespace and strips variant prefixes (`hover:`, `md:`, `rtl:`, …).
+  - Reports each class matching `^-?(ml|mr|pl|pr|left|right|scroll-ml|scroll-mr|scroll-pl|scroll-pr)-` or `^(text-left|text-right|float-left|float-right|clear-left|clear-right)$` or `^(border-l|border-r|rounded-l|rounded-r|rounded-tl|rounded-tr|rounded-bl|rounded-br)(-|$)`.
+  - Reports `space-x-*` and `divide-x-*` unless the same string also contains `rtl:space-x-reverse` (respectively `rtl:divide-x-reverse`).
+  - Classes with an `rtl:` or `ltr:` variant aren't reported.
+  - A literal on a line whose preceding line holds the comment `rtl-exempt: <non-empty reason>` isn't reported.
+- **Errors:** report message `physical`: "Use the logical utility instead of '{{cls}}' (D-38)."
+- **Calls:** none.
+
+#### F-3: `budmon/icon-from-registry` (ESLint rule)
+- **File:** `packages/config/eslint/rules/icon-from-registry.js` · **Layer:** lint rule
+- **Signature:** as F-2.
+- **Behaviour:** in `apps/web/src/**`, reports any import from an icon package (`lucide-solid`, `@tabler/icons-solidjs`, or any module whose name matches `/icons?/`) outside `apps/web/src/ui/icons/registry.ts`, and any `<svg>` JSX element outside `apps/web/src/ui/icons/**`.
+- **Errors:** message "Use an icon from the registry (D-38 rule 6)."
+
+#### F-4: stylelint configuration
+- **File:** `packages/config/stylelint/index.js` · **Layer:** config
+- **Behaviour:** `plugins: ["stylelint-use-logical"]`, `rules: { "csstools/use-logical": ["always", { except: [] }] }`. A declaration preceded by the comment `/* rtl-exempt: <reason> */` is ignored (through `stylelint-disable-next-line csstools/use-logical` written by authors with the reason).
+
+#### F-5: TypeScript and Prettier bases
+- **Files:** `packages/config/tsconfig/{base,node,web}.json`, `packages/config/prettier/index.js`
+- **Behaviour:**
+  - `base`: `strict`, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, `verbatimModuleSyntax`, `isolatedModules`, `noUncheckedSideEffectImports`, `moduleDetection: force`, `skipLibCheck`, `target: ES2024`, `declaration`, `sourceMap`.
+  - `node`: `module`/`moduleResolution: nodenext`, `lib: ["ES2024"]`, `types: ["node"]`.
+  - `web`: `module: preserve`, `moduleResolution: bundler`, `jsx: preserve`, `jsxImportSource: solid-js`, `lib: ["ES2024", "DOM", "DOM.Iterable"]`.
+  - Prettier: `{ printWidth: 100, semi: true, singleQuote: false, trailingComma: "all" }`.
+
+#### F-6: `checkMigrationFiles`
+- **File:** `tools/ci/checkMigrationFiles.ts` · **Layer:** CI script
+- **Signature:** `export function checkMigrationFiles(input: { branch: string; changedFiles: readonly string[]; isHotfixMergeBack: boolean }): { ok: true } | { ok: false; message: string }`. CLI: `pnpm --filter @budmon/tools-ci exec tsx src/checkMigrationFiles.ts` reads `GITHUB_HEAD_REF` and `git diff --name-only origin/main...HEAD`; exit 1 if not ok.
+- **Behaviour:**
+  - If `branch` matches `^(release|hotfix|infra)/` or `isHotfixMergeBack` is true → `{ ok: true }`.
+  - Otherwise, any changed file under `apps/server/drizzle/` → `{ ok: false, message: "Migration files may only change on release/* and hotfix/* branches (D-12): <files>" }`.
+  - A merge-back PR is identified by the label `hotfix-merge-back` (or `infra-merge-back`) on the PR, which `ci.yml` passes in.
+
+#### F-7: `checkEnvExample`
+- **File:** `tools/ci/checkEnvExample.ts` · **Layer:** CI script (S-2)
+- **Signature:** `export function checkEnvExample(schemaKeys: readonly string[], exampleText: string): { missingInExample: string[]; unknownInExample: string[] }`
+- **Behaviour:** parses `KEY=value` lines (ignoring comments and blank lines) and compares them with `schemaKeys` (from F-10's `allConfigKeys()`). The CLI exits 1 if either list is non-empty.
+
+#### F-8: `checkApiMinor`
+- **File:** `tools/ci/checkApiMinor.ts` · **Layer:** CI script (S-4)
+- **Signature:** `export function checkApiMinor(input: { baseOpenapi: object; headOpenapi: object }): { ok: boolean; message: string }`
+- **Behaviour:** compares the two documents ignoring `info.version`. If they differ, `head.info.version` must be `1.<m>` with `m` > the base's minor, otherwise not ok ("The contract changed; bump API_MINOR in packages/contract/src/common/version.ts"). Identical documents with any version → ok.
+
+#### F-9: `checkCatalogs`
+- **File:** `tools/ci/checkCatalogs.ts` · **Layer:** CI script (S-11)
+- **Signature:** `export function checkCatalogs(input: { usedIds: ReadonlySet<string>; catalogs: Record<string, Record<string, string>> }): { missing: Record<string, string[]> }`
+- **Behaviour:** for each shipped locale in `catalogs` (`en` at launch; pseudo-locales are generated, not shipped), lists the used IDs it lacks. The CLI extracts IDs with `@formatjs/cli extract` over `apps/web/src/**/*.{ts,tsx}` and fails if anything is missing.
+
+### 4.2 Shared library `@budmon/shared` (S-1)
+
+Pure functions with no I/O. Imported by the server and the web app. Android mirrors them in Kotlin (F-256) against the same test vectors.
+
+#### F-300: currency codes and rationals
+- **File:** `packages/shared/src/money/currency.ts`, `packages/shared/src/money/rational.ts`
+- **Signatures:**
+  ```ts
+  export type CurrencyCode = string & { readonly __brand: "CurrencyCode" };
+  export function asCurrencyCode(value: string): CurrencyCode;
+  export interface Rational { readonly num: bigint; readonly den: bigint }
+  export function rational(num: bigint, den: bigint): Rational;
+  export function parseDecimal(text: string): Rational;
+  export function roundHalfEven(value: Rational): bigint;
+  export function toFixedDecimalString(value: Rational, scale: number): string;
+  ```
+- **Behaviour:**
+  - `asCurrencyCode` returns the input if it matches `^[A-Z]{3}$`.
+  - `rational` normalises to `den > 0n` and reduces by gcd.
+  - `parseDecimal` accepts `^[+-]?\d+(\.\d+)?([eE][+-]?\d{1,3})?$` and returns the exact rational ("0.1" → 1/10; "1.5e-3" → 3/2000).
+  - `roundHalfEven` rounds to the nearest integer, ties to even (5/2 → 2, 7/2 → 4, −5/2 → −2).
+  - `toFixedDecimalString(r, s)` rounds half-even to `s` decimals and prints without exponent, always with exactly `s` decimals (`s = 0` → no point).
+- **Errors:** `asCurrencyCode` throws `TypeError("Invalid currency code")`; `rational` with `den = 0n` throws `RangeError`; `parseDecimal` throws `RangeError("Invalid decimal")`; `toFixedDecimalString` with `s` not an integer in 0..18 throws `RangeError`.
+
+#### F-301: `Money` and arithmetic
+- **File:** `packages/shared/src/money/money.ts`
+- **Signatures:**
+  ```ts
+  export class Money {
+    static of(minor: bigint, currency: CurrencyCode): Money;
+    readonly minor: bigint;
+    readonly currency: CurrencyCode;
+    toString(): string;   // "[redacted]"
+    toJSON(): string;     // "[redacted]"
+    [Symbol.for("nodejs.util.inspect.custom")](): string; // "[redacted]"
+  }
+  export class CurrencyMismatchError extends Error {}   // name "CurrencyMismatchError"
+  export function add(a: Money, b: Money): Money;
+  export function subtract(a: Money, b: Money): Money;
+  export function negate(a: Money): Money;
+  export function sum(items: readonly Money[], currency: CurrencyCode): Money;
+  export function compare(a: Money, b: Money): -1 | 0 | 1;
+  export function isZero(a: Money): boolean;
+  export function multiplyByRational(m: Money, r: Rational): Money;
+  export function percentOf(m: Money, basisPoints: bigint): Money;
+  export function ratio(part: Money, whole: Money): Rational;
+  ```
+- **Behaviour:** instances are frozen. `sum([])` returns zero in `currency`. `multiplyByRational` rounds once, half-even. `percentOf(m, bp)` is `multiplyByRational(m, bp/10000)`. `ratio` returns the exact `part.minor / whole.minor`.
+- **Errors:**
+  - `Money.of` with a non-bigint `minor` throws `TypeError`.
+  - `add`, `subtract`, `sum`, `compare` and `ratio` with different currencies throw `CurrencyMismatchError`, whose message names only the two codes.
+  - `ratio` with a zero whole throws `RangeError`.
+
+#### F-302: `allocate`
+- **File:** `packages/shared/src/money/allocate.ts`
+- **Signature:** `export function allocate(m: Money, weights: readonly bigint[]): Money[]`
+- **Behaviour:** largest-remainder allocation. Each share is `floor(|m| × wᵢ / W)`. The leftover units go one each to the parts with the largest remainders, ties to the lower index. A negative `m` is allocated as `|m|` and every part negated. The result has `weights.length` parts that sum exactly to `m`.
+- **Errors:** an empty `weights`, any `wᵢ < 0n`, or `W = 0n` throws `RangeError`.
+
+#### F-303: `convertWithRates`
+- **File:** `packages/shared/src/money/convert.ts`
+- **Signature:** `export function convertWithRates(m: Money, from: { unitsPerUsd: Rational; minorUnits: number }, to: { currency: CurrencyCode; unitsPerUsd: Rational; minorUnits: number }): Money`
+- **Behaviour:** returns `Money.of(roundHalfEven(m.minor × to.unitsPerUsd × 10^to.minorUnits / (from.unitsPerUsd × 10^from.minorUnits)), to.currency)`, exact in rationals, rounding once. If `m.currency === to.currency`, returns `m` unchanged.
+- **Errors:** a non-positive `unitsPerUsd` throws `RangeError`.
+
+#### F-304: wire conversion
+- **File:** `packages/shared/src/money/wire.ts`
+- **Signatures:**
+  ```ts
+  export const MAX_WIRE_MINOR: 9007199254740991;
+  export class MoneyRangeError extends Error {}
+  export function toMoney(minor: number, currency: CurrencyCode): Money;
+  export function toWire(m: Money): number;
+  export function toWireMoney(m: Money): { amount: number; currency: string };
+  export function fromWireMoney(w: { amount: number; currency: string }): Money;
+  ```
+- **Errors:**
+  - `toMoney` with a non-safe-integer throws `MoneyRangeError`.
+  - `toWire` and `toWireMoney` with `|minor| > 2^53 − 1` throw `MoneyRangeError`, whose message holds no amount.
+  - `fromWireMoney` with an invalid code throws `TypeError` (F-300).
+
+#### F-305: `formatMoney`
+- **File:** `packages/shared/src/money/format.ts`
+- **Signature:** `export function formatMoney(m: Money, opts: { locale: string; minorUnits: number; currencyDisplay?: "code" | "symbol" | "narrowSymbol"; signDisplay?: "auto" | "never" | "always" | "exceptZero" }): string`
+- **Behaviour:** builds the exact decimal string of `m.minor / 10^minorUnits` with exactly `minorUnits` decimals, then formats it with `new Intl.NumberFormat(locale, { style: "currency", currency: m.currency, currencyDisplay ?? "code", minimumFractionDigits: minorUnits, maximumFractionDigits: minorUnits, signDisplay ?? "auto" }).format(decimalString)`. The string-input overload keeps it exact. The default numbering system follows the locale.
+- **Errors:** `minorUnits` outside 0..4 throws `RangeError`.
+
+#### F-306: `canonicalJson`
+- **File:** `packages/shared/src/json/canonical.ts`
+- **Signature:** `export function canonicalJson(value: unknown): string`
+- **Behaviour:** JSON with object keys sorted by UTF-16 code-unit order at every depth. Arrays keep their order. Properties whose value is `undefined` are omitted. No whitespace.
+- **Errors:** throws `TypeError` for `bigint`, non-finite numbers, functions, symbols, `Date`, `Map`, `Set` and class instances other than plain objects and arrays.
+
+#### F-310: time
+- **File:** `packages/shared/src/time/temporal.ts`, `packages/shared/src/time/clock.ts`
+- **Signatures:**
+  ```ts
+  export const Temporal: typeof import("@js-temporal/polyfill").Temporal; // globalThis.Temporal if present
+  export interface Clock { now(): Temporal.Instant }
+  export const systemClock: Clock;
+  export interface MutableClock extends Clock { set(at: Temporal.Instant | string): void; advance(by: Temporal.DurationLike): void }
+  export function fixedClock(at: Temporal.Instant | string): MutableClock;
+  export function isValidTimeZone(zone: string): boolean;
+  export function todayIn(clock: Clock, timeZone: string): Temporal.PlainDate;
+  export function utcDateOf(instant: Temporal.Instant): Temporal.PlainDate;
+  ```
+- **Behaviour:**
+  - `isValidTimeZone` is true for any IANA name `Intl` accepts, except `Etc/Unknown`.
+  - `todayIn` is the calendar date of `clock.now()` in `timeZone`.
+  - `utcDateOf` is the UTC calendar date.
+- **Errors:** `todayIn` with an invalid zone throws `RangeError("Invalid time zone")`. `fixedClock` with an unparseable string throws `RangeError`.
+
+#### F-311: IDs
+- **File:** `packages/shared/src/ids/ids.ts`
+- **Signatures:** `export interface IdGenerator { next(): string }`, `export const uuidv7Generator: IdGenerator`, `export function isUuid(value: string): boolean`
+- **Behaviour:** `next()` returns a lower-case RFC 9562 UUIDv7 from `uuid`'s `v7()`. `isUuid` accepts any lower-case RFC 9562 UUID.
+
+#### F-312: locales and bidi
+- **File:** `packages/shared/src/i18n/locale.ts`, `packages/shared/src/i18n/bidi.ts`
+- **Signatures:** `export function resolveLocale(requested: string | null, supported: readonly string[], fallback?: string): string`, `export function directionOf(locale: string): "ltr" | "rtl"`, `export function isolate(text: string): string`
+- **Behaviour:**
+  - `resolveLocale`: an exact (case-insensitive) match wins, then the language subtag, then `fallback ?? "en"`; returns the supported tag's own spelling.
+  - `directionOf`: `"rtl"` when the language subtag is `ar`, `he`, `fa`, `ur`, `ps`, `sd`, `yi` or `dv`, or the tag is `ar-XB`; otherwise `"ltr"`.
+  - `isolate(t)` returns `"⁨" + t + "⁩"`.
+
+#### F-313: test vectors
+- **Files:** `packages/shared/test-vectors/{rounding,allocate,convert,wire,format}.json`
+- **Format:** each file is `{ "version": 1, "cases": [ … ] }`, with numbers as strings for bigints:
+  - `rounding`: `{ "num": "5", "den": "2", "expected": "2" }`;
+  - `allocate`: `{ "minor": "100", "currency": "EGP", "weights": ["1","1","1"], "expected": ["34","33","33"] }`;
+  - `convert`: `{ "minor": "12345", "from": { "currency": "EGP", "unitsPerUsd": "48.5", "minorUnits": 2 }, "to": { "currency": "JPY", "unitsPerUsd": "149.25", "minorUnits": 0 }, "expected": "380" }`;
+  - `wire`: `{ "minor": "9007199254740992", "expected": "MoneyRangeError" }`;
+  - `format`: `{ "minor": "123450", "currency": "EGP", "minorUnits": 2, "locale": "en-US", "expected": "EGP 1,234.50" }`.
+
+  Format comparisons normalise U+00A0 and U+202F to U+0020 on both platforms. The test-architect writes the cases. The minimum set is listed in TP-1.10.
+- **Behaviour:** read by the TypeScript suite (Vitest) and the Android suite (JUnit, through Gradle `sourceSets.test.resources.srcDir("../../packages/shared/test-vectors")`).
+
+### 4.3 Configuration and database (S-2)
+
+#### F-10: configuration schema
+- **File:** `platform/config/schema.ts` · **Layer:** validator
+- **Signatures:** `export type ProcessKind = "api" | "worker" | "migrate"`, `export type AppEnv = "development" | "test" | "rehearsal" | "production"`, `export function configSchemaFor(kind: ProcessKind): z.ZodType<Config>`, `export function allConfigKeys(): string[]`, and the `Config` type below.
+- **Variables:** every `*_FILE` variable names a file whose content is the value, with one trailing newline trimmed. **Secret-typed** values are wrapped in `Secret<string>` (F-32). "prod" means `APP_ENV` is `production` or `rehearsal`.
+
+| Variable | Kinds | Rule | `.env.example` |
+| -------- | ----- | ---- | -------------- |
+| `APP_ENV` | all | enum `AppEnv` | `development` |
+| `LOG_LEVEL` | all | `debug\|info\|warn\|error`, default `info` | `debug` |
+| `BUDMON_RELEASE` | all | `^v\d+\.\d+\.\d+(-(hotfix\|infra)\.\d+)?$` or `dev`; default `dev`; prod requires a version | `dev` |
+| `DB_HOST`, `DB_NAME`, `DB_USER` | all | non-empty | `localhost`, `budmon`, `budmon_app` |
+| `DB_PORT` | all | int 1..65535, default 5432 | `5432` |
+| `DB_PASSWORD_FILE` | all | readable file (secret) | `.data/dev-secrets/db_password` |
+| `DB_SSLMODE` | all | `disable\|verify-full`, default `disable`; prod with a worker role `capture` requires `verify-full` | `disable` |
+| `DB_SSL_ROOT_CERT_FILE` | all | required when `verify-full` | (empty) |
+| `DB_POOL_MAX` | all | int 1..50; default api 10, worker 5, migrate 2 | (empty) |
+| `WORKER_ROLES` | worker | comma list, non-empty subset of `capture,general`; prod requires exactly one | `capture,general` |
+| `QUEUE_DB_USER`, `QUEUE_DB_PASSWORD_FILE` | worker with `general` | required; password is secret | `budmon_queue`, `.data/dev-secrets/queue_password` |
+| `QUEUE_POOL_MAX` | worker | int 1..10, default 3 | (empty) |
+| `ROLE_SECRETS_FILE` | migrate | JSON `{ "<role>": { "verifier": "SCRAM-SHA-256$…" } \| { "password": "…" } }` for `budmon_app`, `budmon_capture`, `budmon_queue`, `budmon_monitor`, `budmon_migrator`; prod requires the `verifier` form for every role | `.data/dev-secrets/roles.json` |
+| `PORT`, `HOST` | api | int, default 3000; host default `0.0.0.0` | `3000`, `127.0.0.1` |
+| `PUBLIC_ORIGIN` | api | `https://` URL; development also allows `http://localhost:<port>` | `http://localhost:5173` |
+| `TRUSTED_PROXY` | api | comma list of IPs or CIDRs; prod requires it | (empty) |
+| `CLIENT_MIN_ANDROID`, `CLIENT_LATEST_ANDROID`, `CLIENT_MIN_WEB` | api | int ≥ 0, defaults 0; latest ≥ min | `0` |
+| `ANDROID_DOWNLOAD_URL` | api | `https://` URL, optional | (empty) |
+| `CURSOR_KEY_FILE` | api | base64 of exactly 32 bytes (secret) | `.data/dev-secrets/cursor_key` |
+| `RATE_LIMIT_HMAC_KEY_FILE` | api | base64 of ≥ 32 bytes (secret) | `.data/dev-secrets/rate_limit_key` |
+| `API_SECRETS_KEYS_FILE` | api | JSON `{ "current": "<id>", "keys": { "<id>": "<base64 32 bytes>" } }`, `current ∈ keys`, ids match `^[a-z0-9]{1,16}$` (secret) | `.data/dev-secrets/api_secrets.json` |
+| `CAPTURE_PUBLIC_KEY_FILE` | api, worker | PEM RSA public key ≥ 3072 bits | `.data/dev-secrets/capture_public.pem` |
+| `CAPTURE_KEY_VERSION` | api, worker | `^projects/[^/]+/locations/[^/]+/keyRings/[^/]+/cryptoKeys/[^/]+/cryptoKeyVersions/\d+$` or `^local:\d+$`; prod requires the first form unless `APP_ENV=rehearsal` | `local:1` |
+| `KMS_PROVIDER` | worker with `capture` | `gcp\|local`; `production` requires `gcp`; `rehearsal` allows `local` (DV-2) | `local` |
+| `GCP_CREDENTIALS_FILE` | worker with `capture`, `gcp` | service-account JSON (secret) | (empty) |
+| `CAPTURE_PRIVATE_KEY_FILE` | worker with `capture`, `local` | PEM RSA private key (secret) | `.data/dev-secrets/capture_private.pem` |
+| `GOOGLE_OAUTH_CLIENT_ID` | api, worker with `capture` | non-empty; optional in development and for the api | (empty) |
+| `GOOGLE_OAUTH_CLIENT_SECRET_FILE` | worker with `capture` | secret; required when the client id is set | (empty) |
+| `MAILBOX_HMAC_KEY_FILE` | worker with `capture` | base64 ≥ 32 bytes (secret) | `.data/dev-secrets/mailbox_key` |
+| `FX_PROVIDER` | worker with `general` | `live\|fixed`; prod requires `live` | `fixed` |
+| `FX_PRIMARY_APP_ID_FILE` | worker with `general`, `live` | secret | (empty) |
+| `FX_PRIMARY_BASE_URL`, `FX_FALLBACK_BASE_URL`, `FX_FALLBACK_MIRROR_URL` | worker with `general` | `https://` URLs; defaults `https://openexchangerates.org/api`, `https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@{date}/v1`, `https://{date}.currency-api.pages.dev/v1` | (empty) |
+| `OBJECT_STORE_KIND` | api, worker with `general` | `fs\|s3`; prod requires `s3` | `fs` |
+| `OBJECT_STORE_FS_ROOT` | same, `fs` | path | `.data/objects` |
+| `S3_ENDPOINT`, `S3_REGION`, `S3_BUCKET_EXPORTS`, `S3_BUCKET_ERASURE_LOG` | same, `s3` | URL / non-empty | (empty) |
+| `S3_ACCESS_KEY_ID_FILE`, `S3_SECRET_ACCESS_KEY_FILE` | same, `s3` | secret (api: the read-only presigning key; worker-general: the write keys) | (empty) |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | all | URL, optional (absent: no export) | (empty) |
+| `SENTRY_DSN` | all | URL, optional (absent: no reporting) | (empty) |
+| `DEV_OBJECTS_SIGNING_KEY_FILE` | api in development | base64 ≥ 32 bytes | `.data/dev-secrets/dev_objects_key` |
+
+- **`Config` shape:**
+
+  ```ts
+  { kind; appEnv; logLevel; release;
+    db: { host; port; name; user; password: Secret<string>; sslmode; sslRootCert?: Buffer; poolMax };
+    worker?: { roles: ReadonlySet<"capture" | "general">; queue?: { user; password: Secret<string>; poolMax } };
+    migrate?: { roleSecrets: Record<DbLoginRole, { verifier: string } | { password: Secret<string> }> };
+    api?: { port; host; publicOrigin: URL; trustedProxy: string[]; clientVersions: { minAndroid; latestAndroid; minWeb; androidDownloadUrl?: URL };
+            cursorKey: Secret<Buffer>; rateLimitKey: Secret<Buffer>; apiSecretsKeys: Secret<{ current: string; keys: Map<string, Buffer> }>; devObjectsKey?: Secret<Buffer> };
+    capture?: { publicKeyPem: string; keyVersion: string; kms: { provider: "gcp"; credentials: Secret<object> } | { provider: "local"; privateKeyPem: Secret<string> };
+                oauth?: { clientId: string; clientSecret: Secret<string> }; mailboxHmacKey: Secret<Buffer> };
+    sealing?: { publicKeyPem: string; keyVersion: string };
+    fx?: { provider: "live"; primaryAppId: Secret<string>; primaryBaseUrl: URL; fallbackBaseUrl: string; fallbackMirrorUrl: string } | { provider: "fixed" };
+    objectStore?: { kind: "fs"; root: string } | { kind: "s3"; endpoint: URL; region: string; buckets: { exports: string; erasureLog: string }; accessKeyId: Secret<string>; secretAccessKey: Secret<string> };
+    otlpEndpoint?: URL; sentryDsn?: string }
+  ```
+- **Behaviour:** pure schema. `allConfigKeys()` returns every variable name in the table, sorted.
+
+#### F-11: `loadConfig`
+- **File:** `platform/config/loadConfig.ts` · **Layer:** validator
+- **Signature:** `export function loadConfig(kind: ProcessKind, env: Readonly<Record<string, string | undefined>>, readFile: (path: string) => Buffer [inj]): Config`. Also `export class ConfigError extends Error { readonly problems: readonly { variable: string; rule: string }[] }`.
+- **Behaviour:**
+  1. Reads each `*_FILE` variable that's set through `readFile`.
+  2. Parses with `configSchemaFor(kind)`.
+  3. Applies the production rules in F-10.
+  4. Returns a deep-frozen `Config`.
+- **Errors:** throws `ConfigError` with one problem per failing variable. `rule` is a fixed phrase from the schema ("required", "must be one of: …", "must be an https URL", "file not readable", "must be base64 of 32 bytes", "not allowed in production"). **Values never appear** in `message` or `problems`. Every entry point catches `ConfigError` (F-90 to F-93): it prints `Configuration invalid:` followed by one `  - <VARIABLE>: <rule>` line per problem to stderr, exits with code 78, and opens no port or connection.
+- **Calls:** F-10, F-32 (`Secret`).
+
+#### F-12: `createDatabase`
+- **File:** `platform/db/client.ts` · **Layer:** infrastructure
+- **Signature:** `export function createDatabase(cfg: Config["db"], opts: { applicationName: string; onError?: (err: Error) => void }): Database`
+- **Behaviour:**
+  - Creates a `pg.Pool` with `max = cfg.poolMax`, `application_name = applicationName`, `statement_timeout = 30000`, `idle_in_transaction_session_timeout = 60000` and `ssl = cfg.sslmode === "verify-full" ? { ca: cfg.sslRootCert, rejectUnauthorized: true, servername: cfg.host } : false`.
+  - `handle.db` is `drizzle({ client: pool, schema, casing: "snake_case" })`.
+  - `handle.executeSql` runs `pool.query(text, values)`. `handle.inTransaction = false`.
+  - Pool `error` events go to `opts.onError` (sanitised by the caller).
+  - `close()` ends the pool.
+- **Errors:** none at construction (connections are lazy).
+
+#### F-13: `withTransaction` and `createCommitTracker`
+- **File:** `platform/db/transaction.ts` · **Layer:** infrastructure
+- **Signatures:**
+  ```ts
+  export function withTransaction<T>(database: Database, fn: (tx: DbHandle) => Promise<T>,
+    opts?: { isolation?: "read committed" | "serializable"; tracker?: CommitTracker;
+             sleep?: (ms: number) => Promise<void> /* [inj] */; random?: () => number /* [inj] */ }): Promise<T>;
+  export function createCommitTracker(): CommitTracker;
+  ```
+- **Behaviour:**
+  1. Takes a client from the pool and runs `BEGIN ISOLATION LEVEL <isolation ?? READ COMMITTED>`.
+  2. Builds a `DbHandle` bound to that client (`inTransaction: true`) and calls `fn`.
+  3. On resolve: `COMMIT`, then `tracker?.markCommitted()`, then returns the value.
+  4. On reject: `ROLLBACK` (its own errors are ignored), releases the client, and rethrows.
+  - If the error, or the error raised by `COMMIT`, has SQLSTATE `40001` or `40P01`, the whole `fn` is retried up to **3** times (4 attempts in total) after `sleep(10 + floor(random() × 40))` ms.
+  - Nested calls aren't supported: if `fn` calls `withTransaction` with the same database, the inner call runs in a separate transaction. Services must not do that; review checks it.
+- **Errors:** rethrows the last error after 4 attempts, or any non-retryable error unchanged.
+
+#### F-14: `bootstrapCluster`
+- **File:** `platform/db/clusterBootstrap.ts`, SQL in `platform/db/sql/cluster-bootstrap.sql` · **Layer:** infrastructure
+- **Signature:** `export async function bootstrapCluster(superuser: import("pg").Client, input: { databaseName: string; migrator: { verifier: string } | { password: string } }): Promise<void>`
+- **Behaviour:** idempotent. Creates role `budmon_migrator` (LOGIN CREATEROLE NOINHERIT) if missing and sets its password from the verifier or password. Creates database `databaseName` owned by `budmon_migrator` if missing. In that database it runs `ALTER SCHEMA public OWNER TO budmon_migrator`, `REVOKE CREATE ON SCHEMA public FROM PUBLIC` and `REVOKE ALL ON DATABASE <name> FROM PUBLIC`, `CREATE EXTENSION IF NOT EXISTS amcheck`, `GRANT EXECUTE ON FUNCTION bt_index_check(regclass, boolean) TO budmon_migrator` and `GRANT pg_read_all_data TO budmon_migrator` (all for F-150).
+- **Used by:** the test global setup (with the Testcontainers superuser) and the Postgres image's first-setup script (F-170), which runs the same SQL file through `psql` with `-v` variables.
+- **Errors:** rethrows driver errors.
+
+#### F-15: `applyRolesAndPrivileges`
+- **File:** `platform/db/roles.ts` · **Layer:** infrastructure (schema step 1)
+- **Signature:** `export type DbLoginRole = "budmon_app" | "budmon_capture" | "budmon_queue" | "budmon_monitor" | "budmon_migrator"; export async function applyRolesAndPrivileges(migrator: DbHandle, secrets: Record<DbLoginRole, { verifier: string } | { password: string }>, appEnv: AppEnv): Promise<void>`
+- **Behaviour:** as `budmon_migrator`, idempotently:
+  1. Creates the roles in §3.3 that are missing (`CREATE ROLE … LOGIN NOINHERIT`).
+  2. Runs `GRANT budmon_queue TO budmon_migrator WITH SET TRUE, INHERIT FALSE` and `GRANT pg_monitor TO budmon_monitor`.
+  3. Sets every role's password with `ALTER ROLE <r> PASSWORD $1`. For the verifier form, the value is the literal `SCRAM-SHA-256$…` string, which Postgres stores as is. Validation runs **before any statement**: a verifier must match `^SCRAM-SHA-256\$\d+:[A-Za-z0-9+/=]+\$[A-Za-z0-9+/=]+:[A-Za-z0-9+/=]+$`, and in prod `password` forms are rejected.
+  4. Grants `CONNECT` on the database to all login roles, and `USAGE` on schema `public` to `budmon_app`, `budmon_capture` and `budmon_monitor`.
+- **Errors:** throws `SchemaStepError("invalid_verifier", role)` or `SchemaStepError("password_form_in_production", role)` (plain `Error` subclasses, CLI exit 3). Rethrows driver errors.
+
+#### F-16: `tableGrants` and `applyTableGrants`
+- **File:** `platform/db/grants.ts` · **Layer:** infrastructure (schema step 4)
+- **Signatures:**
+  ```ts
+  export type Privilege = "SELECT" | "INSERT" | "UPDATE" | "DELETE";
+  export interface TableGrant { app: readonly Privilege[]; capture: readonly Privilege[]; credential: boolean }
+  export const tableGrants: Readonly<Record<string, TableGrant>>; // keyed by SQL table name
+  export async function applyTableGrants(migrator: DbHandle, grants?: Readonly<Record<string, TableGrant>>): Promise<void>;
+  ```
+- **Behaviour:**
+  1. For every table in `public`, revokes all privileges from `budmon_app` and `budmon_capture`.
+  2. Grants exactly the listed privileges.
+  3. Grants `USAGE, SELECT` on the table's sequences when `INSERT` is granted.
+  4. `budmon_monitor` gets no table privileges (`pg_monitor` covers statistics).
+
+  Modules add their tables to `tableGrants` in their own slices, through an import of `<module>Grants` merged in `grants.ts`.
+- **Errors:**
+  - A table present in `public` but missing from `grants` throws `SchemaStepError("table_without_grants", table)`.
+  - An entry with `credential: true` and a non-empty `capture` list throws `SchemaStepError("credential_table_granted_to_capture", table)` (HLD D-19 platform rule).
+
+#### F-17: `pushSchemaOntoEmpty`
+- **File:** `platform/db/schemaPush.ts` (development and test only; never imported by `main/migrate.ts`) · **Layer:** infrastructure (schema step 2, push mode)
+- **Signature:** `export async function pushSchemaOntoEmpty(migrator: DbHandle): Promise<{ statements: number }>`
+- **Behaviour:**
+  1. Checks that `public` holds no tables. Then computes SQL with `drizzle-kit/api`'s `generateMigration(generateDrizzleJson({}), generateDrizzleJson(schema, undefined, "snake_case"))`. With an empty "from" there are no rename ambiguities and therefore no prompt.
+  2. Executes the statements in one transaction, then `ALTER TABLE "rate_limit_counters" SET UNLOGGED`.
+- **Errors:** a non-empty `public` throws `PushTargetNotEmptyError` (message lists up to 5 table names).
+
+#### F-18: `applyCommittedMigrations`
+- **File:** `platform/db/migrations.ts` · **Layer:** infrastructure (schema step 2, migrate mode)
+- **Signature:** `export async function applyCommittedMigrations(database: Database, migrationsFolder: string): Promise<{ applied: number; verified: number }>`, and `export function readJournal(migrationsFolder: string): { tag: string; when: number; hash: string }[]`
+- **Behaviour:**
+  1. `readJournal` reads `meta/_journal.json`; `hash` is the SHA-256 hex of each `<tag>.sql` (Drizzle's algorithm).
+  2. If `drizzle.__drizzle_migrations` exists, every row's `(hash, created_at)` must match a journal entry's `(hash, when)`.
+  3. Then runs `migrate(drizzle(pool), { migrationsFolder })` (all pending migrations in one transaction).
+  4. Returns the count newly applied and the count verified.
+- **Errors:** a recorded migration missing from the image throws `UnknownMigrationError` (CLI exit 4). Migration SQL errors are rethrown (CLI exit 5).
+
+#### F-19: `runSchemaStep`
+- **File:** `platform/db/schemaStep.ts` · **Layer:** service
+- **Signature:** `export async function runSchemaStep(input: { mode: "migrate" | "push"; database: Database /* as budmon_migrator */; migrationsFolder: string; roleSecrets: Record<DbLoginRole, { verifier: string } | { password: string }>; appEnv: AppEnv; jobRegistry: JobRegistry; referenceData: ReferenceData; logger: Logger }): Promise<SchemaStepReport>`, where `SchemaStepReport = { migrationsApplied: number; pushedStatements: number; queueSchema: "installed" | "upgraded" | "current"; currenciesUpserted: number; queuesCreated: number; queuesUpdated: number }`.
+- **Behaviour, in order:**
+  1. F-15.
+  2. `push` → F-17; `migrate` → F-18.
+  3. F-74 (queue schema, as `SET ROLE budmon_queue`).
+  4. F-16, plus `pgboss` default privileges (F-74).
+  5. F-21.
+  6. F-75 (queue sync).
+
+  Each step is logged with `event: "schema_step"`, `step` and `durationMs`. The step stops at the first failure; earlier steps aren't undone (each is idempotent).
+- **Errors:** propagates the step's error.
+
+#### F-20: `resetDevelopmentDatabase`
+- **File:** `platform/db/reset.ts`; CLI `main/dbReset.ts` (`pnpm db:reset`) · **Layer:** service
+- **Signature:** `export async function resetDevelopmentDatabase(input: { appEnv: AppEnv; superuserUrl: string; databaseName: string; migratorPassword: string; roleSecrets: …; seed: boolean }, deps: { runSchemaStep: typeof runSchemaStep [inj]; seed: (c: WorkerContainer) => Promise<void> [inj] }): Promise<void>`
+- **Behaviour:**
+  1. Guard (before any connection): `appEnv` must be `development` or `test`, and the host of `superuserUrl` must be `localhost`, `127.0.0.1`, `::1` or `host.docker.internal`, or the env `TESTCONTAINERS=1` must be set.
+  2. Terminates connections to `databaseName`, drops it (`WITH (FORCE)`), then F-14, then F-19 with `mode: "push"`, then the seeders when `seed` is true.
+  3. `superuserUrl` comes from `DEV_SUPERUSER_URL` (development only; `.env.example`: `postgres://postgres:postgres@localhost:5432/postgres`). The dev roles' passwords come from `.data/dev-secrets/roles.json`, which `pnpm dev` creates with random values on first run.
+- **Errors:** a failed guard throws `ResetRefusedError` (exit 2, message "db:reset only runs against a local development or test database"). Otherwise rethrows.
+
+#### F-21: `loadReferenceData`
+- **File:** `platform/db/referenceData.ts` · **Layer:** repo
+- **Signature:** `export interface ReferenceData { currencies: readonly { code: string; name: string; minorUnits: number; active: boolean }[] }; export async function loadReferenceData(migrator: DbHandle, data: ReferenceData): Promise<{ upserted: number }>`
+- **Behaviour:** in one transaction: inserts missing currencies, and updates `name`, `is_active` and `updated_at` for existing ones where they differ. Never deletes. A row whose `minor_units` differs from the file is an error.
+- **Errors:** throws `SchemaStepError("minor_units_changed", code)` and rolls back.
+
+#### F-22: `main/dev.ts` (`pnpm dev`)
+- **Behaviour:**
+  1. `docker compose -f infra/compose.yaml up -d`; waits up to 60 s for `pg_isready`.
+  2. Creates `.data/dev-secrets/*` with random values if missing, plus an RSA-3072 key pair for `capture_*`.
+  3. If database `budmon` doesn't exist, runs F-20 with `seed: true`.
+  4. Starts `tsx watch src/main/api.ts`, `tsx watch src/main/worker.ts` (`WORKER_ROLES=capture,general`) and `vite` (web) with prefixed output. Ctrl-C stops all three.
+- **Errors:** Docker not running → prints "Docker isn't running" and exits 1.
+
+#### F-23: seed framework
+- **File:** `platform/db/seed.ts` · **Layer:** service
+- **Signature:** `export interface Seeder { name: string; run(c: WorkerContainer): Promise<void> }; export const seeders: Seeder[]; export async function runSeeders(c: WorkerContainer, list?: readonly Seeder[]): Promise<void>`
+- **Behaviour:** runs seeders sequentially. Each must be idempotent. The platform registers `platform.fx-rates` (§3.4).
+
+### 4.4 Observability and privacy layers (S-3)
+
+#### F-30: safe log fields
+- **File:** `platform/observability/safeFields.ts` · **Layer:** validator
+- **Signatures:**
+  ```ts
+  export type FieldKind = "id" | "token" | "route" | "count" | "duration" | "bool" | "errorKey" | "date";
+  export const SAFE_LOG_FIELDS: Readonly<Record<string, FieldKind>>;
+  export type SafeFieldName = keyof typeof SAFE_LOG_FIELDS;
+  export type SafeFields = Partial<Record<SafeFieldName, string | number | boolean>>;
+  export function sanitizeFields(fields: Readonly<Record<string, unknown>>): { fields: Record<string, string | number | boolean>; dropped: number };
+  ```
+- **The closed set** (modules add entries only through an amendment to this file):
+
+  | Kind | Fields |
+  | ---- | ------ |
+  | `id` | `requestId`, `traceId`, `spanId`, `userId`, `entityId`, `jobId` |
+  | `token` | `event`, `step`, `jobName`, `queue`, `method`, `statusClass`, `errorClass`, `errorCode`, `clientKind`, `module`, `outcome`, `provider`, `currency`, `service`, `release`, `role`, `limiter`, `signal`, `reason` |
+  | `route` | `route` |
+  | `count` | `status`, `count`, `attempt`, `clientVersion`, `dropped`, `inserted`, `rejected` |
+  | `duration` | `durationMs` |
+  | `bool` | `retryable`, `replayed`, `provisional` |
+  | `errorKey` | `errorKey` |
+  | `date` | `rateDate` |
+- **Value rules per kind:**
+  - `id` and `token`: `^[A-Za-z0-9_.:-]{1,64}$`;
+  - `route`: `^/[A-Za-z0-9_./:{}-]{0,200}$`;
+  - `count`: a non-negative safe integer;
+  - `duration`: a finite number ≥ 0;
+  - `bool`: a boolean;
+  - `errorKey`: `^[A-Z][A-Z0-9_]{1,63}$`;
+  - `date`: `^\d{4}-\d{2}-\d{2}$`.
+- **Behaviour:** unknown keys are removed. Known keys with an invalid value are replaced by the string `"[invalid]"`. `dropped` counts both.
+
+#### F-31: `createLogger`
+- **File:** `platform/observability/logger.ts` · **Layer:** infrastructure
+- **Signature:**
+  ```ts
+  export interface Logger {
+    debug(event: string, fields?: SafeFields): void;
+    info(event: string, fields?: SafeFields): void;
+    warn(event: string, fields?: SafeFields, err?: unknown): void;
+    error(event: string, fields?: SafeFields, err?: unknown): void;
+    child(bindings: SafeFields): Logger;
+  }
+  export function createLogger(opts: { service: string; release: string; level: "debug" | "info" | "warn" | "error";
+    destination?: import("pino").DestinationStream /* [inj] */; onDrop?: (n: number) => void }): Logger;
+  ```
+- **Behaviour:**
+  - Writes one JSON line per call through pino. Fixed keys: `level` (string), `time` (ISO 8601 UTC), `service`, `release`, `event`.
+  - Then the sanitised fields (F-30), then `err` (F-33's `SanitizedError`) when given.
+  - An `event` not matching the `token` rule is written as `"invalid_event"` and counted as dropped.
+  - `onDrop(n)` is called with F-30's `dropped` when > 0, and the line gets `dropped: n`.
+  - pino is configured with `base: null`, no `hostname`/`pid`, and serializers that never print other properties.
+- **Errors:** none (never throws on bad input).
+
+#### F-32: `Secret`
+- **File:** `platform/observability/redaction.ts`
+- **Signature:** `export class Secret<T> { static of<T>(value: T): Secret<T>; reveal(): T; toString(): "[redacted]"; toJSON(): "[redacted]"; [Symbol.for("nodejs.util.inspect.custom")](): "[redacted]" }`
+- **Behaviour:** the value lives in a private field (`#value`). `JSON.stringify`, template literals, `util.inspect` and `console.log` of a `Secret`, or of an object containing one, show `[redacted]`.
+
+#### F-33: `sanitizeError`
+- **File:** `platform/observability/sanitize.ts`
+- **Signature:** `export interface SanitizedError { class: string; key?: string; code?: string; status?: number; reason?: string; frames: string[] }; export function sanitizeError(err: unknown): SanitizedError`
+- **Behaviour:**
+  - **`class`:** `err.constructor.name` for `Error` instances; `"NonError"` otherwise.
+  - **`key`:** for `BudmonError`.
+  - **`code`:** a Postgres error's `code` (SQLSTATE `^[0-9A-Z]{5}$`), or a Node system error's `code` (`^E[A-Z0-9_]{1,30}$`).
+  - **`status`:** an integer 100..599, from `err.status`, `err.response.status` or `err.statusCode`.
+  - **`reason`:** for Google client errors (`GaxiosError`, or any object with `response.data.error`), the first of `response.data.error.errors[0].reason` and `response.data.error.status` that matches the `token` rule.
+  - **`frames`:** the `err.stack` lines beginning with `    at `, trimmed, at most 30. A frame line is kept only if it matches `^at [^()]{0,200}( \([^()]*:\d+:\d+\))?$`; other lines (which could contain message text) are dropped.
+  - `message`, `detail`, `where`, `parameters`, `config`, `cause`, `response.data` and every other property are **never** copied. `AggregateError` and `cause` chains contribute nothing beyond the top-level class.
+- **Errors:** none.
+
+#### F-34: `initSentry` and `ErrorReporter`
+- **File:** `platform/observability/sentry.ts`, `platform/observability/errorReporter.ts`
+- **Signatures:**
+  ```ts
+  export interface ErrorContext { requestId?: string; userId?: string; route?: string; jobName?: string; errorKey?: string }
+  export interface ErrorReporter { report(err: unknown, ctx: ErrorContext): void; flush(timeoutMs: number): Promise<void> }
+  export function initSentry(cfg: { dsn?: string; environment: AppEnv; release: string; service: string; httpsProxy?: string }): ErrorReporter;
+  export function createMemoryErrorReporter(): ErrorReporter & { readonly events: readonly Record<string, unknown>[] }; // tests and the canary suite
+  ```
+- **Behaviour:**
+  - Without a DSN, `report` is a no-op.
+  - With a DSN: `Sentry.init({ dsn, environment, release, sendDefaultPii: false, includeLocalVariables: false, maxBreadcrumbs: 20, defaultIntegrations: false, integrations: [linkedErrorsIntegration({ limit: 1 }), onUncaughtExceptionIntegration(), onUnhandledRejectionIntegration()], beforeSend: scrubSentryEvent, beforeBreadcrumb: scrubBreadcrumb, transportOptions: { proxy: httpsProxy } })`. No request-data, console, HTTP-body or local-variables integrations.
+  - `report` builds the event from F-33 only: `exception.values[0] = { type: s.class, value: s.key ?? s.code ?? s.class, stacktrace: frames parsed to { function, filename, lineno, colno } }`. Tags `route`, `job`, `error_key`; `user: { id: userId }`. It never passes the original error object to Sentry.
+- **Calls:** F-33, F-35.
+
+#### F-35: `scrubSentryEvent` and `scrubBreadcrumb`
+- **File:** `platform/observability/sentry.ts`
+- **Signatures:** `export function scrubSentryEvent(event: Record<string, unknown>): Record<string, unknown> | null`, `export function scrubBreadcrumb(b: Record<string, unknown>): Record<string, unknown> | null`
+- **Behaviour:**
+  - `scrubSentryEvent` returns a new object with only:
+    - `event_id`, `timestamp`, `platform`, `level`, `release`, `environment`;
+    - `exception.values[].{type, value, stacktrace.frames[].{filename, function, lineno, colno, in_app}}`;
+    - `tags` restricted to `route`, `job`, `client_kind`, `error_key`;
+    - `user.id`;
+    - `contexts.trace.{trace_id, span_id}`;
+    - `breadcrumbs.values[]` passed through `scrubBreadcrumb`.
+
+    Any `value` that doesn't match the `token` rule is replaced by the `type`.
+  - `scrubBreadcrumb` keeps only `category ∈ {"http", "navigation"}` with `data.url` reduced to scheme, host and path (F-37), `data.method` and `data.status_code`, plus `timestamp`, `type` and `level`. Anything else returns `null`.
+
+#### F-36: `startTelemetry`
+- **File:** `platform/observability/otel.ts`
+- **Signature:** `export function startTelemetry(cfg: { endpoint?: URL; service: string; release: string; environment: AppEnv }, deps: { onDrop: (signal: "traces" | "metrics", n: number) => void }): { metrics: Metrics; shutdown(): Promise<void> }`
+- **Behaviour:**
+  - Starts the NodeSDK with resource attributes `service.name`, `service.version` and `deployment.environment.name`.
+  - Instrumentations: `http` (incoming `ignoreIncomingRequestHook` for `/health/*`; `headersToSpanAttributes` empty), `undici`, `pg` (`enhancedDatabaseReporting: false`, `requireParentSpan: true`) and `@fastify/otel`. pg-boss's built-in tracing is enabled.
+  - Traces go through `AllowlistSpanExporter(OTLPTraceExporter)` (F-40). Metrics use `PeriodicExportingMetricReader` every 60 s.
+  - Without an `endpoint`, providers are created without exporters, so instruments work and nothing leaves the process.
+  - The W3C trace-context propagator is enabled.
+- **Calls:** F-40, F-41.
+
+#### F-37: `stripQuery`
+- **File:** `platform/observability/sanitize.ts`
+- **Signature:** `export function stripQuery(url: string): string`
+- **Behaviour:** returns `scheme://host[:port]/path` without query or fragment. An unparseable input returns `"[invalid-url]"`.
+
+#### F-38: request log hook
+- **File:** `platform/observability/requestLog.ts`
+- **Signature:** `export function registerRequestLog(app: FastifyInstance, deps: { logger: Logger; metrics: PlatformMetrics }): void`
+- **Behaviour:**
+  - On `onResponse`, logs `info("http_request", { method, route, status, statusClass, durationMs, clientKind, clientVersion, requestId, userId })`. `route` is the matched route template: oRPC's matched OpenAPI path (from `request.orpcRoute` set by F-55), Fastify's `routeOptions.url` for non-oRPC routes, or `"unmatched"`.
+  - Increments `http_server_requests_total` and records `http_server_duration_seconds`.
+  - `/health/live` and `/health/ready` are logged at `debug`.
+
+#### F-40: `AllowlistSpanExporter`
+- **File:** `platform/observability/otel.ts`
+- **Signature:** `export class AllowlistSpanExporter implements SpanExporter { constructor(inner: SpanExporter, allowlist: ReadonlySet<string>, onDrop: (n: number) => void); export(spans: ReadableSpan[], cb): void; shutdown(): Promise<void> }`
+- **Behaviour:**
+  - For each span, copies only allowlisted attribute keys and drops all span **events** (exception events carry messages). The span status message is set to `""`. `url.path` is passed through F-37's path rule.
+  - Sums the removed attributes and events into `onDrop`.
+  - Span names are left as is, because the instrumentations use route templates and SQL operation names.
+  - **Allowlist:** `http.request.method`, `http.response.status_code`, `http.route`, `url.scheme`, `url.path`, `server.address`, `server.port`, `network.protocol.version`, `db.system.name`, `db.namespace`, `db.operation.name`, `db.collection.name`, `db.query.text` (parameterised by `pg`, D-24 rule 6), `rpc.system`, `rpc.method`, and `budmon.job.name`, `budmon.queue`, `budmon.error.key`, `budmon.outcome`, `budmon.client.kind`.
+
+#### F-41: `createMetrics`
+- **File:** `platform/observability/metrics.ts`
+- **Signatures:**
+  ```ts
+  export const METRIC_LABELS: ReadonlySet<string>; // service, environment, http_route, method, status_class, client_kind, queue, job_state,
+                                                   // module, error_key, source_kind, connection_status, age_bucket, signal, limiter, provider
+  export interface Metrics {
+    counter(name: string, opts: { description: string; labels: readonly string[] }): { add(n: number, labels: Record<string, string>): void };
+    histogram(name: string, opts: { description: string; labels: readonly string[]; buckets: readonly [number, number, number, number, number, number] }): { record(v: number, labels: Record<string, string>): void };
+    observableGauge(name: string, opts: { description: string; labels: readonly string[] }, observe: () => readonly { value: number; labels: Record<string, string> }[]): void;
+  }
+  export function createMetrics(meter: import("@opentelemetry/api").Meter, onDrop: (n: number) => void): Metrics;
+  ```
+- **Behaviour:** instrument names must match `^[a-z][a-z0-9_]{2,63}$`. At record time, labels not declared for the instrument are removed, and values not matching the `token` rule are replaced by `"invalid"`. Each removal or replacement calls `onDrop(1)`.
+- **Errors:** registration with a label outside `METRIC_LABELS`, or an invalid name, throws `Error("metric definition invalid: <name>")` (a programming error, caught by unit tests).
+
+#### F-42: `registerPlatformMetrics`
+- **File:** `platform/observability/metrics.ts`
+- **Signature:** `export function registerPlatformMetrics(m: Metrics): PlatformMetrics`
+- **Behaviour:** registers and returns typed handles for:
+
+  | Metric | Labels |
+  | ------ | ------ |
+  | `http_server_requests_total` | `http_route`, `method`, `status_class`, `client_kind` |
+  | `http_server_duration_seconds` (buckets 0.05, 0.1, 0.3, 0.8, 2, 5) | `http_route`, `method` |
+  | `jobs_processed_total` | `queue`, `job_state` (`completed\|failed`) |
+  | `job_duration_seconds` (buckets 0.1, 1, 5, 30, 120, 600) | `queue` |
+  | `jobs_dead_lettered_total` | `queue` |
+  | `queue_depth` (observable) | `queue` |
+  | `worker_heartbeat_timestamp_seconds` (observable) | `service` |
+  | `telemetry_attributes_dropped_total` | `signal` (`logs\|traces\|metrics`) |
+  | `rate_limited_total` | `limiter` |
+  | `idempotent_replays_total` | (none) |
+  | `client_update_required_total` | `client_kind` |
+  | `kms_errors_total` | (none) |
+  | `fx_rates_fetched_total`, `fx_rates_rejected_total` | `provider` |
+  | `fx_backfill_missing_total` | (none) |
+  | `fx_last_day_timestamp_seconds` (observable) | (none) |
+  | `reconcile_corrections_total` | `module` |
+
+### 4.5 Error model and the API server (S-4)
+
+#### F-50: `BudmonError`
+- **File:** `platform/errors/BudmonError.ts` · **Layer:** domain
+- **Signature:** `export class BudmonError<D extends Record<string, unknown> | undefined = undefined> extends Error { readonly key: string; readonly status: number; readonly details: D; constructor(key: string, status: number, message?: string, details?: D) }`
+- **Behaviour:** keeps the existing class's shape (CR §4.1); `toSerializable()` and the Express handler are removed. `message` defaults to `key`. `name` is the subclass name.
+- **Errors:** a `key` not matching `^[A-Z][A-Z0-9_]{1,63}$`, or a `status` outside 400..599, throws `TypeError`.
+
+#### F-51: platform errors
+- **File:** `platform/errors/platformErrors.ts`
+- **Signature:** one class per row of §6 with these constructors: `ValidationFailedError(issues: readonly Issue[])`, `UnauthenticatedError()`, `ForbiddenError()`, `NotFoundError()`, `ConflictError(details?: Record<string, string>)`, `IdempotencyKeyReusedError()`, `PayloadTooLargeError()`, `RateLimitedError(retryAfterSeconds: number)`, `ClientUpdateRequiredError(minimumVersion: number)`, `ServiceUnavailableError(outcome: Outcome)`. Types: `export interface Issue { path: (string | number)[]; code: string; message: string }`, `export type Outcome = "not_applied" | "unknown"`.
+- **Behaviour:** each sets the key, status and fixed developer message from §6.
+
+#### F-52: `mapError` and `createErrorInterceptor`
+- **File:** `platform/errors/interceptor.ts`
+- **Signatures:**
+  ```ts
+  export function mapError(err: unknown, state: { committed: boolean }): { error: ORPCError<string, unknown>; report: boolean };
+  export function createErrorInterceptor(deps: { reporter: ErrorReporter; logger: Logger }): Interceptor; // oRPC server interceptor, registered on the OpenAPIHandler
+  ```
+- **Behaviour of `mapError`** (`outcome = state.committed ? "unknown" : "not_applied"`):
+  1. `BudmonError` → `new ORPCError(key, { status, message, data: details, defined: true })`, `report: false`.
+  2. An oRPC input validation failure (`ORPCError` with code `BAD_REQUEST` whose `cause` is `ValidationError`) → `VALIDATION_FAILED` 400 with `data.issues` built from `cause.issues`: `path` from the issue path, `code` from the zod issue `code`, `message` = the zod default message for that code **without** input values (fixed per code: `invalid_type` "Invalid type", `too_small` "Too small", `too_big` "Too big", `invalid_format` "Invalid format", `invalid_value` "Invalid value", `unrecognized_keys` "Unknown field", `custom` "Invalid value", others "Invalid value"). The `cause` is not attached. `report: false`.
+  3. An oRPC output validation failure (`INTERNAL_SERVER_ERROR` with a `ValidationError` cause) → `INTERNAL` 500 with `data: { outcome }`, `report: true` (reported with issue paths and codes only).
+  4. An `ORPCError` with code `NOT_FOUND` (unmatched route) → `NOT_FOUND` 404, `report: false`. Other oRPC built-in errors (`METHOD_NOT_SUPPORTED`, …) → `NOT_FOUND` 404.
+  5. A Postgres error with SQLSTATE `57P01`, `57P02`, `57P03`, `53300`, or a Node error `ECONNREFUSED`/`ETIMEDOUT`/`ECONNRESET` from `pg` → `SERVICE_UNAVAILABLE` 503 with `data: { outcome }`, `report: true`.
+  6. Anything else → `INTERNAL` 500 with message "Internal error" and `data: { outcome }`, `report: true`.
+- **Behaviour of the interceptor:** wraps every procedure call. On error, calls `mapError` with the request's `commitTracker`. If `report`, calls `reporter.report(err, { requestId, userId, route })` and logs `error("request_failed", { errorKey, requestId, route })` with the error. Rethrows the mapped `ORPCError`. For `RATE_LIMITED` it also sets `Retry-After: <retryAfterSeconds>` on the response.
+- **Calls:** F-34, F-31, F-33.
+
+#### F-53: procedure bases
+- **File:** `platform/http/procedures.ts` · **Layer:** router
+- **Signatures:**
+  ```ts
+  export const base: ImplementerInternal<typeof contract, RequestContext, RequestContext>; // implement(contract).$context<RequestContext>()
+  export const publicProcedure: typeof base;
+  export const authedProcedure: …;  // base.use(requireAuth): ctx.principal: Principal (non-null)
+  export const ownerProcedure: …;   // authed + requireOwner
+  export const PUBLIC_PROCEDURES: ReadonlySet<string>; // dotted contract paths; platform: { "meta.clientConfig" }
+  ```
+- **Behaviour:** `requireAuth` throws `UnauthenticatedError` when `principal` is null. `requireOwner` throws `ForbiddenError` when `!principal.isOwner`. Modules implement procedures only from these bases. Procedures on `publicProcedure` must be listed in `PUBLIC_PROCEDURES`; modules add entries in their own slices.
+
+#### F-54: `AuthHook`
+- **File:** `platform/http/context.ts`
+- **Signature:** `export interface AuthHook { authenticate(req: { headers: Readonly<Record<string, string | undefined>>; cookies: Readonly<Record<string, string>> }): Promise<Principal | null> }; export const noAuthHook: AuthHook`
+- **Behaviour:** `noAuthHook.authenticate` resolves `null`. `identity` provides the real hook through the container (F-96) and owns its errors. A hook that throws is treated as an unexpected error (F-52 rule 6).
+
+#### F-55: `createApiServer`
+- **File:** `platform/http/server.ts` · **Layer:** router (composition)
+- **Signature:** `export async function createApiServer(c: ApiContainer, opts?: { contract?: AnyContractRouter; router?: Router<any, RequestContext> }): Promise<import("fastify").FastifyInstance>`. `opts` defaults to the application's contract and router; tests pass test-only contracts and routers (S-4 AC 1).
+- **Behaviour,** in registration order:
+  1. `Fastify({ logger: false, disableRequestLogging: true, trustProxy: c.config.api.trustedProxy.length ? c.config.api.trustedProxy : false, bodyLimit: 102400, connectionTimeout: 30000, requestTimeout: 30000, return503OnClosing: true, genReqId: () => <request id per RequestContext> })`.
+  2. F-61 (headers), F-62 (body handling), the coarse in-memory rate limit (F-65's global part), `@fastify/cookie`.
+  3. The `onRequest` hook builds the request context: parses `X-Budmon-Client` (F-56), creates the commit tracker (F-13), calls `authHook.authenticate`, and binds a child logger with `requestId`.
+  4. F-57 health routes (`GET /health/live`, `GET /health/ready`).
+  5. `OpenAPIHandler` from `@orpc/openapi/fastify` for the implemented router (`platform` plus modules' routers), with `prefix: "/api/v1"`, plugins `ResponseHeadersPlugin` and `RequestHeadersPlugin`, interceptors F-52, F-56's middleware, and the `X-Budmon-API-Version` setter. It's mounted with a Fastify catch-all `app.all("/api/v1/*", …)` that passes `request.raw`/`reply.raw` and the context.
+  6. In development only, F-145's dev objects route.
+  7. F-38 (request log).
+  8. The `onSend` hook adds `X-Request-Id: <requestId>` to every response and `X-Budmon-API-Version: 1.<API_MINOR>` (F-341) to every `/api/v1/*` response.
+
+  CORS isn't registered; `OPTIONS` requests to `/api/v1/*` return `404 NOT_FOUND` (D-36).
+- **Errors:** a plugin registration failure rejects (the entry point exits 1).
+
+#### F-56: client version check
+- **File:** `platform/http/clientVersion.ts`
+- **Signatures:** `export function parseClientHeader(value: string | undefined): { kind: ClientKind; version: number | null }`, `export function clientVersionMiddleware(versions: Config["api"]["clientVersions"]): Middleware`
+- **Behaviour:**
+  - `parseClientHeader`: `^(android|web)/(\d{1,10})$` → `{ kind, version }`; missing or malformed → `{ kind: "other", version: null }`.
+  - The middleware runs for every procedure except `meta.clientConfig`. For `android` with `version < minAndroid`, or `web` with `version < minWeb`, it throws `ClientUpdateRequiredError(min)` and increments `client_update_required_total`. `other` is never blocked.
+
+#### F-57: health and readiness
+- **File:** `platform/http/health.ts`
+- **Signatures:** `export function schemaWindow(applied: readonly { hash: string; createdAt: number }[], journal: readonly { hash: string; when: number }[]): "ok" | "behind" | "ahead"`, `export async function checkReadiness(deps: { db: Database; appEnv: AppEnv; journal: readonly { hash: string; when: number }[]; timeoutMs?: number }): Promise<{ ready: true } | { ready: false; reason: "database_unreachable" | "schema_behind" | "schema_ahead" }>`, `export function registerHealthRoutes(app: FastifyInstance, deps: …): void`
+- **Behaviour:**
+  - `schemaWindow`:
+    - `"behind"` if any journal entry isn't applied;
+    - `"ahead"` if more than **one** applied entry is missing from the journal;
+    - otherwise `"ok"`.
+  - `checkReadiness`:
+    1. `SELECT 1` with a 2 s timeout; failure → `database_unreachable`.
+    2. In `development`/`test`, or if `drizzle.__drizzle_migrations` doesn't exist and the journal is empty → ready.
+    3. Otherwise reads the migrations table (`hash`, `created_at`) and applies `schemaWindow`.
+  - Routes:
+    - `GET /health/live` → `200 {"status":"ok"}`.
+    - `GET /health/ready` → `200 {"status":"ready"}` or `503 {"status":"not_ready","reason":"<reason>"}`.
+
+    Neither route is in the contract or behind auth; both send `Cache-Control: no-store`. The journal comes from F-18's `readJournal` on the image's `drizzle/` folder.
+
+#### F-58: `meta.clientConfig` handler
+- **File:** `platform/http/meta.ts` · **Layer:** router
+- **Signature:** `export const metaRouter = { clientConfig: publicProcedure.meta.clientConfig.handler(({ context }) => …) }`
+- **Behaviour:** returns `{ apiVersion: "1.<API_MINOR>", android: { minimumVersionCode, latestVersionCode, downloadUrl: string | null }, web: { minimumBuild } }` from configuration. Never blocked by F-56.
+
+### 4.6 Security baseline (S-5)
+
+#### F-61: `registerSecurityHeaders`
+- **File:** `platform/security/headers.ts`
+- **Signature:** `export async function registerSecurityHeaders(app: FastifyInstance): Promise<void>`
+- **Behaviour:** registers `@fastify/helmet` with:
+  - `contentSecurityPolicy: { directives: { "default-src": ["'none'"], "frame-ancestors": ["'none'"] } }`;
+  - `strictTransportSecurity: { maxAge: 31536000, includeSubDomains: true }`;
+  - `referrerPolicy: { policy: "no-referrer" }`;
+  - `crossOriginResourcePolicy: { policy: "same-origin" }`;
+  - `xContentTypeOptions` on.
+
+  The SPA's own CSP is set by Caddy (§7.6).
+
+#### F-62: `registerBodyHandling`
+- **File:** `platform/security/headers.ts`
+- **Signature:** `export function registerBodyHandling(app: FastifyInstance): void`
+- **Behaviour:**
+  - Replaces the JSON content-type parser for `application/json`. Malformed JSON → `400` with the platform envelope: `VALIDATION_FAILED`, `data.issues = [{ path: [], code: "invalid_json", message: "Request body is not valid JSON." }]`. The parser's own message isn't used.
+  - A body over 100 kB → `413 PAYLOAD_TOO_LARGE`.
+  - An unsupported content type on `POST`/`PUT`/`PATCH` → `400 VALIDATION_FAILED` with issue code `unsupported_media_type` (not 415, so clients handle one error key).
+
+  These are written with `setErrorHandler` for Fastify-level errors only (oRPC errors never reach it). Fastify-level errors of any other kind → `500 INTERNAL` `{ outcome: "not_applied" }`, reported.
+
+#### F-63: `createRateLimiter`
+- **File:** `platform/security/rateLimiter.ts` · **Layer:** service
+- **Signature:** `export interface RateLimitSpec { limiter: string; limit: number; windowSeconds: number }; export interface RateLimiter { hit(spec: RateLimitSpec, subject: string): Promise<{ allowed: boolean; retryAfterSeconds: number; hits: number }> }; export function createRateLimiter(deps: { db: Database; key: Buffer; clock: Clock }): RateLimiter`
+- **Behaviour:**
+  - `windowStart = floor(now / windowSeconds) × windowSeconds`.
+  - `bucketKey = limiter + ":" + base64url(HMAC-SHA-256(key, subject))`.
+  - Calls F-64 `incrementWindow` with `expiresAt = windowStart + 2 × windowSeconds`, in autocommit (not inside the caller's transaction, so a rolled-back request still counts).
+  - `allowed = hits ≤ limit`; `retryAfterSeconds = ceil(windowStart + windowSeconds − now)` (≥ 1) when not allowed, else 0.
+- **Errors:** an invalid `limiter` (not the `token` rule) or `limit < 1` throws `RangeError`. Database errors propagate (→ 503 through F-52).
+
+#### F-64: `rateLimitRepo`
+- **File:** `platform/security/rateLimitRepo.ts` · **Layer:** repo
+- **Signatures:** `export async function incrementWindow(h: DbHandle, bucketKey: string, windowStart: Date, expiresAt: Date): Promise<number>`, `export async function deleteExpired(h: DbHandle, now: Date, batchSize: number): Promise<number>`
+- **Behaviour:**
+  - `incrementWindow`: `INSERT … VALUES ($1,$2,1,$3) ON CONFLICT (bucket_key, window_start) DO UPDATE SET hits = rate_limit_counters.hits + 1 RETURNING hits`.
+  - `deleteExpired`: deletes up to `batchSize` rows with `expires_at < now` (`ctid IN (SELECT … LIMIT n)`) and returns the count.
+
+#### F-65: `rateLimited` middleware and the coarse limit
+- **File:** `platform/security/rateLimiter.ts`
+- **Signatures:** `export function rateLimited(...rules: { spec: RateLimitSpec; subject: (input: unknown, ctx: RequestContext) => string | null }[]): Middleware`, `export async function registerCoarseRateLimit(app: FastifyInstance): Promise<void>`
+- **Behaviour:**
+  - `rateLimited`: for each rule with a non-null subject (`ctx.ip`, or a value derived from the input such as a lower-cased email), calls `hit`. The first rule that isn't allowed throws `RateLimitedError(retryAfterSeconds)` and increments `rate_limited_total{limiter}`. Otherwise it continues.
+  - `registerCoarseRateLimit`: `@fastify/rate-limit` with `{ global: true, max: 300, timeWindow: 60000, keyGenerator: (req) => req.ip, allowList: (req) => req.url.startsWith("/health/"), errorResponseBuilder: (_, ctx) => platformEnvelope(429, "RATE_LIMITED", { retryAfterSeconds: Math.ceil(ctx.ttl / 1000) }) }` and the `Retry-After` header.
+
+#### F-66: hashing utilities
+- **File:** `platform/security/hashing.ts`
+- **Signatures:**
+  ```ts
+  export async function hashSecret(plain: string): Promise<string>;              // Argon2id, m=19456 KiB, t=2, p=1, 16-byte salt, PHC string
+  export async function verifySecret(phc: string, plain: string): Promise<boolean>;
+  export function hmacSha256(key: Buffer, data: string | Buffer): Buffer;
+  export function timingSafeEqualBytes(a: Uint8Array, b: Uint8Array): boolean;  // false on length mismatch, constant time otherwise
+  export function randomToken(bytes?: number): string;                          // default 32; base64url without padding
+  export function sha256(data: string | Buffer): Buffer;
+  ```
+- **Errors:** `verifySecret` with a malformed PHC string returns `false` (it doesn't throw). `randomToken` with `bytes` outside 16..64 throws `RangeError`.
+
+### 4.7 Jobs and workers (S-6)
+
+#### F-70: `defineJob`
+- **File:** `platform/queue/jobs.ts`
+- **Signature:**
+  ```ts
+  export type WorkerRole = "capture" | "general";
+  export interface JobDefinition<P> { readonly name: string; readonly role: WorkerRole; readonly payload: z.ZodType<P>;
+    readonly retryLimit: number; readonly retryDelaySeconds: number; readonly retryBackoff: boolean;
+    readonly expireInSeconds: number; readonly policy: "standard" | "stately" | "singleton" | "short"; readonly cron?: string }
+  export function defineJob<P>(def: { name: string; role: WorkerRole; payload: z.ZodType<P> } & Partial<Omit<JobDefinition<P>, "name" | "role" | "payload">>): JobDefinition<P>;
+  ```
+- **Behaviour:** defaults `retryLimit 5`, `retryDelaySeconds 30`, `retryBackoff true`, `expireInSeconds 900`, `policy "standard"`. A `cron` makes it a scheduled job (general role only).
+- **Errors:** a `name` not matching `^[a-z][a-z0-9-]*\.[a-z][a-z0-9-]*$`, `cron` on the capture role, or an invalid cron (5 fields) throws `TypeError`.
+
+#### F-71: `createJobRegistry`
+- **File:** `platform/queue/registry.ts`
+- **Signature:** `export interface JobRegistry { all(): readonly JobDefinition<unknown>[]; forRole(r: WorkerRole): readonly JobDefinition<unknown>[]; get(name: string): JobDefinition<unknown> | undefined; deadLetterQueue(r: WorkerRole): string }; export function createJobRegistry(defs: readonly JobDefinition<unknown>[]): JobRegistry`
+- **Behaviour:** dead-letter queues are named `dead-letter.capture` and `dead-letter.general`. They aren't definitions and have no workers.
+- **Errors:** a duplicate name or a name starting with `dead-letter.` throws `TypeError`.
+
+#### F-72: `assertPayloadSafe`
+- **File:** `platform/queue/payloadSafety.ts`
+- **Signature:** `export class UnsafeJobPayloadError extends Error { readonly path: string }; export function assertPayloadSafe(payload: unknown): void`
+- **Behaviour:**
+  - `payload` must be a plain object.
+  - Each value must be: a string matching `^[A-Za-z0-9_.:+-]{1,64}$` (UUIDs, enum tokens, `YYYY-MM-DD`, RFC 3339 instants); a finite number; a boolean; `null`; an array of at most 100 such scalars; or one nested plain object of such values (depth ≤ 2).
+  - `path` is the dotted path of the first offending value (e.g. `"items.3"`). The message is `"Unsafe job payload at <path>"` and never contains the value.
+
+#### F-73: `createJobQueue`
+- **File:** `platform/queue/jobQueue.ts` · **Layer:** service (injectable into every service)
+- **Signature:** `export interface JobQueue { enqueue<P>(h: DbHandle, def: JobDefinition<P>, payload: P, opts?: { singletonKey?: string; startAfter?: Temporal.Instant }): Promise<string | null> }; export function createJobQueue(deps: { boss: PgBoss; registry: JobRegistry }): JobQueue`
+- **Behaviour:**
+  1. Checks the definition is registered.
+  2. Parses `payload` with `def.payload`, then F-72.
+  3. Calls `boss.send(def.name, parsed, { db: { executeSql: h.executeSql }, retryLimit, retryDelay: retryDelaySeconds, retryBackoff, expireInSeconds, singletonKey, startAfter: startAfter && new Date(startAfter.epochMilliseconds), deadLetter: registry.deadLetterQueue(def.role) })`.
+  4. Returns pg-boss's id, or `null` when the queue policy or singleton key suppressed the job.
+
+  When `h.inTransaction`, the job commits or rolls back with the caller's transaction (F-2 flow).
+- **Errors:** an unregistered definition throws `Error("job not registered: <name>")`. A failed parse throws `JobPayloadInvalidError` (message lists issue paths and codes only). F-72's error propagates.
+
+#### F-74: `installOrUpgradeQueueSchema`
+- **File:** `platform/queue/queueSchema.ts` · **Layer:** infrastructure (schema step 3)
+- **Signature:** `export async function installOrUpgradeQueueSchema(migrator: DbHandle): Promise<"installed" | "upgraded" | "current">`
+- **Behaviour:**
+  1. In one transaction: `SET LOCAL ROLE budmon_queue`. The target version is `pgboss.schema` from pg-boss's `package.json` (located with `createRequire(import.meta.url).resolve("pg-boss")` and walking up to the package root; 44 for 12.36.0).
+  2. If schema `pgboss` doesn't exist, executes `getConstructionPlans("pgboss")` → `"installed"`. Else reads `SELECT version FROM pgboss.version`: below target → executes `getMigrationPlans("pgboss", current)` → `"upgraded"`; equal → `"current"`.
+  3. Then, still as `budmon_queue`:
+     - `GRANT USAGE ON SCHEMA pgboss TO budmon_app, budmon_capture`;
+     - `GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA pgboss TO budmon_app, budmon_capture`;
+     - `GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA pgboss TO budmon_app, budmon_capture`;
+     - `ALTER DEFAULT PRIVILEGES IN SCHEMA pgboss GRANT SELECT, INSERT, UPDATE ON TABLES TO budmon_app, budmon_capture`, and the same for functions (`EXECUTE`).
+- **Errors:** a database version above the target throws `SchemaStepError("queue_schema_ahead")` (exit 3).
+
+#### F-75: `syncQueues`
+- **File:** `platform/queue/queueSync.ts` · **Layer:** service (schema step 6)
+- **Signature:** `export async function syncQueues(boss: PgBoss, registry: JobRegistry): Promise<{ created: number; updated: number }>`
+- **Behaviour:**
+  - Uses a pg-boss instance connected as `budmon_migrator` with `SET ROLE budmon_queue` through its `db` adapter (`options: "-c role=budmon_queue"`).
+  - Ensures both dead-letter queues exist (`policy "standard"`, `retentionSeconds 2592000`, `deleteAfterSeconds 2592000`).
+  - For each definition: `createQueue(name, { policy, retryLimit, retryDelay, retryBackoff, expireInSeconds, deleteAfterSeconds: 604800, retentionSeconds: 1209600, deadLetter })` if missing, else `updateQueue` with the same options except `policy`.
+  - Queues that exist but aren't registered are left alone and logged as `warn("queue_unregistered", { queue })`.
+- **Errors:** an existing queue whose policy differs throws `SchemaStepError("queue_policy_changed", name)`: a policy change needs a queue-upgrade release (D-12).
+
+#### F-76: `wrapHandler` and `JobFailure`
+- **File:** `platform/queue/wrapper.ts`
+- **Signatures:** `export class JobFailure extends Error {}; export interface JobContext { jobId: string; attempt: number; createdOn: Temporal.Instant; logger: Logger; signal: AbortSignal }; export function wrapHandler<P>(def: JobDefinition<P>, handler: (payload: P, ctx: JobContext) => Promise<unknown>, deps: { logger: Logger; metrics: PlatformMetrics; reporter: ErrorReporter; clock: Clock }): (jobs: Job<P>[]) => Promise<void>`
+- **Behaviour,** for each job (batch size 1):
+  1. Parses `data` with `def.payload`.
+  2. Calls `handler` with a child logger (`jobId`, `jobName`, `attempt`). The return value is **discarded** (the wrapper resolves `undefined`, so completed jobs store no output).
+  3. Records `job_duration_seconds` and `jobs_processed_total`.
+  4. On throw (or a failed parse):
+     - logs `warn("job_failed", { jobName, attempt, errorKey, errorClass })` with F-33;
+     - reports to Sentry when the error isn't a `BudmonError`;
+     - throws a new `JobFailure` whose `message` is `s.key ?? s.code ?? s.class` and whose `stack` is `"JobFailure: " + message + "\n    " + s.frames.join("\n    ")`. It has **no other own properties**, so pg-boss's stored `output` holds only `message` and `stack`.
+  5. When `attempt > retryLimit` (the last attempt fails), increments `jobs_dead_lettered_total{queue}`.
+
+#### F-77: `createPgBoss`
+- **File:** `platform/queue/workers.ts`
+- **Signature:** `export function createPgBoss(cfg: Config, mode: "send-only" | "capture" | "general"): PgBoss`
+- **Behaviour:** `schema: "pgboss"`, `migrate: false`, `createSchema: false`, `useListenNotify: false`, `application_name: budmon-<mode>`, TLS settings from `cfg.db`. Per mode:
+
+  | Mode | User | Pool `max` | `supervise` / `schedule` |
+  | ---- | ---- | ---------- | ------------------------ |
+  | `send-only` (api) | `budmon_app` | 2 | false / false |
+  | `capture` | `budmon_capture` | 3 | false / false |
+  | `general` | `budmon_queue` | `cfg.worker.queue.poolMax` | true / true |
+
+  The `error` event is logged through F-31 with F-33.
+
+#### F-78: `startWorkers`
+- **File:** `platform/queue/workers.ts`
+- **Signature:** `export async function startWorkers(c: WorkerContainer, handlers: ReadonlyMap<string, (payload: unknown, ctx: JobContext) => Promise<unknown>>): Promise<{ stop(): Promise<void> }>`
+- **Behaviour:**
+  1. For each role in `c.config.worker.roles`: `boss.start()`.
+  2. For each definition of the role, `boss.getQueue(name)` must exist, and a handler must be in `handlers`.
+  3. `boss.work(name, { batchSize: 1, pollingIntervalSeconds: 2 }, wrapHandler(...))`.
+  4. General role: for each definition with `cron`, `boss.schedule(name, cron, {}, { tz: "UTC" })`. It also registers the `queue_depth` observable gauge, reading `boss.getQueues()` counts (`queuedCount`).
+  5. Starts F-79.
+  - `stop()` calls `boss.stop({ graceful: true, timeout: 30000 })` for each instance.
+- **Errors:** a missing queue throws `MissingQueueError(name)` and the process exits 1 with `error("queue_missing", { queue })`. A missing handler throws `Error("no handler for <name>")`.
+
+#### F-79: `startHeartbeat`
+- **File:** `platform/queue/heartbeat.ts`
+- **Signature:** `export function startHeartbeat(deps: { metrics: Metrics; clock: Clock; service: string; intervalMs?: number; setInterval?: typeof setInterval /* [inj] */ }): { stop(): void; last(): number }`
+- **Behaviour:** every `intervalMs` (default 15000) stores `clock.now().epochMilliseconds / 1000`. `worker_heartbeat_timestamp_seconds{service}` observes `last()`.
+
+#### F-80: platform maintenance jobs
+- **File:** `platform/maintenance/maintenanceJobs.ts`
+- **Definitions:** `platform.idempotency-purge` (general, cron `0 3 * * *`), `platform.rate-limit-purge` (general, cron `*/10 * * * *`), `platform.exports-purge` (general, cron `15 * * * *`, handler F-144). Each has an empty payload `z.object({})`.
+- **Behaviour:**
+  - The idempotency purge repeats `DELETE FROM idempotency_records WHERE ctid IN (SELECT ctid FROM idempotency_records WHERE expires_at < $now LIMIT 5000)` until fewer than 5000 rows are affected, and logs `info("idempotency_purged", { count })`.
+  - The rate-limit purge is F-64 `deleteExpired` in batches of 10000 until fewer are deleted.
+
+#### F-81: dead-letter commands
+- **File:** `platform/queue/deadLetter.ts`; CLI in F-93
+- **Signatures:** `export async function listDeadLetters(boss: PgBoss, role?: WorkerRole, limit?: number): Promise<{ id: string; sourceName: string | null; sourceId: string | null; createdOn: string; sourceRetryCount: number | null; failure: string | null }[]>`, `export async function redriveDeadLetter(boss: PgBoss, role: WorkerRole, id: string): Promise<number>`
+- **Behaviour:**
+  - `listDeadLetters` uses `boss.findJobs("dead-letter.<role>", …)` with metadata (both roles when `role` is absent), newest first, up to `limit` (default 100). `failure` is `sourceOutput.message`, the sanitised key or class from F-76.
+  - `redriveDeadLetter` calls `boss.redrive("dead-letter.<role>", { ids: [id] })` and returns the count moved (0 if the id doesn't exist).
+
+### 4.8 Process entry points and composition root (S-2 to S-6)
+
+#### F-90: `main/api.ts`
+- **Behaviour:**
+  1. `installProxySupport(process.env)` (F-122).
+  2. `loadConfig("api", process.env, fs.readFileSync)`.
+  3. `startTelemetry`.
+  4. `createApiContainer` (F-96).
+  5. `createApiServer` (F-55), then `listen({ port, host })`.
+  - On `SIGTERM`/`SIGINT`: `app.close()`, then `container.close()`, then telemetry shutdown (each with a 10 s deadline), then exit 0.
+  - Logs `info("api_started", { release, service: "api" })`.
+- **Errors:** `ConfigError` → exit 78 (F-11). Any start-up error → `error("startup_failed")` with F-33, then exit 1.
+
+#### F-91: `main/worker.ts`
+- **Behaviour:** like F-90 for kind `worker`: `createWorkerContainer`, then `startWorkers` with the handler map built from the platform's and every module's job handlers (`platform/queue/handlers.ts` exports `buildHandlerMap(c)`). Service name: `worker-capture`, `worker-general` or `worker` (several roles, development only). `SIGTERM` → `stop()`.
+
+#### F-92: `main/migrate.ts` (`pnpm db:migrate`, image entry `node dist/main/migrate.js`)
+- **Behaviour:** `loadConfig("migrate")`, then `createDatabase` as `DB_USER` (must be `budmon_migrator`), then F-19 with `mode: "migrate"` and `migrationsFolder: <image>/drizzle`. It prints the `SchemaStepReport` as one JSON line to stdout, then exits 0.
+- **Exit codes:** 78 config; 3 `SchemaStepError`; 4 `UnknownMigrationError`; 5 migration SQL failure; 1 other.
+
+#### F-93: `main/cli.ts` (`node dist/main/cli.js <command>`)
+- **Commands:**
+
+  | Command | Calls | Output | Exit |
+  | ------- | ----- | ------ | ---- |
+  | `jobs:dead list [--role capture\|general] [--limit n]` | F-81 | one JSON line per entry | 0 |
+  | `jobs:dead redrive --role r --id <uuid>` | F-81 | `{"moved":n}` | 0 if moved = 1, else 2 |
+  | `secrets:rewrap-api` | F-117 | `{"rewrapped":n,"skipped":m}` | 0 |
+  | `restore:verify` | F-150 | report JSON | 0 if ok, else 6 |
+  | `erasure:replay --since <RFC 3339>` | F-151 | `{"replayed":n}` | 0, 2 if no handler is registered and records exist |
+  | `jobs:capture-rewrap` | enqueues `platform.capture-rewrap` (F-118) | `{"enqueued":true}` | 0 |
+
+  Unknown command → usage text, exit 64. Config kind: `worker` with `WORKER_ROLES=general` for every command except `secrets:rewrap-api` (kind `api`).
+
+#### F-94: `main/dbReset.ts` (`pnpm db:reset`)
+- **Behaviour:** reads `DEV_SUPERUSER_URL` and the dev role secrets, then calls F-20 with `seed: !argv.includes("--no-seed")`.
+
+#### F-95: `main/dev.ts`: see F-22.
+
+#### F-96: composition root
+- **File:** `platform/container.ts`
+- **Signatures:**
+  ```ts
+  export interface BaseContainer { config: Config; logger: Logger; clock: Clock; ids: IdGenerator; database: Database; metrics: PlatformMetrics;
+    reporter: ErrorReporter; registry: JobRegistry; queue: JobQueue; boss: PgBoss; close(): Promise<void> }
+  export interface ApiContainer extends BaseContainer { authHook: AuthHook; rateLimiter: RateLimiter; idempotency: Idempotency; cursors: CursorCodec;
+    captureSealer: CaptureSealer; apiSecrets: ApiSecretsCipher; objectStore: ObjectStore; fx: FxService }
+  export interface WorkerContainer extends BaseContainer { roles: ReadonlySet<WorkerRole>; captureSealer: CaptureSealer | null; captureUnsealer: CaptureUnsealer | null;
+    fx: FxService | null; objectStore: ObjectStore | null; erasureLog: ErasureLog | null; fxProviders: FxProviders | null; queueBoss: PgBoss | null; captureBoss: PgBoss | null }
+  export function createApiContainer(config: Config, overrides?: Partial<ApiContainer>): ApiContainer;
+  export function createWorkerContainer(config: Config, overrides?: Partial<WorkerContainer>): WorkerContainer;
+  ```
+- **Behaviour:** builds every dependency from config in dependency order, letting `overrides` replace any entry (tests). Capture-only members are `null` unless the `capture` role is present; general-only members are `null` unless `general` is present. `close()` stops pg-boss instances and closes the database pool.
+
+### 4.9 Idempotency and cursors (S-7)
+
+#### F-100: `createIdempotency`
+- **File:** `platform/idempotency/idempotency.ts` · **Layer:** service
+- **Signature:**
+  ```ts
+  export interface CreatedResult { id: string; createdAt: Temporal.Instant }
+  export interface Idempotency {
+    run(h: DbHandle, req: { userId: string; key: string; procedure: string; input: unknown },
+        work: () => Promise<CreatedResult>): Promise<{ result: CreatedResult; replayed: boolean; status: 201 }>;
+  }
+  export function createIdempotency(deps: { clock: Clock; metrics: PlatformMetrics }): Idempotency;
+  ```
+- **Behaviour:**
+  - Precondition: `h.inTransaction` is true.
+  - `requestHash = sha256(canonicalJson(input))`, where `input` is the procedure's **validated** input (wire values, after zod defaults).
+  1. F-101 `insertIfAbsent(h, { userId, key, procedure, requestHash, expiresAt: now + 90 days })`.
+     - **Inserted:** `result = await work()`, then F-101 `complete(h, userId, key, 201, { id, createdAt: createdAt.toString() })`. Returns `{ result, replayed: false, status: 201 }`.
+     - **Not inserted** (an existing row; a concurrent duplicate waits on the primary key until the first transaction ends): F-101 `find(h, userId, key)`.
+       - Different `procedure` or `requestHash` → throws `IdempotencyKeyReusedError`.
+       - `responseStatus` null → throws `Error("idempotency record incomplete")` (→ `INTERNAL`; unreachable when callers use one transaction).
+       - Otherwise returns the stored result with `replayed: true` and increments `idempotent_replays_total`.
+  - A `work()` failure rolls back the caller's transaction, insert included, so no record remains.
+- **Errors:** as above. `h.inTransaction === false` throws `Error("idempotency requires a transaction")`.
+
+#### F-101: `idempotencyRepo`
+- **File:** `platform/idempotency/idempotencyRepo.ts` · **Layer:** repo
+- **Signatures:** `insertIfAbsent(h: DbHandle, r: { userId: string; key: string; procedure: string; requestHash: Buffer; expiresAt: Date }): Promise<boolean>`, `find(h: DbHandle, userId: string, key: string): Promise<{ procedure: string; requestHash: Buffer; responseStatus: number | null; result: { id: string; createdAt: string } | null } | null>`, `complete(h: DbHandle, userId: string, key: string, status: number, result: { id: string; createdAt: string }): Promise<void>`
+- **Behaviour:** `insertIfAbsent` uses `INSERT … ON CONFLICT (user_id, idempotency_key) DO NOTHING RETURNING 1`. `complete` also sets `updated_at = now()`.
+
+#### F-102: `runIdempotentCreate`
+- **File:** `platform/idempotency/idempotency.ts` · **Layer:** router helper
+- **Signature:** `export async function runIdempotentCreate<I>(ctx: RequestContext & { principal: Principal }, procedure: string, input: I, work: (tx: DbHandle) => Promise<CreatedResult>): Promise<{ id: string; createdAt: string }>`
+- **Behaviour:**
+  1. Reads `ctx.headers["idempotency-key"]`, which must be a lower-case RFC 9562 UUID.
+  2. `withTransaction(db, (tx) => idempotency.run(tx, { userId: ctx.principal.userId, key, procedure, input }, () => work(tx)), { tracker: ctx.commitTracker })`.
+  3. On a replay, sets the response header `Idempotent-Replayed: true`.
+  4. Returns the wire shape `{ id, createdAt: createdAt.toString() }` (RFC 3339 with `Z`).
+- **Errors:** a missing or invalid header throws `ValidationFailedError([{ path: ["headers", "idempotency-key"], code: "invalid_idempotency_key", message: "Idempotency-Key must be a UUID" }])`. F-100's errors propagate.
+
+#### F-103: `createCursorCodec`
+- **File:** `platform/pagination/cursor.ts` · **Layer:** service
+- **Signature:**
+  ```ts
+  export type SortKey = readonly (string | number | boolean | null)[];
+  export interface CursorCodec { encode(p: { sortKey: SortKey; id: string; filterHash: string }): string;
+    decode(token: string, expectedFilterHash: string): { sortKey: SortKey; id: string } }
+  export function createCursorCodec(deps: { key: Buffer; clock: Clock; randomBytes?: (n: number) => Buffer /* [inj] */ }): CursorCodec;
+  ```
+- **Behaviour:**
+  - Plaintext `canonicalJson({ v: 1, s: sortKey, id, f: filterHash, exp: nowEpochSeconds + 86400 })`.
+  - AES-256-GCM with a 12-byte random nonce and no AAD.
+  - Token `base64url(0x01 ‖ nonce ‖ ciphertext ‖ tag)`, no padding.
+  - `decode` reverses this and checks `exp ≥ now` and `f === expectedFilterHash`.
+- **Errors:** `decode` throws `ValidationFailedError([{ path: ["cursor"], code: "invalid_cursor", message: "Invalid cursor" }])` for any of: length > 512, a base64 failure, a wrong version byte, an authentication failure, malformed JSON, an expired cursor, or a filter mismatch. All are indistinguishable.
+
+#### F-104: `filterHash`
+- **File:** `platform/pagination/cursor.ts`
+- **Signature:** `export function filterHash(filters: unknown): string`
+- **Behaviour:** the first 22 characters of `base64url(sha256(canonicalJson(filters)))`.
+
+#### F-105: `paginate`
+- **File:** `platform/pagination/cursor.ts`
+- **Signature:** `export function paginate<T>(rows: readonly T[], limit: number, keyOf: (row: T) => { sortKey: SortKey; id: string }, filterHashValue: string, codec: CursorCodec): { items: T[]; nextCursor: string | null }`
+- **Behaviour:** callers fetch `limit + 1` rows. If `rows.length > limit`, returns the first `limit` rows and a cursor built from the last returned row; otherwise all rows and `nextCursor: null`.
+
+### 4.10 Credential encryption and capture plumbing (S-8)
+
+#### F-110: envelope format
+- **File:** `platform/crypto/envelope.ts`
+- **Signatures:**
+  ```ts
+  export type EnvelopeProvider = "kms-capture" | "local-capture" | "api-local";
+  export interface SealContext { table: string; rowId: string; purpose: string }
+  export interface EnvelopeParts { provider: EnvelopeProvider; keyVersion: string; wrappedDek: Buffer; nonce: Buffer; ciphertext: Buffer; tag: Buffer }
+  export class EnvelopeFormatError extends Error {}
+  export function encodeEnvelope(p: EnvelopeParts): Buffer;
+  export function decodeEnvelope(b: Buffer): EnvelopeParts;
+  export function aadFor(ctx: SealContext): Buffer; // utf8 "budmon/v1|<table>|<rowId>|<purpose>"
+  export function keyVersionOf(b: Buffer): string;
+  ```
+- **Byte layout (v1):**
+
+  | Offset | Size | Field |
+  | ------ | ---- | ----- |
+  | 0 | 1 | `0x01` (format version) |
+  | 1 | 1 | provider (`0x01` kms-capture, `0x02` local-capture, `0x03` api-local) |
+  | 2 | 1 | `L`, the key-version length (1..255) |
+  | 3 | L | key version, UTF-8 |
+  | 3+L | 2 | `W`, the wrapped-DEK length (big-endian, 1..1024) |
+  | 5+L | W | wrapped DEK |
+  | 5+L+W | 12 | nonce |
+  | 17+L+W | n | ciphertext (n ≥ 0) |
+  | end−16 | 16 | GCM tag |
+- **Errors:** a short buffer, unknown version or provider, or out-of-range lengths throw `EnvelopeFormatError` (no content in the message). `aadFor` with a field not matching `^[A-Za-z0-9_.:-]{1,64}$` throws `RangeError`.
+
+#### F-111: `createCaptureSealer`
+- **File:** `platform/crypto/captureSealer.ts` · **Layer:** service (api, worker-general, worker-capture)
+- **Signature:** `export interface CaptureSealer { seal(plaintext: Buffer, ctx: SealContext): Buffer }; export function createCaptureSealer(cfg: { publicKeyPem: string; keyVersion: string }, deps?: { randomBytes?: (n: number) => Buffer /* [inj] */ }): CaptureSealer`
+- **Behaviour:**
+  1. Generates a 32-byte DEK and a 12-byte nonce.
+  2. AES-256-GCM over `plaintext` with `aadFor(ctx)`.
+  3. Wraps the DEK with `crypto.publicEncrypt({ key: publicKeyPem, padding: RSA_PKCS1_OAEP_PADDING, oaepHash: "sha256" }, dek)`.
+  4. The provider is `local-capture` if `keyVersion` starts with `local:`, otherwise `kms-capture`.
+  5. Zero-fills the DEK (`dek.fill(0)`) and returns F-110's encoding.
+- **Errors:** a public key under 3072 bits or not RSA throws `TypeError` at construction.
+
+#### F-112: `createKmsCaptureUnsealer`
+- **File:** `platform/crypto/captureUnsealer.ts` · **Layer:** service (worker-capture only)
+- **Signature:** `export interface CaptureUnsealer { unseal(envelope: Buffer, ctx: SealContext): Promise<Buffer> }; export function createKmsCaptureUnsealer(deps: { client: Pick<KeyManagementServiceClient, "asymmetricDecrypt"> /* [inj] */; timeoutMs?: number; metrics: PlatformMetrics }): CaptureUnsealer`
+- **Behaviour:**
+  1. Decodes the envelope; the provider must be `kms-capture`.
+  2. `client.asymmetricDecrypt({ name: keyVersion, ciphertext: wrappedDek }, { timeout: timeoutMs ?? 5000 })`.
+  3. AES-256-GCM decrypt with `aadFor(ctx)`.
+  4. Zero-fills the DEK and returns the plaintext.
+- **Errors:**
+  - Provider mismatch → `EnvelopeFormatError`.
+  - Any KMS error or timeout → `KmsUnavailableError` (retryable), and increments `kms_errors_total`.
+  - GCM authentication failure → `EnvelopeAuthError` (not retryable; the job fails and reaches the dead-letter queue).
+
+#### F-113: `createLocalCaptureUnsealer`
+- **File:** `platform/crypto/captureUnsealer.ts`
+- **Signature:** `export function createLocalCaptureUnsealer(cfg: { privateKeyPem: string }): CaptureUnsealer`
+- **Behaviour:** as F-112, with `crypto.privateDecrypt` (OAEP SHA-256) and provider `local-capture` only. F-96 picks it when `KMS_PROVIDER=local`, which F-10 refuses in `production`.
+
+#### F-114: `createApiSecretsCipher`
+- **File:** `platform/crypto/apiSecrets.ts`
+- **Signature:** `export interface ApiSecretsCipher { seal(plaintext: Buffer, ctx: SealContext): Buffer; unseal(envelope: Buffer, ctx: SealContext): Buffer; currentKeyId(): string }; export function createApiSecretsCipher(keys: { current: string; keys: ReadonlyMap<string, Buffer> }, deps?: { randomBytes?: (n: number) => Buffer }): ApiSecretsCipher`
+- **Behaviour:** the provider is `api-local` and `keyVersion` is the key id. The DEK is wrapped with AES-256-GCM under the key-encryption key (`wrappedDek = nonce(12) ‖ ct(32) ‖ tag(16)`, no AAD). The payload is encrypted as in F-111.
+- **Errors:** `unseal` with a key id not in `keys` → `UnknownKeyVersionError`; authentication failure → `EnvelopeAuthError`; a wrong provider → `EnvelopeFormatError`.
+
+#### F-115: sealed-column registry
+- **File:** `platform/crypto/sealedColumns.ts`
+- **Signature:** `export interface SealedColumn { table: string; idColumn: string; column: string; purpose: string; provider: "capture" | "api" }; export function createSealedColumnRegistry(): { register(c: SealedColumn): void; all(): readonly SealedColumn[] }`
+- **Behaviour:** modules register their sealed columns at container build. The platform registers none.
+- **Errors:** identifiers not matching `^[a-z_][a-z0-9_]{0,62}$`, a purpose failing the `token` rule, or a duplicate `(table, column)` throw `TypeError`.
+
+#### F-117: `rewrapApiSecrets`
+- **File:** `platform/crypto/rewrap.ts`
+- **Signature:** `export async function rewrapApiSecrets(deps: { database: Database; cipher: ApiSecretsCipher; columns: readonly SealedColumn[]; batchSize?: number; logger: Logger }): Promise<{ rewrapped: number; skipped: number }>`
+- **Behaviour:** for each column with `provider: "api"`, repeatedly:
+  1. Selects up to `batchSize` (default 500) rows: `SELECT <id>, <col> FROM <table> WHERE <col> IS NOT NULL AND substring(<col> from 4 for get_byte(<col>, 2)) <> convert_to($current, 'UTF8') LIMIT $n`.
+  2. In one transaction per batch, for each row: `unseal` with `{ table, rowId: id, purpose }`, then `seal` with the current key, then `UPDATE … SET <col> = $new WHERE <id> = $id AND <col> = $old`.
+  3. A row updated 0 times (changed concurrently) counts as `skipped`.
+
+  The loop stops when a batch returns no rows. Identifiers are quoted with `pg`'s `escapeIdentifier`.
+- **Errors:** `UnknownKeyVersionError` and `EnvelopeAuthError` abort that batch's transaction and propagate (CLI exit 1), naming table and column only.
+
+#### F-118: `platform.capture-rewrap` job
+- **File:** `platform/crypto/rewrap.ts`
+- **Definition:** `defineJob({ name: "platform.capture-rewrap", role: "capture", payload: z.object({}), retryLimit: 3, expireInSeconds: 3600, policy: "singleton" })`
+- **Behaviour:** like F-117 for columns with `provider: "capture"`. Rows qualify when their key version ≠ `config.capture.keyVersion`. Each row is unsealed through F-112/F-113 and sealed with F-111. Batches of 100. Logs `info("capture_rewrap", { count })`.
+
+#### F-119: PKCE, state and the authorisation URL
+- **File:** `platform/crypto/oauth.ts`
+- **Signatures:**
+  ```ts
+  export function createPkcePair(randomBytes?: (n: number) => Buffer): { verifier: Secret<string>; challenge: string; method: "S256" };
+  export function createOAuthState(): string; // randomToken(32)
+  export function buildGoogleAuthorizationUrl(p: { clientId: string; redirectUri: string; scopes: readonly string[]; state: string; challenge: string; loginHint?: never }): URL;
+  ```
+- **Behaviour:**
+  - The verifier is the base64url of 32 random bytes (43 characters). The challenge is `base64url(sha256(verifier))`.
+  - The URL is `https://accounts.google.com/o/oauth2/v2/auth` with `response_type=code`, `client_id`, `redirect_uri`, `scope` (space-joined), `state`, `code_challenge`, `code_challenge_method=S256`, `access_type=offline`, `prompt=consent` and `include_granted_scopes=true`.
+  - The API reads `GOOGLE_OAUTH_CLIENT_ID` (kind `api`, optional; added to F-10 for both `api` and capture workers).
+
+#### F-120: `exchangeAuthorizationCode`
+- **File:** `platform/crypto/oauth.ts` · **Layer:** integration (worker-capture only)
+- **Signature:**
+  ```ts
+  export interface OAuthTokens { refreshToken: Secret<string>; accessToken: Secret<string>; expiresAt: Temporal.Instant; scopes: readonly string[] }
+  export class OAuthExchangeError extends Error { readonly reason: "invalid_grant" | "rejected" | "no_refresh_token" | "server" | "network"; readonly retryable: boolean }
+  export async function exchangeAuthorizationCode(deps: { fetch: typeof fetch /* [inj], guarded by F-121 */; clientId: string; clientSecret: Secret<string>; clock: Clock },
+    input: { code: Secret<string>; verifier: Secret<string>; redirectUri: string }): Promise<OAuthTokens>;
+  ```
+- **Behaviour:** `POST https://oauth2.googleapis.com/token`, `Content-Type: application/x-www-form-urlencoded`, body `grant_type=authorization_code&code&code_verifier&client_id&client_secret&redirect_uri`, `AbortSignal.timeout(10000)`, `redirect: "manual"`. On 200 it parses `{ access_token, expires_in, refresh_token, scope }`; `expiresAt = now + expires_in` seconds.
+- **Errors** (`OAuthExchangeError`, whose message is only the reason):
+
+  | Condition | `reason` | `retryable` |
+  | --------- | -------- | ----------- |
+  | 200 without `refresh_token` | `no_refresh_token` | false |
+  | 400 with `error: "invalid_grant"` | `invalid_grant` | false |
+  | Other 4xx | `rejected` | false |
+  | 5xx or 429 | `server` | true |
+  | Network error or timeout | `network` | true |
+
+  Response bodies are never kept on the error.
+
+#### F-121: egress guard
+- **File:** `platform/crypto/egress.ts`
+- **Signatures:** `export const CAPTURE_EGRESS_HOSTS: ReadonlySet<string>; export class EgressDeniedError extends Error { readonly host: string }; export function createGuardedFetch(allowed: ReadonlySet<string>, inner: typeof fetch): typeof fetch`
+- **Behaviour:**
+  - `CAPTURE_EGRESS_HOSTS = { "oauth2.googleapis.com", "gmail.googleapis.com", "cloudkms.googleapis.com", "pubsub.googleapis.com" }`, plus the Sentry DSN host, added at container build from config.
+  - The guarded fetch rejects a URL unless: the protocol is `https:`, there's no user info, the port is empty or `443`, and the hostname is exactly in `allowed`. It forces `redirect: "manual"`.
+  - worker-capture passes this fetch to F-120 and to every capture integration. Google client libraries (KMS, Pub/Sub over gRPC) are constructed with `apiEndpoint` set to the allowlisted host explicitly.
+- **Errors:** `EgressDeniedError(host)` (the host isn't sensitive).
+
+#### F-122: `installProxySupport`
+- **File:** `platform/crypto/proxy.ts`
+- **Signature:** `export function installProxySupport(env: Readonly<Record<string, string | undefined>>): { httpsProxy?: string }`
+- **Behaviour:** always calls `setGlobalDispatcher(new EnvHttpProxyAgent())` (undici), which honours `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY`; with none set, it connects directly. Returns `HTTPS_PROXY ?? https_proxy` for Sentry's transport (F-34). gRPC (`@grpc/grpc-js`) and gaxios read the standard variables themselves (`grpc_proxy`/`https_proxy`, `no_grpc_proxy`/`no_proxy`). Called first in every entry point (F-90, F-91, F-92, F-93). **No code path checks whether a proxy is set** (D-29 rule 3 (b)).
+
+### 4.11 FX (S-9)
+
+#### F-130: provider decimal parsing
+- **File:** `platform/fx/decimal.ts`
+- **Signatures:** `export function parseJsonKeepingNumberText(text: string): unknown`, `export function normaliseRate(raw: string): string | null`
+- **Behaviour:**
+  - `parseJsonKeepingNumberText` uses `JSON.parse(text, (key, value, context) => typeof value === "number" ? context.source : value)`, so numbers become their exact source text.
+  - `normaliseRate` parses with F-300 `parseDecimal` and returns `toFixedDecimalString(r, 12)`. It returns `null` for unparseable input, `r ≤ 0`, or `r ≥ 10^12`.
+
+#### F-131: `fxRepo`
+- **File:** `platform/fx/fxRepo.ts` · **Layer:** repo
+- **Signatures:**
+  ```ts
+  latestDayOnOrBefore(h: DbHandle, date: string): Promise<string | null>;
+  ratesOn(h: DbHandle, date: string, codes: readonly string[]): Promise<Map<string, string>>;
+  dayExists(h: DbHandle, date: string): Promise<boolean>;
+  nextStoredDayAfter(h: DbHandle, date: string): Promise<string | null>;
+  insertDay(h: DbHandle, rows: readonly { code: string; unitsPerUsd: string }[], rateDate: string, provider: string, fetchedAt: Date): Promise<number>;
+  currencies(h: DbHandle): Promise<Map<string, { minorUnits: number; active: boolean }>>;
+  ```
+- **Behaviour:** dates are `YYYY-MM-DD` strings. `insertDay` uses `INSERT … ON CONFLICT (currency_code, rate_date) DO NOTHING` and returns the rows inserted. `numeric` values are read as strings.
+
+#### F-132: `createFxService`
+- **File:** `platform/fx/fxService.ts` · **Layer:** service
+- **Signatures:**
+  ```ts
+  export type ConversionResult =
+    | { kind: "converted"; money: Money; rateDate: Temporal.PlainDate; provisional: boolean }
+    | { kind: "no_rate"; reason: "no_day" | "currency_missing" };
+  export type SumResult = { kind: "converted"; total: Money; provisional: boolean } | { kind: "no_rate"; reason: "no_day" | "currency_missing" };
+  export class UnknownCurrencyError extends Error {}
+  export interface FxService {
+    convert(m: Money, to: CurrencyCode, onDate: Temporal.PlainDate, h?: DbHandle): Promise<ConversionResult>;
+    convertSum(items: readonly { money: Money; onDate: Temporal.PlainDate }[], to: CurrencyCode, h?: DbHandle): Promise<SumResult>;
+    registerRatesAddedSubscriber(def: JobDefinition<RatesAddedPayload>): void;
+    subscribers(): readonly JobDefinition<RatesAddedPayload>[];
+  }
+  export const RatesAddedPayload: z.ZodType<{ rateDate: string; affectedFrom: string; affectedTo: string | null }>;
+  export const FX_FALLBACK_FIRST_DATE: "2024-03-02";
+  export function createFxService(deps: { database: Database; queue: JobQueue; clock: Clock; logger: Logger; metrics: PlatformMetrics }): FxService;
+  ```
+- **Behaviour of `convert`** (reads use `h ?? database.handle`; currency metadata is cached per process after the first read):
+  1. Either currency not in `currencies` → throws `UnknownCurrencyError`.
+  2. Same currency → `{ converted, money: m, rateDate: onDate, provisional: false }`.
+  3. `day = latestDayOnOrBefore(onDate)`.
+     - **No day** → if `onDate < todayUTC` and `onDate ≥ FX_FALLBACK_FIRST_DATE`, enqueue `platform.fx-backfill { rateDate: onDate }` with `singletonKey = onDate` **outside** the caller's transaction (`database.handle`). Returns `{ no_rate, reason: "no_day" }`.
+     - **A day exists** → loads rates for both currencies on `day` (USD is `1` implicitly). If either is missing → `{ no_rate, reason: "currency_missing" }`. Otherwise F-303 `convertWithRates` → `{ converted, rateDate: day, provisional: day !== onDate }`.
+- **Behaviour of `convertSum`:** converts each item (rounding per item) and sums with F-301. Any `no_rate` makes the whole result `no_rate` with the first reason. `provisional` is the OR over items. An empty `items` → zero in `to`, `provisional: false`.
+- **Subscribers:** `registerRatesAddedSubscriber` stores the definition. Each must be registered in the job registry with role `general` and payload `RatesAddedPayload`, or it throws `TypeError`.
+
+#### F-133: providers
+- **File:** `platform/fx/providers.ts` · **Layer:** integration
+- **Signatures:**
+  ```ts
+  export type FxProviderName = "openexchangerates" | "fawazahmed0" | "fixed";
+  export class FxProviderError extends Error { readonly reason: "not_found" | "http" | "network" | "invalid"; readonly status?: number }
+  export interface FxProvider { readonly name: FxProviderName; fetchDay(date: string, signal: AbortSignal): Promise<Map<string, string>> } // upper-case code → raw decimal text
+  export interface FxProviders { primary: FxProvider; fallback: FxProvider }
+  export function createOpenExchangeRates(cfg: { baseUrl: URL; appId: Secret<string> }, deps: { fetch: typeof fetch }): FxProvider;
+  export function createFawazahmed0(cfg: { baseUrl: string; mirrorUrl: string }, deps: { fetch: typeof fetch }): FxProvider;
+  export function createFixedProvider(): FxProvider;
+  ```
+- **Behaviour:**
+  - **Open Exchange Rates:** `GET {baseUrl}/historical/{date}.json?app_id=…&base=USD&show_alternative=false`, timeout 10 s.
+    - 200 → F-130 parse. The body must be `{ base: "USD", rates: { CODE: number } }`, otherwise `invalid`.
+    - 400/404 → `not_found`; other non-2xx → `http` with status; network → `network`.
+  - **fawazahmed0:** `GET {baseUrl with {date}}/currencies/usd.json`; on `network` or 5xx, retries once on `{mirrorUrl with {date}}/currencies/usd.json`.
+    - 200 → parse `{ date, usd: { eur: n, … } }`; `date` must equal the requested date (else `invalid`); keys are upper-cased.
+    - 404 → `not_found`.
+  - **Fixed:** returns `USD 1`, `EUR 0.92`, `GBP 0.79`, `EGP 48.5`, `JPY 149.25`, `KWD 0.307`, `SAR 3.75` for any date.
+  - URLs in logs and spans pass through F-37.
+
+#### F-137: FX jobs
+- **File:** `platform/fx/fxJobs.ts`
+- **Definitions:**
+  - `platform.fx-rates-fetch`: general, `cron "30 0 * * *"`, payload `z.object({})`, `retryLimit 14`, `retryDelaySeconds 1800`, `retryBackoff false`, `expireInSeconds 300`, `policy "singleton"`.
+  - `platform.fx-backfill`: general, payload `z.object({ rateDate: isoDate })`, `retryLimit 5`, `retryBackoff true`, `expireInSeconds 300`, `policy "short"`.
+- **Behaviour, fetch:**
+  1. `rateDate = utcDateOf(ctx.createdOn) − 1 day`, so retries keep the same day. If `dayExists(rateDate)`, complete.
+  2. `elapsed = now − ctx.createdOn`; provider = primary if `elapsed < 6 h`, else fallback.
+  3. `fetchDay`, keeping codes that are **active** in `currencies`, each through F-130 `normaliseRate`. Rejected codes increment `fx_rates_rejected_total{provider}`.
+  4. Zero valid rows → throws `FxProviderError("invalid")`.
+  5. In one transaction: F-131 `insertDay`, then F-138.
+  6. Increments `fx_rates_fetched_total{provider}` and logs `info("fx_day_stored", { rateDate, provider, inserted, rejected })`.
+- **Behaviour, backfill:**
+  - `dayExists` → complete.
+  - Fallback provider. `not_found` → increments `fx_backfill_missing_total`, logs `info("fx_backfill_missing", { rateDate })` and completes (no throw).
+  - Other provider errors throw (retry).
+  - Success → the same insert path with provider `fawazahmed0`.
+- **Errors:** `FxProviderError` → job retry; the stored output is the sanitised class and code (F-76).
+
+#### F-138: `enqueueRatesAdded`
+- **File:** `platform/fx/fxJobs.ts`
+- **Signature:** `export async function enqueueRatesAdded(h: DbHandle, fx: FxService, queue: JobQueue, rateDate: string): Promise<number>`
+- **Behaviour:** `next = nextStoredDayAfter(rateDate)`; `affectedTo = next ? next − 1 day : null`. For each subscriber, `queue.enqueue(h, def, { rateDate, affectedFrom: rateDate, affectedTo })`. Returns the count. Runs in the inserting transaction.
+
+### 4.12 Object storage and the erasure log (S-10)
+
+#### F-140: `ObjectStore`
+- **File:** `platform/storage/objectStore.ts`
+- **Signatures:**
+  ```ts
+  export type BucketName = "exports" | "erasure-log";
+  export class ObjectStoreError extends Error { readonly reason: "not_found" | "denied" | "unavailable" }
+  export interface ObjectStore {
+    put(bucket: BucketName, key: string, body: Buffer, contentType: string): Promise<void>;
+    delete(bucket: BucketName, key: string): Promise<void>;          // missing key: no error
+    deletePrefix(bucket: BucketName, prefix: string): Promise<number>;
+    list(bucket: BucketName, prefix: string): AsyncIterable<{ key: string; lastModified: Temporal.Instant }>;
+    presignGet(bucket: BucketName, key: string, ttlSeconds?: number): Promise<URL>; // 60..900, default 900
+  }
+  export function assertObjectKey(bucket: BucketName, key: string): void;
+  ```
+- **Key rules:**
+  - `exports`: `^users/[0-9a-f-]{36}/exports/[0-9a-f-]{36}\.(csv|json|zip)$`.
+  - `erasure-log`: `^records/\d{8}T\d{6}Z_[0-9a-f-]{36}\.json$`.
+  - Prefixes must match `^users/[0-9a-f-]{36}/$`, `^users/$` or `^records/$`.
+- **Errors:** an invalid key or prefix throws `RangeError`. A `ttlSeconds` outside 60..900 throws `RangeError`.
+
+#### F-141: `createS3ObjectStore`
+- **File:** `platform/storage/s3ObjectStore.ts` · **Layer:** integration
+- **Signature:** `export function createS3ObjectStore(cfg: Extract<Config["objectStore"], { kind: "s3" }>, deps?: { client?: S3Client /* [inj] */ }): ObjectStore`
+- **Behaviour:**
+  - AWS SDK v3 `S3Client({ endpoint, region, credentials, requestChecksumCalculation: "WHEN_REQUIRED" })`; the logical bucket is mapped to its configured name.
+  - `deletePrefix` lists with `ListObjectsV2` (1000 per page) and deletes with `DeleteObjects`.
+  - `presignGet` uses `getSignedUrl(client, new GetObjectCommand({ Bucket, Key, ResponseContentDisposition: "attachment" }), { expiresIn })`.
+- **Errors:** SDK `NoSuchKey`/404 → `ObjectStoreError("not_found")`; 403 → `"denied"`; network or 5xx → `"unavailable"`.
+
+#### F-142: `createFsObjectStore`
+- **File:** `platform/storage/fsObjectStore.ts` (development)
+- **Signature:** `export function createFsObjectStore(cfg: { root: string; publicOrigin: URL; signingKey: Buffer; clock: Clock }): ObjectStore`
+- **Behaviour:**
+  - Files live at `<root>/<bucket>/<key>`; `lastModified` is the file's mtime.
+  - `presignGet` returns `<publicOrigin>/dev/objects/<token>`, where `token = base64url(canonicalJson({ b, k, exp })) + "." + base64url(hmacSha256(signingKey, payloadPart))`.
+
+#### F-143: `createMemoryObjectStore`
+- **File:** `platform/storage/memoryObjectStore.ts`
+- **Signature:** `export function createMemoryObjectStore(clock: Clock): ObjectStore & { snapshot(): ReadonlyMap<string, { body: Buffer; lastModified: Temporal.Instant }> }`
+- **Behaviour:** an in-memory fake with the same validation and error behaviour. `presignGet` returns `memory://<bucket>/<key>?exp=<epoch>`.
+
+#### F-144: exports purge
+- **File:** `platform/storage/exportsPurge.ts`
+- **Signature:** `export async function purgeExpiredExports(deps: { store: ObjectStore; clock: Clock; logger: Logger }): Promise<number>`
+- **Behaviour:** lists `exports` under `users/` and deletes objects whose `lastModified < now − 7 days`. Returns the count and logs `info("exports_purged", { count })`.
+
+#### F-145: development objects route
+- **File:** `platform/http/devObjects.ts`
+- **Signature:** `export function registerDevObjectsRoute(app: FastifyInstance, deps: { root: string; signingKey: Buffer; clock: Clock }): void`
+- **Behaviour:** registered only when `APP_ENV=development`. `GET /dev/objects/:token` verifies the HMAC (constant time) and `exp ≥ now`, then streams the file with `Content-Disposition: attachment` and `Cache-Control: no-store`. Any failure → `404` with the platform `NOT_FOUND` envelope.
+
+#### F-146: `ErasureLog`
+- **File:** `platform/storage/erasureLog.ts`
+- **Signatures:**
+  ```ts
+  export interface ErasureRecord { userId: string; erasedAt: Temporal.Instant }
+  export interface ErasureLog { append(r: ErasureRecord): Promise<void>; listSince(since: Temporal.Instant): Promise<ErasureRecord[]> }
+  export type ErasureHandler = (userId: string) => Promise<void>;
+  export function createErasureLog(store: ObjectStore): ErasureLog;
+  ```
+- **Behaviour:**
+  - `append` writes `records/<erasedAt as YYYYMMDDTHHMMSSZ>_<userId>.json` with body `canonicalJson({ userId, erasedAt: erasedAt.toString() })`, `application/json`.
+  - `listSince` lists `records/` and returns records with `erasedAt ≥ since`, read from the key name (parsed; the body isn't needed), sorted by `erasedAt` and then `userId`.
+  - `identity` provides the `ErasureHandler` through the container (`WorkerContainer.erasureHandler`, default `null`).
+- **Errors:** `put` failures propagate (`identity` stops the erasure before deleting anything, HLD D-30).
+
+### 4.13 Operations commands (S-10, S-15)
+
+#### F-150: `verifyRestore`
+- **File:** `platform/ops/restoreVerify.ts`
+- **Signature:** `export interface RestoreReport { ok: boolean; schema: "ok" | "behind" | "ahead" | "not_migrated"; amcheck: { indexesChecked: number; failures: { index: string; code: string }[] }; tables: { schema: string; table: string; rows: number }[] }; export async function verifyRestore(deps: { database: Database; journal: readonly { hash: string; when: number }[] }): Promise<RestoreReport>`
+- **Behaviour:**
+  1. `schema`: F-57 `schemaWindow` against the migrations table (`not_migrated` if it's absent).
+  2. For every B-tree index in schemas `public` and `pgboss`: `SELECT bt_index_check(index => $oid, heapallindexed => true)`. An error records `{ index: <name>, code: <SQLSTATE> }`.
+  3. Exact `count(*)` for every table in `public` and `pgboss`.
+  - `ok = schema === "ok" && failures.length === 0`.
+  - Run as `budmon_migrator`, which F-14 grants `EXECUTE ON FUNCTION bt_index_check(regclass, boolean)` and `pg_read_all_data` membership.
+- **Errors:** database errors propagate (CLI exit 1).
+
+#### F-151: `replayErasures`
+- **File:** `platform/ops/erasureReplay.ts`
+- **Signature:** `export class NoErasureHandlerError extends Error {}; export async function replayErasures(deps: { log: ErasureLog; handler: ErasureHandler | null; logger: Logger }, since: Temporal.Instant): Promise<{ replayed: number }>`
+- **Behaviour:** lists the records since `since` and calls the handler for each, in order. Handlers are idempotent (`identity`'s requirement). Logs `info("erasure_replayed", { count })`.
+- **Errors:** records exist and the handler is null → `NoErasureHandlerError`. A handler failure is logged with `replayed` so far and rethrown.
+
+#### F-160: server message rendering
+- **File:** `apps/server/src/i18n/render.ts`
+- **Signature:** `export function renderMessage(locale: string, id: string, values?: Record<string, string | number>): string`
+- **Behaviour:** resolves the locale with F-312 against the catalogs present in `apps/server/src/i18n/messages/`, then formats with `@formatjs/intl`'s `createIntl`. String values are wrapped with F-312 `isolate`.
+- **Errors:** an id that isn't in `en.json` throws `Error("unknown message id")` (a programming error).
+
+### 4.14 Contract package `@budmon/contract` (S-4)
+
+#### F-340: money and common wire schemas
+- **File:** `packages/contract/src/common/money.ts`, `dates.ts`, `ids.ts`
+- **Signatures:**
+  ```ts
+  export const MoneyAmount: z.ZodNumber;            // z.number().int().min(-9007199254740991).max(9007199254740991)
+  export const CurrencyCodeSchema: z.ZodString;     // regex ^[A-Z]{3}$
+  export const MoneySchema: z.ZodObject<{ amount: typeof MoneyAmount; currency: typeof CurrencyCodeSchema }>;
+  export const PlainDateWire: z.ZodString;          // ^\d{4}-\d{2}-\d{2}$ + refine(valid calendar date)
+  export const InstantWire: z.ZodString;            // RFC 3339 with "Z", e.g. 2026-10-05T12:00:00.000Z
+  export const UuidSchema: z.ZodString;             // z.uuid() lower-case
+  ```
+- **Behaviour:** `MoneyAmount` is registered in `@orpc/zod/zod4`'s `JSON_SCHEMA_REGISTRY` with `{ type: "integer", format: "int64", minimum: -9007199254740991, maximum: 9007199254740991 }`, so input and output are emitted identically. No `.transform()` anywhere in the contract.
+
+#### F-341: API version
+- **File:** `packages/contract/src/common/version.ts`
+- **Signature:** `export const API_MAJOR = 1; export const API_MINOR: number; export const API_VERSION: \`1.${number}\``
+- **Behaviour:** `API_MINOR` starts at `0` and is bumped by any pull request that changes `openapi.json` (F-8).
+
+#### F-342: platform errors in the contract
+- **File:** `packages/contract/src/common/errors.ts`
+- **Signatures:** `export const IssueSchema`, `export const OutcomeSchema = z.enum(["not_applied", "unknown"])`, `export const PLATFORM_ERRORS` (an oRPC error map), and `export const base = oc.errors(PLATFORM_ERRORS)`. Every procedure is built from `base`.
+- **Error map:**
+
+  | Key | Status | `data` schema |
+  | --- | ------ | ------------- |
+  | `VALIDATION_FAILED` | 400 | `{ issues: Issue[] }` |
+  | `CLIENT_UPDATE_REQUIRED` | 400 | `{ minimumVersion: int }` |
+  | `UNAUTHENTICATED` | 401 | none |
+  | `FORBIDDEN` | 403 | none |
+  | `NOT_FOUND` | 404 | none |
+  | `CONFLICT` | 409 | `Record<string, string>`, optional |
+  | `IDEMPOTENCY_KEY_REUSED` | 409 | none |
+  | `PAYLOAD_TOO_LARGE` | 413 | none |
+  | `RATE_LIMITED` | 429 | `{ retryAfterSeconds: int ≥ 1 }` |
+  | `INTERNAL` | 500 | `{ outcome }` |
+  | `SERVICE_UNAVAILABLE` | 503 | `{ outcome }`, optional |
+
+#### F-343: create procedures
+- **File:** `packages/contract/src/common/create.ts`
+- **Signatures:** `export const CreatedResultSchema = z.object({ id: UuidSchema, createdAt: InstantWire })`; `export function createRoute(path: \`/${string}\`): ProcedureBuilder` returns `base.route({ method: "POST", path, successStatus: 201, spec: addIdempotencyKeyHeader }).meta({ kind: "create" }).output(CreatedResultSchema)`.
+- **Behaviour:** `addIdempotencyKeyHeader(operation)` adds a required header parameter `Idempotency-Key` (`string`, `format: uuid`) and the extension `x-budmon-kind: create` to the OpenAPI operation.
+
+#### F-344: list schemas
+- **File:** `packages/contract/src/common/cursor.ts`
+- **Signatures:** `export const CursorSchema = z.string().max(512).meta({ "x-budmon-cursor": true })`; `export function listInput<F extends z.ZodRawShape>(filters: F)` returns `z.object({ ...filters, cursor: CursorSchema.optional(), limit: z.number().int().min(1).max(100).default(50) })`; `export function listOutput<T extends z.ZodTypeAny>(item: T)` returns `z.object({ items: z.array(item), nextCursor: CursorSchema.nullable() })`.
+
+#### F-345: meta contract
+- **File:** `packages/contract/src/meta/metaContract.ts`
+- **Signature:** `export const metaContract = { clientConfig: base.route({ method: "GET", path: "/meta/client-config" }).output(ClientConfigSchema) }`, where `ClientConfigSchema = z.object({ apiVersion: z.string().regex(/^1\.\d+$/), android: z.object({ minimumVersionCode: z.number().int().min(0), latestVersionCode: z.number().int().min(0), downloadUrl: z.url().nullable() }), web: z.object({ minimumBuild: z.number().int().min(0) }) })`.
+
+#### F-346: contract root
+- **File:** `packages/contract/src/index.ts`
+- **Signature:** `export const contract = { meta: metaContract /* modules add their keys */ }`; also re-exports F-340 to F-345.
+
+#### F-347: `emitOpenapi`
+- **File:** `packages/contract/scripts/emitOpenapi.ts` (`pnpm contract:openapi`)
+- **Signature:** `export async function emitOpenapi(): Promise<string>`, which returns the JSON text; the script writes it to `packages/contract/openapi.json`.
+- **Behaviour:** `new OpenAPIGenerator({ schemaConverters: [new ZodToJsonSchemaConverter()] }).generate(contract, { info: { title: "Budmon API", version: API_VERSION }, servers: [{ url: "/api/v1" }] })`. Output is serialised with keys sorted recursively, 2-space indentation and a trailing newline, so it's deterministic.
+
+#### F-348: `checkContractRules`
+- **File:** `packages/contract/src/rules/contractRules.ts`
+- **Signature:** `export interface Violation { rule: string; location: string }; export function checkContractRules(doc: OpenAPIV3_1.Document): Violation[]`
+- **Rules** (`location` = JSON pointer):
+  - **R1:** no schema in a request or response body is `{}` or lacks `type`, `$ref`, `anyOf`, `oneOf`, `allOf`, `enum` and `const` (catches `.transform()` and untyped schemas).
+  - **R2:** every `type: "integer"` with `format: "int64"` has `minimum` and `maximum`.
+  - **R3:** no `type: "number"` anywhere without `x-budmon-allow-number: true` (money is integer only).
+  - **R4:** `GET` operations have no request body. Each query or path parameter schema is one of: `format: uuid`; `enum`; `format: date` (or `PlainDateWire`'s pattern); `type: integer`; `type: boolean`; or a string with `x-budmon-cursor: true`.
+  - **R5:** every operation with `x-budmon-kind: create` has a required `Idempotency-Key` header parameter and a `201` response whose schema is `CreatedResult`.
+  - **R6:** operation IDs are unique.
+
+#### F-349: `listProcedures`
+- **File:** `packages/contract/src/rules/listProcedures.ts`
+- **Signature:** `export function listProcedures(c: AnyContractRouter, prefix?: string): { path: string; method: string; route: string }[]`
+- **Behaviour:** walks the router and returns the dotted path (e.g. `meta.clientConfig`), HTTP method and OpenAPI path for every procedure. Used by the default-deny test and F-348's tests.
+
+### 4.15 Images, deploy bundles and the stage-0 host (S-15)
+
+#### F-170: Postgres image entrypoint
+- **File:** `images/postgres/budmon-entrypoint.sh` (bash), `images/postgres/Dockerfile`
+- **Image:** `FROM postgres:18-bookworm@sha256:<digest>`. Adds `pgbackrest` (PGDG apt, pinned; `pg_stat_statements` and `amcheck` ship with the base image's contrib), and copies `apps/server/src/platform/db/sql/cluster-bootstrap.sql` to `/docker-entrypoint-initdb.d/10-budmon.sql.tpl` plus `10-budmon.sh`. Runs as user `postgres` (uid 999).
+- **Behaviour** (CLI `budmon-entrypoint.sh postgres [args]`):
+  1. `PGDATA` must equal `/var/lib/postgresql/data/pgdata`. If `/var/lib/postgresql/data` isn't a mount point (`mountpoint -q`), print `Refusing to start: data mount missing` and exit 70.
+  2. If `$PGDATA/PG_VERSION` is missing:
+     - `BUDMON_FIRST_SETUP=1` → run the upstream `docker-entrypoint.sh` initialisation with `POSTGRES_USER=budmon_admin`, `POSTGRES_PASSWORD_FILE=/run/secrets/ADMIN_PASSWORD` and `POSTGRES_DB=postgres`. `10-budmon.sh` runs the bootstrap SQL with `psql -v migrator_verifier="$(cat /run/secrets/MIGRATOR_VERIFIER)" -v dbname=budmon`.
+     - Otherwise print `Refusing to initialise an empty data directory without BUDMON_FIRST_SETUP=1` and exit 70.
+  3. Otherwise `exec docker-entrypoint.sh postgres -c config_file=/etc/budmon/postgresql.conf -c hba_file=/etc/budmon/pg_hba.conf`.
+- **Configuration** (`infra/deploy/main/postgres/postgresql.conf`, mounted read-only):
+  - **Logging (D-24 rule 8):** `log_error_verbosity = terse`, `log_min_error_statement = panic`, `log_statement = none`, `log_parameter_max_length = 0`, `log_parameter_max_length_on_error = 0`, `log_destination = stderr`.
+  - **Connections and TLS:** `password_encryption = scram-sha-256`, `ssl = on` with `ssl_cert_file`/`ssl_key_file` = `/run/secrets/TLS_CERT` and `/run/secrets/TLS_KEY`, `listen_addresses = '${BUDMON_LISTEN_ADDRESSES}'` (through `-c` from Compose), `max_connections = 100`.
+  - **WAL and archiving:** `wal_level = replica`, `archive_mode = on`, `archive_command = 'pgbackrest --stanza=budmon archive-push %p'`, `archive_timeout = 300`.
+  - **Extensions:** `shared_preload_libraries = 'pg_stat_statements'`.
+  - `shared_buffers` comes from `-c` (stage 0: `512MB`).
+- **pgBackRest:** refuses to archive to a stanza whose system identifier differs (its built-in check). The stanza is created once by the first-deploy runbook (`pgbackrest --stanza=budmon stanza-create`).
+
+#### F-171: `budmon-deploy` (bootstrap)
+- **File:** `infra/deploy/bootstrap/budmon-deploy` (bash 5, `set -euo pipefail`) and `lib/{tag,state,verify,bundle}.sh`. Installed by cloud-init to `/usr/local/bin/budmon-deploy`; anchors in `/etc/budmon/trust/`.
+- **Invocation:** as the forced command for user `deploy`, it reads `$SSH_ORIGINAL_COMMAND`, which must be `deploy <tag>` or `status`. Directly: `budmon-deploy --boot` (from `budmon-boot.service`) or `budmon-deploy --self-test`.
+- **Host files:**
+  - `/etc/budmon/host.env`: `HOST_ROLE` (`main`, `capture` or `main,capture`), `DEPLOYMENT`, `REGISTRY` (e.g. `ghcr.io/<owner>/budmon`).
+  - `/etc/budmon/registry-token`: read-only GHCR token, 0400 root.
+  - `/etc/budmon/age.key`: stage 0, 0400 root.
+  - `/var/lib/budmon/state.json`: `{ "current": { "tag": …, "seq": n } | null, "previous": … | null }`.
+- **Behaviour of `deploy <tag>`:**
+  1. The tag must match `^v[0-9]+\.[0-9]+\.[0-9]+(-(hotfix|infra)\.[0-9]+)?$` (exit 10).
+  2. For each role in `HOST_ROLE` (`main` first): resolve `${REGISTRY}/budmon-deploy-<role>:<tag>` with `crane digest`, then verify it (F-174). On failure, exit 12. Extract it with `crane export <ref@digest> - | tar -x -C /var/lib/budmon/releases/<tag>/<role>`.
+  3. Read `manifest.json`. It must hold `release == tag` and `role == <role>`. Accept only if `seq > state.current.seq`, or `seq == state.previous.seq` (rollback), or `state.current == null`. Otherwise exit 11.
+  4. **Self-update:** if the `main` bundle's `bootstrap/budmon-deploy` or `trust/*` differ from the installed ones:
+     - install them (keeping `*.previous`);
+     - re-exec with the same arguments and `BUDMON_REEXEC=1`;
+     - with `BUDMON_REEXEC=1` already set, skip this step.
+  5. For every application image in the manifest: F-174 verification, then `docker pull <image@digest>` (exit 13 on failure). Third-party images are pulled by their digest from the manifest.
+  6. Run `steps/deploy.sh <tag>` from the `main` bundle, then from the `capture` bundle on a `main,capture` host (F-172), passing the step's exit code through.
+  7. Write `state.json`: `previous ← current`, `current ← { tag, seq }`. Exit 0.
+- **`status`:** prints `state.json` and `docker compose ps --format json` for each project.
+- **`--boot`:** for `state.current`, decrypts secrets and runs `compose up -d` for each role from the extracted bundle. No pull, no migrate. Always exits 0 and logs to journald.
+- **`--self-test`:** prints the anchors' SHA-256 and the host role.
+- **Exit codes:** 0 ok; 10 bad tag; 11 sequence rejected; 12 verification failed; 13 pull failed; 15 migrate failed; 16 not ready, rolled back; 17 rollback failed; 18 secrets decryption failed.
+
+#### F-172: `steps/deploy.sh` (inside the bundle)
+- **File:** `infra/deploy/main/steps/deploy.sh`, `infra/deploy/capture/steps/deploy.sh`
+- **Main role, in order:**
+  1. **Decrypt secrets:** for each `secrets/<DEPLOYMENT>/main/<service>.sops.yaml`, run `SOPS_AGE_KEY_FILE=/etc/budmon/age.key sops -d --output-type json`. Each top-level key is written to `/run/budmon/secrets/<service>/<KEY>`: mode 0400, owner = the service's container UID (api/worker 10001, postgres 999, alloy 0, caddy 10002), directory 0500. On failure, exit 18. `/run` is tmpfs.
+  2. **Silence alerts:** `POST` a 15-minute silence for `alertname="Budmon API down"` to Grafana with `GRAFANA_SILENCE_TOKEN` (from `secrets/<DEPLOYMENT>/main/deploy.sops.yaml`). On failure, log and continue.
+  3. **Queue upgrade:** if `manifest.queueUpgrade` is true, `budmonctl maintenance on`, then stop `worker-general` and (in the capture project) `worker-capture`.
+  4. `docker compose -p budmon-main -f compose.stage<INFRA_STAGE>.yaml run --rm migrate`, on every deploy (exit 15 on non-zero).
+  5. `docker compose -p budmon-main … up -d --remove-orphans`.
+  6. If the host has the capture role: run the capture bundle's step.
+  7. **Wait for readiness:** up to 60 s for `curl -fsS --resolve <DOMAIN>:443:127.0.0.1 https://<DOMAIN>/health/ready`, and for `docker inspect` health `healthy` on `worker-general` and `worker-capture`.
+  8. **On timeout, roll back:** re-run steps 1, 5 and 6 with `state.current`'s bundle and images. If they become ready, exit 16; otherwise exit 17.
+  9. If step 3 turned maintenance on, `budmonctl maintenance off`.
+- **Capture role:** decrypts `secrets/<DEPLOYMENT>/capture/*`, then `docker compose -p budmon-capture -f compose.stage<INFRA_STAGE>.yaml up -d --remove-orphans`.
+- **Worker health check:** the server image has a `healthcheck` entry (`node dist/main/healthcheck.js`). It reads `/tmp/heartbeat` (written by F-79 every interval) and exits 0 if it's younger than 60 s, otherwise 1. Compose: `interval: 15s`, `retries: 4`.
+
+#### F-173: `budmonctl` (host side)
+- **File:** `infra/budmonctl/host/budmonctl` (bash), installed from the bundle to `/usr/local/bin/budmonctl` by `steps/deploy.sh`
+- **Commands:**
+  - `maintenance on|off|status`: creates or removes `/srv/budmon/maintenance/on`; prints `on`/`off`.
+  - `reboot`: `docker compose -p budmon-capture stop`, `docker compose -p budmon-main stop`, `systemctl reboot`.
+  - `status`: same as `budmon-deploy status`.
+- **Exit codes:** unknown command → 64.
+
+#### F-174: signature verification
+- **File:** `infra/deploy/bootstrap/lib/verify.sh`
+- **Signature:** `verify_ref <image@digest>` returns 0 or 12.
+- **Behaviour:** `cosign verify --offline=true --trusted-root=/etc/budmon/trust/trusted_root.json --certificate-identity-regexp="$(cat /etc/budmon/trust/identity.regex)" --certificate-oidc-issuer="$(cat /etc/budmon/trust/issuer)" <ref>`.
+- **Anchors:**
+  - Production `identity.regex`: `^https://github\.com/<owner>/<repo>/\.github/workflows/release\.yml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+(-(hotfix|infra)\.[0-9]+)?$`.
+  - `issuer`: `https://token.actions.githubusercontent.com`.
+  - `trusted_root.json`: the Sigstore public-good trusted root, fetched with `cosign trusted-root create` (or TUF) when the bundle is built and pinned in the bundle and cloud-init.
+- The rehearsal uses `infra/deploy/rehearsal/trust/`, whose identity regex matches `rehearsal.yml` on `refs/pull/*` and `refs/tags/*`.
+
+#### F-175: Compose files and deployment values
+- **Files:** `infra/deploy/main/compose.stage0.yaml`, `infra/deploy/capture/compose.stage0.yaml`, `compose.stage1.yaml` (both roles), `infra/deploy/deployments/<deployment>.env`
+- **`prod-s0.env`:** `INFRA_STAGE=0`, `DOMAIN=budmon.com`, `DATA_SUBNET=172.30.40.0/24`, `PG_DATA_IP=172.30.40.10`, `CAPTURE_DB_SUBNET=172.30.42.0/29`, `PG_CAPTURE_IP=172.30.42.2`, `ALLOY_CAPTURE_IP=172.30.42.3`, `WORKER_CAPTURE_IP=172.30.42.4`.
+- **Stage-0 main project** (`budmon-main`). Every application service runs `read_only: true`, `tmpfs: [/tmp]`, `cap_drop: [ALL]`, `security_opt: [no-new-privileges:true]`, and a named non-root UID.
+
+  | Service | Image | Networks | Memory | Notes |
+  | ------- | ----- | -------- | ------ | ----- |
+  | `caddy` | web | `edge`, `egress` | 128m | Ports 80/443. Mounts: `/var/lib/budmon/caddy:/data`, `/srv/budmon/maintenance:/srv/maintenance:ro`, `Caddyfile:ro`. |
+  | `api` | server, `node dist/main/api.js` | `edge`, `data` | 512m | Env: config from the deployment and the `api` secrets mount. |
+  | `worker-general` | server, `node dist/main/worker.js`, `WORKER_ROLES=general` | `data`, `egress` | 384m | |
+  | `postgres` | postgres | `data` (`ipv4_address: PG_DATA_IP`), `capture-db` (`PG_CAPTURE_IP`), `egress` | 1g | Bind mount `/var/lib/budmon/pg:/var/lib/postgresql/data` with `bind.create_host_path: false`. `BUDMON_LISTEN_ADDRESSES=${PG_DATA_IP},${PG_CAPTURE_IP}`. |
+  | `alloy` | grafana/alloy@digest | `data`, `capture-db` (`ALLOY_CAPTURE_IP`), `egress` | 256m | User root. Read-only mounts: `/var/lib/docker/containers`, `/proc`, `/sys`, `/var/lib/budmon/metrics`. |
+  | `migrate` | server, `node dist/main/migrate.js` | `data` | 256m | Profile `tools`. |
+
+  Networks: `edge` (bridge); `data` (`internal: true`, subnet `DATA_SUBNET`); `egress` (bridge); `capture-db` (external, name `budmon_capture_db`, created by the bootstrap with `--internal --subnet ${CAPTURE_DB_SUBNET}`).
+- **Stage-0 capture project** (`budmon-capture`): `worker-capture` (server, `WORKER_ROLES=capture`, 384m) on `capture-db` (`ipv4_address: WORKER_CAPTURE_IP`) and `capture-egress` (bridge, project-local). Settings:
+  - `extra_hosts`: `db.budmon.internal:${PG_CAPTURE_IP}`, `alloy.budmon.internal:${ALLOY_CAPTURE_IP}`;
+  - `DB_HOST=db.budmon.internal`, `DB_SSLMODE=verify-full`, `DB_SSL_ROOT_CERT_FILE=/run/secrets/DB_CA_CERT`;
+  - `OTEL_EXPORTER_OTLP_ENDPOINT=http://alloy.budmon.internal:4318`;
+  - no proxy variables.
+- **`pg_hba.prod-s0.conf`:**
+  ```
+  local   all     budmon_admin                                    scram-sha-256
+  local   all     all                                             reject
+  hostssl budmon  budmon_capture  172.30.42.4/32                  scram-sha-256
+  host    budmon  budmon_app,budmon_queue,budmon_migrator,budmon_monitor  172.30.40.0/24  scram-sha-256
+  host    all     all             0.0.0.0/0                       reject
+  hostssl all     all             0.0.0.0/0                       reject
+  ```
+- **Stage-1 files** (`compose.stage1.yaml`, `pg_hba.prod-s1.conf`, `pg_hba.dryrun.conf`, `squid/squid.conf`, capture `alloy/config.alloy`) exist from the first release, because the rehearsal runs them (D-41). Their host-level counterparts are out of scope. `squid.conf` allows `CONNECT` only to `:443` of `oauth2.googleapis.com`, `gmail.googleapis.com`, `cloudkms.googleapis.com`, `pubsub.googleapis.com` and the Sentry ingest host, for the source address of worker-capture. Stage-1 worker-capture sets `HTTPS_PROXY=http://egress-proxy:3128`, `HTTP_PROXY` the same, and `NO_PROXY=no_proxy=no_grpc_proxy=alloy.budmon.internal,db.budmon.internal,localhost`.
+- **Caddyfile** (`infra/deploy/main/Caddyfile`):
+  - Site `{$DOMAIN}`.
+  - `log` and the default logger use `format filter` with `request>uri regexp "\?.*$" ""`, `request>headers delete`, `resp_headers delete` and `request>remote_ip ip_mask 24 64`.
+  - `@maint file /srv/maintenance/on`.
+  - `handle /api/*`:
+    - with `@maint`, `respond` 503, `Content-Type: application/json`, `Retry-After: 120`, body `{"defined":true,"code":"SERVICE_UNAVAILABLE","status":503,"message":"Service unavailable","data":{"outcome":"not_applied"}}`;
+    - otherwise `reverse_proxy api:3000 { lb_try_duration 10s  lb_try_interval 250ms }`.
+  - `handle /health/ready`: with `@maint`, `respond {"status":"maintenance"} 503`; otherwise proxy to `api`.
+  - `handle /version.json`: `file_server` with `Cache-Control: no-store`.
+  - `handle`: `root /srv/web`, `try_files {path} /index.html`, `file_server`; `/assets/*` gets `Cache-Control: public, max-age=31536000, immutable`.
+  - Headers on all responses: `Strict-Transport-Security: max-age=31536000; includeSubDomains`, `Referrer-Policy: no-referrer`, `X-Content-Type-Options: nosniff`, `Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://*.ingest.de.sentry.io https://*.ingest.sentry.io; frame-ancestors 'none'; base-uri 'none'; form-action 'self'`.
+- **Alloy** (`infra/deploy/main/alloy/config.alloy`):
+  - `otelcol.receiver.otlp` (gRPC 4317 and HTTP 4318), then `otelcol.processor.transform`, which keeps only F-40's span-attribute allowlist and F-41's metric labels, then `otelcol.exporter.otlphttp` to Grafana Cloud with the token from the `alloy` secret.
+  - `loki.source.file` on `/var/lib/docker/containers/*/*-json.log`, then `loki.process`:
+    - parse JSON;
+    - drop lines whose `event` isn't present (non-application lines are kept only for Caddy and Postgres containers, selected by container label);
+    - drop any JSON key outside F-30's fields plus the fixed keys;
+    - count drops with `stage.metrics` as `budmon_alloy_log_fields_dropped_total`;
+    - then `loki.write`.
+  - `prometheus.exporter.unix` (CPU, memory, filesystem, textfile collector at `/var/lib/budmon/metrics`), `prometheus.exporter.postgres` (as `budmon_monitor`), `prometheus.scrape`, then `prometheus.remote_write`.
+
+#### F-176: host units and cloud-init (stage 0)
+- **Files:** `infra/systemd/*`, `infra/cloud-init/stage0-single.yaml`
+- **Units:**
+
+  | Unit | Behaviour |
+  | ---- | --------- |
+  | `budmon-boot.service` | `After=docker.service`, runs `budmon-deploy --boot`. |
+  | `pgbackrest-full.timer` | `OnCalendar=Sun *-*-* 02:00:00 UTC`, runs `docker exec budmon-main-postgres-1 pgbackrest --stanza=budmon --type=full backup`. |
+  | `pgbackrest-diff.timer` | `Mon..Sat 02:00 UTC`, `--type=diff`. |
+  | `budmon-backup-metrics.timer` | Every 15 min, runs `pgbackrest --output=json info`. Writes `/var/lib/budmon/metrics/pgbackrest.prom` with `pgbackrest_last_backup_completed_timestamp_seconds{type="full\|diff"}` and `pgbackrest_last_archive_timestamp_seconds`, plus `pgbackrest_check_ok 0\|1` from `pgbackrest check` (run hourly). |
+- **cloud-init:**
+  - Users `deploy` (`authorized_keys` with `command="/usr/local/bin/budmon-deploy",no-pty,no-port-forwarding,no-agent-forwarding,no-X11-forwarding`) and `owner` (sudo, key only).
+  - `sshd`: `PasswordAuthentication no`, `PermitRootLogin no`.
+  - Docker from its apt repository (pinned major); `/etc/docker/daemon.json` with `{"log-driver":"json-file","log-opts":{"max-size":"10m","max-file":"3"}}`.
+  - cosign, crane, sops and age binaries, downloaded by pinned version and SHA-256.
+  - `unattended-upgrades` with `Automatic-Reboot "true"` and `Automatic-Reboot-Time "04:00"` (stage 0, D-20); journald `MaxRetentionSec=14day`.
+  - `/etc/budmon/host.env`, `/etc/budmon/trust/*`, the bootstrap, the units, and the directories `/var/lib/budmon/{pg,caddy,metrics,releases}`. `/var/lib/budmon/pg` is created **empty**, so the first deploy uses `BUDMON_FIRST_SETUP=1` (first-deploy runbook).
+  - The age key and registry token are **not** in user-data. The first-deploy runbook installs them over SSH (`sudo install -m 0400 /dev/stdin /etc/budmon/age.key`).
+  - Hetzner Cloud firewall (OpenTofu): inbound 22, 80, 443. Snapshots and backups disabled.
+
+#### F-177: OpenTofu (stage 0)
+- **Files:** `infra/tofu/*.tf`, `infra/tofu/stage0.tfvars`
+- **Resources:**
+  - **Hetzner:** `hcloud_server` CX23 (`location` from vars), `hcloud_firewall`, `hcloud_ssh_key` (owner and deploy), primary IPv4.
+  - **Google Cloud:** KMS key ring `budmon` and key `capture-credentials` (`purpose = ASYMMETRIC_DECRYPT`, algorithm `RSA_DECRYPT_OAEP_3072_SHA256`, `prevent_destroy`); service account `budmon-capture` with `roles/cloudkms.cryptoKeyDecrypter` on that key only; Pub/Sub topic `gmail-push` with publisher `gmail-api-push@system.gserviceaccount.com`; subscription `gmail-push-capture` (pull, 7-day retention) with `roles/pubsub.subscriber` for `budmon-capture`.
+  - **Backblaze B2:** buckets `budmon-backups`, `budmon-exports` (lifecycle: delete after 8 days), `budmon-erasure-log` (Object Lock 30 days if available, lifecycle 31 days) and `budmon-tofu-state`. Application keys: backups RW → postgres; exports RW → worker-general; erasure-log write-only → worker-general; exports read-only → api. Key secrets are output once and stored in SOPS by the owner.
+  - **Grafana:** contact point (email), notification policy, alert rules (§7.5) and the synthetic HTTP check on `https://<domain>/health/ready` every 60 s from 2 probes.
+- **State:** OpenTofu state encryption with the `pbkdf2` key provider (passphrase from `TF_VAR_state_passphrase`, in the owner's password manager); `s3` backend on B2.
+
+### 4.16 `budmonctl` owner-side commands (S-15)
+
+#### F-190: `scramVerifier`
+- **File:** `infra/budmonctl/src/scram.ts`
+- **Signature:** `export function scramVerifier(password: string, opts?: { salt?: Buffer; iterations?: number }): string`
+- **Behaviour:** RFC 5802/7677. `SaltedPassword = PBKDF2-HMAC-SHA-256(password, salt, iterations, 32)`; `ClientKey = HMAC(SaltedPassword, "Client Key")`; `StoredKey = SHA-256(ClientKey)`; `ServerKey = HMAC(SaltedPassword, "Server Key")`. Returns `SCRAM-SHA-256$<iterations>:<b64 salt>$<b64 StoredKey>:<b64 ServerKey>`. Defaults: 4096 iterations, 16 random salt bytes.
+
+#### F-191: `rotateRolePassword`
+- **File:** `infra/budmonctl/src/secrets.ts`; CLI `pnpm budmonctl secrets rotate-role <role> --deployment <d>`
+- **Signature:** `export async function rotateRolePassword(input: { deployment: string; role: DbLoginRole; repoRoot: string }, deps: { sops: SopsCli /* [inj] */; randomBytes: (n: number) => Buffer /* [inj] */ }): Promise<{ filesChanged: string[] }>`, where `SopsCli = { set(file: string, jsonPath: string, jsonValue: string): Promise<void>; get(file: string, jsonPath: string): Promise<string> }`.
+- **Behaviour:**
+  1. `password = base64url(randomBytes(32))`.
+  2. The plaintext is written into the using services' files:
+
+     | Role | File and key |
+     | ---- | ------------ |
+     | `budmon_app` | `main/api.DB_PASSWORD` and `main/worker-general.DB_PASSWORD` |
+     | `budmon_capture` | `capture/worker-capture.DB_PASSWORD` |
+     | `budmon_queue` | `main/worker-general.QUEUE_DB_PASSWORD` |
+     | `budmon_monitor` | `main/alloy.PG_MONITOR_PASSWORD` |
+     | `budmon_migrator` | `main/migrate.DB_PASSWORD` |
+  3. Reads `main/migrate.ROLE_SECRETS` (JSON), sets `[role] = { verifier: scramVerifier(password) }`, and writes it back.
+  4. Paths are `infra/secrets/<deployment>/<path>.sops.yaml`.
+  - **Never prints the password.**
+- **Errors:** an unknown deployment directory or missing file → `Error("missing secret file <path>")`, exit 2. An unknown role → exit 64.
+
+#### F-192: `initDeployment`
+- **File:** `infra/budmonctl/src/secrets.ts`; CLI `pnpm budmonctl secrets init-deployment <d> --main-recipient <age1…> --capture-recipient <age1…>`
+- **Signature:** `export async function initDeployment(input: { deployment: string; repoRoot: string; mainRecipient: string; captureRecipient: string; ownerRecipient: string }, deps: { sops: SopsCli; randomBytes; writeFile }): Promise<{ files: string[] }>`
+- **Behaviour:**
+  1. Refuses if `infra/secrets/<d>/` exists.
+  2. Appends creation rules to `infra/secrets/.sops.yaml`: `path_regex: ^infra/secrets/<d>/main/` → `age: <main>,<owner>`; capture likewise.
+  3. Creates every service file with generated values: role passwords and the verifiers file; `CURSOR_KEY`, `RATE_LIMIT_HMAC_KEY`, `API_SECRETS_KEYS` (`{ current: "k1", keys: { k1 } }`), `MAILBOX_HMAC_KEY`, `DEV`-none; Postgres `ADMIN_PASSWORD`, `MIGRATOR_VERIFIER` and `PGBACKREST_REPO1_CIPHER_PASS`.
+  4. Writes `__FILL_ME__` placeholders for externally issued secrets: B2 keys, `GCP_CREDENTIALS`, `GOOGLE_OAUTH_CLIENT_SECRET`, `FX_PRIMARY_APP_ID`, Grafana tokens, `TLS_KEY`/`TLS_CERT`/`DB_CA_CERT`.
+  5. Returns the file list.
+
+  `budmon-deploy` refuses (exit 18) to decrypt a file still containing `__FILL_ME__`.
+- **Errors:** an existing directory → exit 2.
+
+### 4.17 Release tooling (S-14) and the rehearsal (S-16)
+
+#### F-180: `generateReleaseMigration` (`pnpm db:release-migration <version>`)
+- **File:** `apps/server/tools/releaseMigration.ts`
+- **Signature:** `export async function generateReleaseMigration(input: { version: string; serverDir: string; timeoutMs?: number }, deps: { spawnPty: typeof import("node-pty").spawn /* [inj] */ }): Promise<{ file: string | null; ambiguities: string[] }>`
+- **Behaviour:**
+  1. `version` must match `^v\d+\.\d+\.\d+(-hotfix\.\d+)?$`.
+  2. Spawns `pnpm exec drizzle-kit generate --name <version>` in `serverDir` under a pty (80×24).
+  3. Whenever the output (ANSI stripped) contains a line matching `/created or renamed|renamed from another|create (table|column|enum|sequence|view)/i` followed by a selection list, writes `"\r"`, which selects the first option ("+ create …"), and records the question line in `ambiguities`.
+  4. On exit 0, returns the newly created `drizzle/NNNN_<version>.sql`, or `null` if the output contains "No schema changes".
+- **Errors:** a non-zero exit → `Error("drizzle-kit generate failed")` with the exit code. A timeout (default 120 s) kills the process and throws `Error("generate timed out")`.
+
+#### F-181: `pendingSchemaReport` (`pnpm db:pending-report`)
+- **File:** `apps/server/tools/releaseMigration.ts`
+- **Signature:** `export async function pendingSchemaReport(input: { serverDir: string }, deps: …): Promise<{ sql: string; ambiguities: string[] }>`
+- **Behaviour:** copies `serverDir/drizzle` and `drizzle.config.ts` into a temp directory, runs F-180's logic there with `--name pending`, and returns the generated SQL (or `""`). It never writes into the repository. CI posts the result as a pull-request comment (non-blocking).
+
+#### F-182: `checkMigrationsReproduceSchema` (`pnpm db:check-migrations`, check (i))
+- **File:** `apps/server/tools/checkMigrations.ts`
+- **Signature:** `export async function checkMigrationsReproduceSchema(input: { serverDir: string }, deps: { startPostgres: () => Promise<{ superuserUrl: string; stop(): Promise<void> }> /* [inj] */ }): Promise<{ ok: boolean; snapshotClean: boolean; dumpDiff: string }>`
+- **Behaviour:**
+  - (a) `snapshotClean`: F-181 returns `sql === ""`.
+  - (b) On one Postgres instance, builds two databases: `push_ref` (F-14, then F-19 push mode) and `from_migrations` (F-14, then F-19 migrate mode). Runs `pg_dump --schema-only --no-owner --no-privileges --schema=public` on each, normalises (drops comments, blank lines and `SET`/`SELECT pg_catalog.set_config` lines, sorts statements), and diffs.
+  - `ok = snapshotClean && dumpDiff === ""`.
+  - With no migrations at all (before the first release), returns `{ ok: true, snapshotClean: true, dumpDiff: "" }` and CI skips it on non-release branches.
+
+#### F-183: upgrade test harness
+- **File:** `apps/server/test/upgrade/` (test-architect)
+- **Rule:** for release `vN`, builds the previous release's database from the migrations at the previous release tag (`git show <prevTag>:apps/server/drizzle/…` into a temp folder), loads `apps/server/test/upgrade/<vN>/fixtures.sql`, applies the current migrations, then runs `apps/server/test/upgrade/<vN>/*.test.ts`. If there's no previous release tag, the harness reports "skipped: baseline" and passes.
+
+#### F-184: `checkRiskyStatements` (`pnpm db:check-risky <files…>`)
+- **File:** `apps/server/tools/checkRisky.ts`
+- **Signature:** `export function checkRiskyStatements(sql: string): { line: number; pattern: string }[]`
+- **Behaviour:**
+  - Splits on Drizzle's `--> statement-breakpoint`.
+  - Flags statements matching (case-insensitive):
+    - `DROP TABLE`, `DROP COLUMN`, `RENAME`, `ALTER COLUMN … TYPE`, `SET NOT NULL`;
+    - `ADD COLUMN … NOT NULL` without `DEFAULT`;
+    - `ADD CONSTRAINT …` (`CHECK` or `FOREIGN KEY`) without `NOT VALID`;
+    - `CREATE UNIQUE INDEX`, `DROP INDEX`, `TRUNCATE`, `DELETE FROM`.
+  - A statement preceded by a line `-- reviewed: <at least 10 characters>` isn't flagged.
+  - The CLI prints `file:line pattern` and exits 1 if anything is flagged.
+
+#### F-185: `releaseSequence`
+- **File:** `tools/ci/releaseSequence.ts`
+- **Signature:** `export function releaseSequence(tags: readonly string[]): number`
+- **Behaviour:** counts the tags matching F-171's tag regex. The release workflow calls it after creating the new tag, so the first release is `1`. This number is the manifest's `seq` and the web build number.
+
+#### F-195: `runRehearsal`
+- **File:** `tools/rehearsal/src/run.ts`; CLI `pnpm --filter @budmon/tools-rehearsal rehearse --mode full|infra --previous <tag|none>`
+- **Signature:** `export async function runRehearsal(opts: { mode: "full" | "infra"; previousTag: string | null; images: { server: string; web: string; postgres: string }; bundles: { main: string; capture: string }; workDir: string }, deps: { exec: (cmd: string, args: string[], o?: object) => Promise<{ code: number; stdout: string }> /* [inj] */ }): Promise<{ ok: boolean; steps: { name: string; ok: boolean; detail: string }[] }>`
+- **Steps** (each recorded; the first failure stops the run, except that cleanup and artifact collection always run):
+  1. `verify-bundles`: F-174 with the rehearsal anchors, and the sequence-rule checks (F-171 steps 3 and 4) run against a scratch state file: accept seq n+1; accept a rollback to the previous seq; reject seq n−1.
+  2. `previous-db` (mode `full`, `previousTag` not null): start Postgres from the **postgres image** with `BUDMON_FIRST_SETUP=1`. Build the previous release's schema by running the previous release's `migrate` image, then load `apps/server/test/upgrade/<version>/fixtures.sql`. With `previousTag = null`: first setup only.
+  3. `migrate`: run the new `migrate` image.
+  4. `stack-up`: `docker compose -p rh-main -f infra/deploy/main/compose.stage1.yaml -f infra/deploy/rehearsal/compose.rehearsal.yaml up -d`, and the same for `rh-capture`. The overlay:
+     - generates throwaway secrets per run with separate age keys for `main` and `capture` (F-192 into a temp directory);
+     - Caddy with `tls internal`;
+     - MinIO for B2;
+     - `KMS_PROVIDER=local` with `APP_ENV=rehearsal`;
+     - F-197 behind `FX_PRIMARY_BASE_URL`/`FX_FALLBACK_BASE_URL`;
+     - Mailpit;
+     - F-196 reachable as the Google hostnames through `extra_hosts` and the egress proxy, with `NODE_EXTRA_CA_CERTS` set to its CA;
+     - Alloy exporting to a file sink;
+     - `SENTRY_DSN` pointing at F-198's capture endpoint.
+  5. `ready`: `/health/ready` is 200 and both workers are healthy within 120 s.
+  6. `upgrade-assertions` (mode `full`): runs `apps/server/test/upgrade/<version>/*.test.ts` against the migrated database.
+  7. `canary-flows`: runs `tools/rehearsal/checks/canaryFlows.test.ts` (test-architect) through Caddy.
+  8. `scan`: F-198 over every container's `docker logs`, Caddy's access and error logs, the Postgres and pgBackRest logs, Alloy's file sink, the captured Sentry events, and `SELECT output FROM pgboss.job`. Also asserts `budmon_alloy_log_fields_dropped_total == 0` and `telemetry_attributes_dropped_total == 0` from Alloy's scrape.
+  9. `no-stage-setting`: `docker inspect` every application container. Fail if `Config.Env` or `Mounts` mention `HOST_ROLE`, `DEPLOYMENT`, `INFRA_STAGE` or `/etc/budmon/host.env`.
+  10. `cross-role-secrets`: assert `rh-main` containers have no mount under the capture secrets directory, and vice versa.
+  11. `gate-commands`:
+      - `budmonctl secrets rotate-role budmon_capture` on the temp secrets, then redeploy the capture project (schema step first). Expect the heartbeat healthy within 60 s.
+      - `cli secrets:rewrap-api` exits 0.
+      - `pgbackrest backup` to MinIO, a restore into a fresh Postgres container, then `cli restore:verify` exits 0 and `cli erasure:replay --since <run start>` exits 0.
+  12. `maintenance`: touch the flag. `/api/v1/meta/client-config` → 503 envelope; `/health/ready` → 503 `maintenance`. Remove it → 200.
+  13. `rollback` (`previousTag` not null): start the previous release's images on the migrated database and expect `/health/ready` 200.
+  14. `smoke`: `apps/web/e2e/smoke.spec.ts` (test-architect) against the stack.
+  15. `stage0-overlay`, mode `full`, only while the repository variable `PRODUCTION_STAGE == 0`: F-199.
+
+  Artifacts (logs, scan report, Sentry events) are uploaded by the workflow.
+- **Mode `infra`:** skips steps 2 (it uses a database migrated by the previous release's images instead) and 6. Step 3 must report `migrationsApplied: 0`.
+
+#### F-196: fake Google
+- **File:** `tools/rehearsal/src/fakeGoogle.ts`
+- **Signature:** `export function startFakeGoogle(opts: { tls: { key: Buffer; cert: Buffer }; port: number; controlPort: number; canaries: Canaries }): Promise<{ close(): Promise<void> }>`
+- **Behaviour:** HTTPS server answering by the `Host` header:
+  - `oauth2.googleapis.com POST /token` → `{ access_token: canaries.token, refresh_token: canaries.token + "-r", expires_in: 3599, scope: "https://www.googleapis.com/auth/gmail.readonly", token_type: "Bearer" }`;
+  - `gmail.googleapis.com GET /gmail/v1/users/me/history` and `/messages/:id` → canary content (`snippet` and `payload.body.data` hold `canaries.message`; headers hold `canaries.payee`);
+  - `pubsub.googleapis.com` → `503` (sources' tests use their own fakes).
+
+  `POST /__control { mode: "ok" | "invalid_grant" | "server_error" | "gaxios_error" }` on `controlPort` switches the token endpoint: `400 {error:"invalid_grant", error_description: canaries.message}`, `500` with a body containing `canaries.token`, or a malformed body that triggers a client exception with config.
+
+#### F-197: fake FX
+- **File:** `tools/rehearsal/src/fakeFx.ts`
+- **Behaviour:** serves `/historical/<date>.json` (OXR shape) and `/<date>/currencies/usd.json` (fawazahmed0 shape) with F-133's fixed rates.
+
+#### F-198: `scanForCanaries` and the Sentry capture endpoint
+- **File:** `tools/rehearsal/src/scan.ts`
+- **Signatures:** `export interface Canaries { amountMinor: string; payee: string; email: string; token: string; message: string }; export const CANARIES: Canaries; export function scanForCanaries(sources: readonly { name: string; text: string }[], canaries: Canaries): { source: string; canary: keyof Canaries; offset: number }[]; export function startSentryCapture(port: number): Promise<{ events(): string[]; close(): Promise<void> }>`
+- **Canaries:** `amountMinor: "987654321"`, `payee: "CANARYPAYEE7f3a"`, `email: "canary.7f3a@example.invalid"`, `token: "ya29.CANARYTOKEN7f3a"`, `message: "CANARYMESSAGE7f3a"`.
+- **Behaviour:** case-sensitive substring search. Also searches the base64 and URL-encoded forms of each canary.
+
+#### F-199: stage-0 overlay run
+- **File:** `tools/rehearsal/src/stage0Overlay.ts`
+- **Behaviour:**
+  1. Brings the rehearsal down.
+  2. Starts `compose.stage0.yaml` for both projects (`HOST_ROLE=main,capture` semantics: two projects joined by `budmon_capture_db`; worker-capture on `capture-egress` with no proxy variables) using the overlay's stand-ins, with `budmon-boot`'s decrypt step executed by the harness.
+  3. Checks readiness and heartbeats. Checks that `docker exec rh-capture-worker-capture-1 node -e "<connect to postgres at PG_DATA_IP:5432>"` fails, i.e. Postgres is unreachable except through `capture-db`.
+  4. Runs `canaryFlows.test.ts` (the subset tagged `@stage0`) and step 8's scan.
+
+### 4.18 Web (S-11, S-12)
+
+All files are under `apps/web/src/`. §8.1 gives routes and screen behaviour.
+
+#### F-200: application entry (`main.tsx`)
+- **Behaviour:**
+  1. `initWebSentry` (F-217).
+  2. Creates the query client (F-204) and API client (F-201).
+  3. Loads the locale (F-206): user preference later from `identity`; for now `navigator.language` resolved against the supported locales.
+  4. Renders `<I18nProvider><QueryClientProvider><RouterProvider/><Toaster/><UpdateNotifier/><OfflineBanner/></…>` into `#root`.
+
+#### F-201: `createApiClient`
+- **File:** `api/client.ts`
+- **Signature:** `export function createApiClient(opts: { buildNumber: number; baseUrl?: string; fetch?: typeof fetch; onClientUpdateRequired?: () => void }): ContractRouterClient<typeof contract>`
+- **Behaviour:** `new OpenAPILink(contract, { url: baseUrl ?? location.origin + "/api/v1", headers: () => ({ "X-Budmon-Client": "web/" + buildNumber, traceparent: newTraceparent() }), fetch: (req, init) => (opts.fetch ?? fetch)(req, { ...init, credentials: "same-origin" }) })`. Any response error with code `CLIENT_UPDATE_REQUIRED` calls `onClientUpdateRequired`. `newTraceparent()` returns `00-<32 hex>-<16 hex>-01` from `crypto.getRandomValues`.
+
+#### F-202: `toAppError`
+- **File:** `api/errors.ts`
+- **Signature:** `export type AppError = { kind: "defined"; key: string; status: number; data: unknown } | { kind: "network" } | { kind: "timeout" } | { kind: "unknown" }; export function toAppError(err: unknown): AppError`
+- **Behaviour:**
+  - An oRPC client error with `defined: true` → `defined`.
+  - A `TypeError` from fetch, or `navigator.onLine === false` → `network`.
+  - An `AbortError` caused by a timeout → `timeout`.
+  - Otherwise → `unknown`.
+
+#### F-203: `messageForError`
+- **File:** `api/errorMessages.ts`
+- **Signature:** `export function messageForError(e: AppError, operation: "read" | "create" | "mutation"): { descriptor: MessageDescriptor; values?: Record<string, string | number> }`
+- **Behaviour** (the HLD §4.9 table):
+
+  | `AppError` | Message ID |
+  | ---------- | ---------- |
+  | `INTERNAL` with outcome `not_applied` and a non-read operation | `error.generic.notChanged` |
+  | `INTERNAL` with outcome `unknown`, or `timeout` on a non-read | `error.generic.unknownOutcome` |
+  | `INTERNAL` on a read | `error.generic.read` |
+  | `VALIDATION_FAILED` | `error.validation.form` |
+  | `RATE_LIMITED` | `error.rateLimited` with `{ minutes: ceil(retryAfterSeconds / 60) }` |
+  | `SERVICE_UNAVAILABLE` or `network` | `error.unavailable` |
+  | `NOT_FOUND` | `error.notFound` |
+  | `FORBIDDEN` | `error.forbidden` |
+  | `CLIENT_UPDATE_REQUIRED` | `update.required.web` |
+  | Unknown keys and `unknown` | The generic message for the operation (`read` → `error.generic.read`, otherwise `error.generic.unknownOutcome`) |
+
+#### F-204: `createQueryClient`
+- **File:** `api/queryClient.ts`
+- **Signature:** `export function createQueryClient(): QueryClient`
+- **Behaviour:**
+  - **Queries:** `retry(failureCount, err)` is true while `failureCount < 3` and `toAppError(err)` is `network`, `timeout`, or `defined` with status ≥ 500. `retryDelay: (n) => 1000 × 2^n`. `refetchOnWindowFocus: true`. `staleTime: 30000`.
+  - **Mutations:** `retry` is the same rule only when `mutation.meta?.idempotent === true`, otherwise 0.
+
+#### F-205: `createCreateMutation`
+- **File:** `api/createMutation.ts`
+- **Signature:** `export function createCreateMutation<I>(opts: { mutationFn: (input: I, idempotencyKey: string) => Promise<{ id: string; createdAt: string }>; invalidate: readonly QueryKey[] }): CreateMutationResult<{ id: string; createdAt: string }, unknown, I>`
+- **Behaviour:**
+  - The helper keeps a current key (`crypto.randomUUID()`) and the `canonicalJson` of the last failed input.
+  - A `mutate(input)` reuses the current key if the previous call **failed** with the same canonical input, otherwise it generates a new key. So automatic retries and a manual **Try again** with unchanged input reuse the key, and the server deduplicates.
+  - After a success, or when the input changes, the next call gets a new key.
+  - It sets `meta: { idempotent: true }`. On success it invalidates every key in `invalidate`.
+
+#### F-206: i18n provider
+- **File:** `i18n/I18nProvider.tsx`, `i18n/useI18n.ts`
+- **Signature:** `export function I18nProvider(props: { initialLocale: string; children: JSX.Element }): JSX.Element; export function useI18n(): { locale: Accessor<string>; dir: Accessor<"ltr" | "rtl">; t: (d: MessageDescriptor, v?: Record<string, unknown>) => string; formatMoney: (m: Money, minorUnits: number) => string; formatDate: (d: Temporal.PlainDate) => string; formatInstant: (i: Temporal.Instant, timeZone: string) => string; formatRelative: (i: Temporal.Instant, now: Temporal.Instant) => string; setLocale: (l: string) => Promise<void> }`
+- **Behaviour:**
+  - Supported locales: `en`, plus `en-XA` and `ar-XB` when `import.meta.env.VITE_PSEUDO_LOCALES === "1"`.
+  - `setLocale` lazily imports the catalog, then sets `document.documentElement.lang` and `.dir = directionOf(locale)` without reloading.
+  - `formatRelative` uses `Intl.RelativeTimeFormat` when `now − i < 7 days` (seconds → "now", then minutes, hours, days), and otherwise `formatInstant` as a date.
+  - `t` wraps string values in F-312 `isolate`.
+
+#### F-207: pseudo-locale generator
+- **File:** `apps/web/scripts/pseudoLocales.ts` (runs in `vite build` and `dev` when `VITE_PSEUDO_LOCALES=1`)
+- **Signatures:** `export function toAccented(icuMessage: string): string`, `export function toRtlPseudo(icuMessage: string): string`
+- **Behaviour:** both preserve ICU syntax (arguments, plural and select keywords, and tags) by transforming only literal text segments of the parsed AST.
+  - `toAccented` maps ASCII letters to accented look-alikes (a→á, e→é, i→í, o→ó, u→ú, A→Á, …, c→ç, n→ñ). Each literal gains `~` padding: one per 3 characters, which reaches +30% when combined with brackets. The result is wrapped as `[…]`.
+  - `toRtlPseudo` wraps each literal segment with RLM (U+200F) at both ends, keeping English letters, so the layout flips while the text stays readable.
+  - Outputs `src/i18n/generated/{en-XA,ar-XB}.json` (gitignored).
+
+#### F-209: `ErrorFallback` (S-2)
+- **File:** `ui/ErrorFallback.tsx`
+- **Signature:** `export function ErrorFallback(props: { error: AppError; requestId?: string; onRetry: () => Promise<void> }): JSX.Element`
+- **Behaviour:** described in §8.1 S-2.
+
+#### F-210: `UpdateNotifier` (J-6)
+- **File:** `ui/UpdateNotifier.tsx`
+- **Signature:** `export function UpdateNotifier(props: { buildNumber: number; fetchVersion?: () => Promise<{ buildNumber: number }>; now?: () => number; schedule?: (fn: () => void, ms: number) => () => void }): JSX.Element`
+- **Behaviour:** checks `/version.json` on `window` focus (at most once per 60 s) and every 30 minutes. If the fetched `buildNumber` is greater than its own, shows the toast (`update.web.available`, button `update.web.reload`, which calls `location.reload()`). After the global `clientUpdateRequired` signal (F-201), shows a persistent banner (`role="alert"`) with the same button. It never reloads automatically. Fetch failures are ignored silently.
+
+#### F-211: `OfflineBanner` (C-1, web)
+- **File:** `ui/OfflineBanner.tsx`
+- **Behaviour:**
+  - Listens to `online`/`offline` events and `navigator.onLine`.
+  - **Offline:** a banner `role="status"` `aria-live="polite"` with `offline.banner.web` ("You're offline.") and an icon.
+  - **Back online:** the text changes to `offline.back` ("Back online.") for 3 seconds, then the banner hides.
+
+#### F-212: toasts
+- **File:** `ui/Toaster.tsx`
+- **Signatures:** `export function showToast(t: { message: string; tone: "info" | "error" | "success"; action?: { label: string; onClick: () => void }; persistent?: boolean }): string`, `export function dismissToast(id: string): void`
+- **Behaviour:** uses Kobalte's `Toast` region (`aria-live="polite"`; `assertive` for `error`). Non-persistent toasts close after 6 s, paused on hover or focus.
+
+#### F-213: form error helpers
+- **File:** `ui/forms.tsx`
+- **Signatures:** `export function FieldError(props: { id: string; message?: string }): JSX.Element`, `export function FormErrorSummary(props: { messages: readonly { fieldId?: string; text: string }[] }): JSX.Element`, `export function applyServerIssues(issues: readonly Issue[], fields: Readonly<Record<string, { id: string; label: string; setError: (m: string) => void }>>, t: …): { summary: { fieldId?: string; text: string }[] }`
+- **Behaviour:**
+  - `FieldError` renders an icon plus text with `id` for `aria-describedby`.
+  - `FormErrorSummary` renders `role="alert"`, receives focus when it changes, and each entry links to its field.
+  - `applyServerIssues` maps each issue whose `path.join(".")` names a field to `setError(translated issue message)`, where the issue `code` maps to a `validation.<code>` message ID with a fallback to `validation.invalid`. The summary holds `error.validation.form`, plus one entry per issue that names no field: `error.validation.unknownField` with `{ label }` (the field label, or the path text if unknown).
+
+#### F-214: rate-limit notice (J-3)
+- **File:** `ui/RateLimitNotice.tsx`
+- **Signature:** `export function createRateLimitGate(now?: () => number): { blockedFor: Accessor<number>; block(retryAfterSeconds: number): void }` and `export function RateLimitNotice(props: { secondsLeft: number }): JSX.Element`
+- **Behaviour:** `block` sets an expiry. `blockedFor` is the seconds remaining (ticks every second, 0 when expired). The form's submit is `disabled` while `blockedFor() > 0`. The notice text is `error.rateLimited` with `minutes = ceil(seconds / 60)`, in `role="status"`.
+
+#### F-215: icon registry
+- **File:** `ui/icons/registry.ts`, `ui/icons/Icon.tsx`
+- **Signatures:** `export const icons: Record<IconName, { svg: Component<JSX.SvgSVGAttributes<SVGSVGElement>>; mirrorInRtl: boolean }>`; `export function Icon(props: { name: IconName; label?: string; class?: string }): JSX.Element`
+- **Behaviour:** renders the SVG with `aria-hidden="true"` when there's no `label`, otherwise `role="img"` and `aria-label`. Adds the class `rtl:-scale-x-100` and `data-rtl-probe="mirror"` when `mirrorInRtl`, else `data-rtl-probe="no-mirror"`. The platform's initial icons are `alert`, `info`, `offline`, `refresh` (no mirror), `chevron-start`, `chevron-end`, `arrow-back` (mirror) and `check` (no mirror).
+
+#### F-216: router
+- **File:** `router.tsx`
+- **Behaviour:** TanStack Router (code-based):
+  - `rootRoute` with `errorComponent` = `ErrorFallback` (F-209), with `onRetry` = `router.invalidate()`;
+  - `/` → `HomePlaceholder`: an `<h1>` "Budmon" and the paragraph `home.placeholder` ("Nothing here yet."), replaced by `identity`;
+  - `notFoundComponent` → `NotFound`: `<h1>` `error.notFound.title` "Page not found" and a "Go to home" link;
+  - fixtures route `/__fixtures/*`, registered only when `import.meta.env.VITE_FIXTURES === "1"` (S-12).
+  - Search params are validated with zod schemas that accept only URL-safe values (D-24).
+  - On navigation, focus moves to the new page's `<h1>` (`tabindex="-1"`) and the title is announced through the live region (F-218).
+
+#### F-217: web Sentry
+- **File:** `observability/sentry.ts`
+- **Signatures:** `export function initWebSentry(cfg: { dsn?: string; release: string; environment: string }): void`, `export function scrubWebEvent(e: Record<string, unknown>): Record<string, unknown> | null`
+- **Behaviour:** `@sentry/solid` `init` with `sendDefaultPii: false`, `integrations: []` beyond the defaults (no browser tracing: no client spans in the MVP, D-24), no Replay, `beforeSend: scrubWebEvent`, and `beforeBreadcrumb` keeping only `navigation` and `fetch`/`xhr` with URLs stripped to the path. `scrubWebEvent` applies F-35's allowlist, plus `request.url` stripped to the path and the transaction name stripped of the query. Error values are replaced by the error key (when it's an oRPC defined error) or the class name: never `message`.
+
+#### F-218: accessibility helpers
+- **File:** `ui/a11y.ts`
+- **Signature:** `export function announce(text: string, politeness?: "polite" | "assertive"): void`
+- **Behaviour:** writes to a visually hidden live region (`#live-polite` or `#live-assertive`) after clearing it, so repeats are announced.
+
+#### F-219: `VirtualTable` (S-12)
+- **File:** `ui/table/VirtualTable.tsx`
+- **Signature:** `export function VirtualTable<T>(props: { label: string; columns: readonly { id: string; header: string; cell: (row: T) => JSX.Element; align?: "start" | "end" }[]; source: InfiniteListSource<T>; rowHeight: number; getRowId: (row: T) => string; onRowActivate?: (row: T) => void }): JSX.Element`
+- **Behaviour:**
+  - A `role="grid"` element with `aria-label`, `aria-rowcount` (`source.totalCount() ?? -1`) and `aria-colcount`. TanStack Table v9 provides headers and cells; TanStack Virtual renders rows with a fixed `rowHeight` and `overscan: 10`.
+  - Each rendered row has `role="row"` and `aria-rowindex` = absolute index + 2 (the header row is 1). Cells have `role="gridcell"`. Columns with `align: "end"` use `text-end`.
+  - Rows whose page isn't in memory render as placeholder rows (same height, `aria-busy="true"`, `data-placeholder`).
+  - When a placeholder page scrolls into view, `source.ensurePage(pageIndex)` is called. When the last loaded row is within 20 rows of the viewport end, the next page is requested.
+  - **Keyboard:** ArrowUp/ArrowDown move focus between rows and scroll the focused row into view; Home/End go to the first or last loaded row; Enter calls `onRowActivate`. ArrowLeft/ArrowRight move between cells, reversed in RTL (D-38 rule 11).
+
+#### F-220: `createInfiniteList`
+- **File:** `ui/table/infiniteList.ts`
+- **Signature:** `export interface InfiniteListSource<T> { rowCount(): number; totalCount(): number | null; rowAt(index: number): T | undefined; ensurePage(pageIndex: number): void; loading(): boolean; error(): AppError | null }; export function createInfiniteList<T>(opts: { fetchPage: (cursor: string | null) => Promise<{ items: T[]; nextCursor: string | null }>; pageSize: number; maxPagesInMemory?: number }): InfiniteListSource<T>`
+- **Behaviour:**
+  - Fetches pages sequentially by cursor and records each page's starting cursor. `rowCount()` = rows known so far (loaded plus dropped).
+  - When more than `maxPagesInMemory` (default 50) pages are loaded, the page farthest from the last requested page is dropped; its rows read as `undefined` (placeholders) and `rowCount` is unchanged.
+  - `ensurePage(i)` refetches a dropped page from its recorded starting cursor; its rows take the same indexes.
+  - Errors set `error()` and stop automatic fetching until `ensurePage` is called again.
+
+#### F-221: `version.json` and build number
+- **File:** `apps/web/vite.config.ts` (plugin `budmonVersion`)
+- **Behaviour:** reads `BUDMON_BUILD_NUMBER` (default `0` outside release builds), defines `import.meta.env.VITE_BUILD_NUMBER`, and emits `dist/version.json` with `{"buildNumber":<n>}`.
+
+### 4.19 Android (S-13)
+
+Package `com.budmon.app`, under `apps/android/app/src/main/java/com/budmon/app/`. Hilt modules provide every dependency; constructor injection throughout.
+
+| ID | Class / function (file) | Behaviour |
+| -- | ----------------------- | --------- |
+| F-250 | `BudmonApp : Application` (`BudmonApp.kt`) | `@HiltAndroidApp`. Initialises Sentry (F-260) when `BuildConfig.SENTRY_DSN` isn't empty, then the WorkManager configuration (Hilt worker factory), then schedules F-255's periodic sync (unique work `outbox-sync`, every 15 min, `NetworkType.CONNECTED`). |
+| F-251 | `ClientHeaderInterceptor(versionCode: Int)`, `TraceparentInterceptor(random)`, `IdempotencyKeyInterceptor` (`core/network/Interceptors.kt`) | Add `X-Budmon-Client: android/<versionCode>`, and `traceparent` with random ids. `IdempotencyKeyInterceptor` reads the request tag `IdempotencyKey(value: UUID)` and sets `Idempotency-Key` (lower-case); with no tag it adds nothing. |
+| F-252 | `ApiErrorParser.parse(code: Int, body: ByteArray?): ApiError` (`core/network/ApiError.kt`) | `sealed interface ApiError { data class Defined(val key: String, val status: Int, val data: JsonObject?); object Network; object Timeout; object Unknown }`. A body matching the envelope (`defined: true`, string `code`) → `Defined`. Otherwise status ≥ 500 → `Defined("INTERNAL", status, null)`, and other statuses → `Unknown`. `IOException` → `Network`; `SocketTimeoutException` → `Timeout` (mapped by the caller). |
+| F-253 | `ErrorMessages.forError(error: ApiError, op: Operation): UiText` (`core/error/ErrorMessages.kt`) | Same mapping as F-203, to `R.string` resources with the same keys (dots → underscores). `UiText` holds a resource id and arguments. |
+| F-254 | `OutboxEntry` (`@Entity("outbox")`) and `OutboxDao` (`core/outbox/`) | Columns: `id: Long` (PK autogen), `idempotencyKey: String` (unique), `method: String`, `path: String`, `body: ByteArray`, `contentType: String`, `createdAtEpochMs: Long`, `status: String` (`PENDING`, `SENDING`, `FAILED`, `NEEDS_CONFIRMATION`, `PAUSED`), `lastErrorKey: String?`, `attempts: Int`. DAO: `insert`, `pendingOldestFirst(limit)`, `markStatus(id, status, errorKey)`, `delete(id)`, `observeCounts(): Flow<OutboxCounts>` (pending, failed, needsConfirmation). Room database `budmon.db`, version 1, schema exported to `app/schemas/`. |
+| F-255 | `OutboxRepository.enqueue(method, path, body: ByteArray, contentType): Long` and `SyncWorker : CoroutineWorker` (`core/outbox/`) | `enqueue` stores **the exact bytes** with a new random UUID and `PENDING`, then calls `WorkManager.enqueueUniqueWork("outbox-sync-now", KEEP, oneTime with NetworkType.CONNECTED)`. Worker rules below the table. |
+| F-256 | `Money`, `Rational`, `roundHalfEven`, `allocate`, `convertWithRates`, `formatMoney` (`core/money/`) | Kotlin mirrors of F-300 to F-305: `BigInteger` minor units, `java.math` exact rationals, `android.icu.text.NumberFormat` with `setMinimumFractionDigits`/`setMaximumFractionDigits(minorUnits)` formatting a `BigDecimal`. `toString()` returns `"[redacted]"`. Passes the shared test vectors (TP-13.9). |
+| F-257 | `UpdateRepository` (`core/update/`) | `refresh()` calls `GET meta/client-config` (generated client), stores the result in DataStore, and computes `UpdateState`: `Required(min)` if `versionCode < minimumVersionCode`; `Available(latest)` if `< latestVersionCode` and not dismissed within 3 days; else `None`. `markRequired(min)` is called by the error path on `CLIENT_UPDATE_REQUIRED`. `dismissAvailable()` records the time. Exposes `state: StateFlow<UpdateState>`. |
+| F-258 | Compose UI: `OfflineBanner`, `SyncIndicator`, `SyncChip`, `ErrorFallbackScreen`, `UpdateRequiredScreen`, `UpdateCard` (`ui/platform/`) | §8.2. |
+| F-259 | `ConnectivityMonitor` (`core/network/ConnectivityMonitor.kt`) | `isOnline: StateFlow<Boolean>` from `ConnectivityManager.registerDefaultNetworkCallback` (`NET_CAPABILITY_VALIDATED`). |
+| F-260 | `SentryScrubber : SentryOptions.BeforeSendCallback` (`core/observability/`) | Sentry options: `isSendDefaultPii = false`, `isAttachScreenshot = false`, `isAttachViewHierarchy = false`, `maxBreadcrumbs = 20`, `beforeBreadcrumb` keeps navigation and HTTP with the URL path only. `beforeSend` keeps F-35's allowlisted fields, replaces each exception `value` with the type (or the API error key), and clears `request`, `extra`, contexts other than trace, and user fields other than `id`. |
+| F-261 | `ComposeTextLiteralDetector` (`apps/android/lint-rules/src/main/java/com/budmon/lint/`) | Lint issue `BudmonHardcodedComposeText` (error): reports a string literal or string template passed as the `text` argument of `androidx.compose.material3.Text`/`BasicText`, or as `contentDescription` of any composable, or to `Modifier.semantics { contentDescription = … }`. Allows `stringResource(...)`, `pluralStringResource(...)` and variables. |
+| F-262 | `res/xml/data_extraction_rules.xml`, `backup_rules.xml` | Exclude `database/budmon.db*` and `sharedpref`/DataStore files from cloud backup and device transfer. |
+| F-263 | Locale and RTL | `android:supportsRtl="true"`; `res/xml/locales_config.xml` with `en`; `pseudoLocalesEnabled true` in the debug build type; lint `RtlHardcoded`, `RtlCompat`, `RtlEnabled`, `HardcodedText` and `SetTextI18n` as errors; the accessibility lint category non-fatal (`warning`, D-39). |
+
+**F-255 `SyncWorker` rules:**
+- Processes `PENDING` entries oldest first.
+- An entry older than 60 days → `NEEDS_CONFIRMATION`, not sent.
+- If `UpdateState` is `Required` → stops and leaves entries `PENDING`.
+- Otherwise sends `method path` with the stored bytes, `Content-Type` and `Idempotency-Key = idempotencyKey`, through the generated client's OkHttp instance (raw request).
+- Responses:
+
+  | Response | Action |
+  | -------- | ------ |
+  | 2xx (including replays) | Delete the entry. |
+  | `CLIENT_UPDATE_REQUIRED` | `UpdateRepository.markRequired`, stop; entries stay `PENDING`. |
+  | 429 or `RATE_LIMITED` | Stop and return `Result.retry()`. |
+  | Other 4xx | `FAILED` with the error key. |
+  | 5xx, `Network` or `Timeout` | Stop and return `Result.retry()` (WorkManager exponential backoff from 30 s). |
+
+- `attempts` is incremented on every send.
+
+**Generated client:** `apps/android/app/build.gradle.kts` applies `org.openapi.generator` 7.14.0 with `generatorName = "kotlin"`, `library = "jvm-retrofit2"`, `serializationLibrary = "kotlinx_serialization"`, `inputSpec = "$rootDir/../../packages/contract/openapi.json"`, `outputDir = build/generated/openapi`, `packageName = "com.budmon.api"`. `preBuild` depends on `openApiGenerate`. The output is never committed.
+
+### 4.20 Dependency graph
+
+```mermaid
+flowchart TD
+  subgraph shared["@budmon/shared"]
+    F300[F-300..305 money] --> F306[F-306 canonicalJson]
+    F310[F-310 time] 
+    F311[F-311 ids]
+    F312[F-312 locale/bidi]
+  end
+  subgraph contract["@budmon/contract"]
+    F340[F-340..345 schemas] --> F346[F-346 contract]
+    F346 --> F347[F-347 emitOpenapi]
+    F347 --> F348[F-348 rules]
+  end
+  F11[F-11 loadConfig] --> F10[F-10 schema]
+  F11 --> F32[F-32 Secret]
+  F96[F-96 container] --> F11 & F12[F-12 createDatabase] & F31[F-31 logger] & F34[F-34 Sentry] & F36[F-36 telemetry] & F73[F-73 JobQueue] & F63[F-63 rateLimiter] & F100[F-100 idempotency] & F103[F-103 cursors] & F111[F-111 sealer] & F112[F-112/113 unsealer] & F114[F-114 apiSecrets] & F132[F-132 FxService] & F140[F-140 ObjectStore] & F146[F-146 ErasureLog]
+  F90[F-90 api main] --> F122[F-122 proxy] & F96 & F55[F-55 api server]
+  F91[F-91 worker main] --> F122 & F96 & F78[F-78 startWorkers]
+  F92[F-92 migrate main] --> F19[F-19 schema step]
+  F19 --> F15[F-15 roles] & F17[F-17 push] & F18[F-18 migrations] & F74[F-74 queue schema] & F16[F-16 grants] & F21[F-21 reference data] & F75[F-75 queue sync]
+  F55 --> F61[F-61 headers] & F62[F-62 body] & F65[F-65 rate limits] & F56[F-56 client version] & F57[F-57 health] & F52[F-52 error interceptor] & F38[F-38 request log] & F53[F-53 procedures]
+  F52 --> F34 & F33[F-33 sanitizeError]
+  F31 --> F30[F-30 safe fields] & F33
+  F34 --> F35[F-35 scrub]
+  F36 --> F40[F-40 span allowlist] & F41[F-41 metrics]
+  F78 --> F77[F-77 pg-boss] & F76[F-76 wrapper] & F79[F-79 heartbeat]
+  F76 --> F33 & F34
+  F73 --> F72[F-72 payload safety] & F71[F-71 registry]
+  F100 --> F101[F-101 repo] & F306
+  F102[F-102 runIdempotentCreate] --> F100 & F13[F-13 withTransaction]
+  F103 --> F306
+  F111 --> F110[F-110 envelope]
+  F112 --> F110
+  F114 --> F110
+  F117[F-117 rewrap api] --> F114 & F115[F-115 sealed columns]
+  F118[F-118 capture rewrap] --> F111 & F112 & F115
+  F120[F-120 OAuth exchange] --> F121[F-121 guarded fetch]
+  F132 --> F131[F-131 fxRepo] & F303[F-303 convertWithRates] & F73
+  F137[F-137 FX jobs] --> F133[F-133 providers] & F130[F-130 decimal] & F131 & F138[F-138 rates-added]
+  F144[F-144 exports purge] --> F140
+  F151[F-151 erasure replay] --> F146
+  F150[F-150 restore verify] --> F57
+  F171[F-171 bootstrap] --> F174[F-174 verify] & F172[F-172 deploy steps]
+  F172 --> F92 & F173[F-173 budmonctl host]
+  F191[F-191 rotate-role] --> F190[F-190 scram]
+  F195[F-195 rehearsal] --> F196[F-196 fake Google] & F197[F-197 fake FX] & F198[F-198 scan] & F199[F-199 stage-0 overlay] & F174 & F191
+  F200[F-200 web main] --> F201[F-201 api client] & F204[F-204 query client] & F206[F-206 i18n] & F217[F-217 web Sentry] & F216[F-216 router]
+  F201 --> F346
+  F203[F-203 messages] --> F202[F-202 toAppError]
+  F219[F-219 VirtualTable] --> F220[F-220 infinite list]
+  F255[F-255 SyncWorker] --> F254[F-254 outbox] & F252[F-252 errors] & F257[F-257 updates]
+```
+
+## 5. API contract
+
+### 5.1 Conventions for every procedure
+
+- **Base URL:** `https://<domain>/api/v1` (D-36). JSON only (`Content-Type: application/json`).
+- **Request headers the platform reads:**
+
+  | Header | Rule |
+  | ------ | ---- |
+  | `X-Budmon-Client` | F-56. |
+  | `Idempotency-Key` | Creates only (F-102). |
+  | `traceparent` | Optional. |
+  | Authentication | `identity`'s. |
+- **Response headers on every `/api/v1` response:** `X-Request-Id` and `X-Budmon-API-Version: 1.<minor>`, plus helmet's headers (F-61). On replays: `Idempotent-Replayed: true`. On 429: `Retry-After`.
+- **Error envelope** (oRPC OpenAPI, F-52). The body is exactly:
+  ```json
+  { "defined": true, "code": "<KEY>", "status": <http status>, "message": "<fixed developer message>", "data": <object, present only when the error defines data> }
+  ```
+  `message` is the fixed text in §6, never derived from input or exceptions.
+- **Creates** (F-343): `POST`, `201`, body `{ "id": "<uuid>", "createdAt": "<RFC 3339 Z>" }`, header `Idempotency-Key` required.
+- **Lists** (F-344): input `{ …filters, cursor?, limit? (1..100, default 50) }`; output `{ "items": [...], "nextCursor": string | null }`.
+- **Every procedure** may also return `UNAUTHENTICATED` (unless public), `CLIENT_UPDATE_REQUIRED`, `RATE_LIMITED` (the coarse limit), `PAYLOAD_TOO_LARGE`, `VALIDATION_FAILED`, `INTERNAL` and `SERVICE_UNAVAILABLE`.
+
+### 5.2 `GET /api/v1/meta/client-config`, procedure `meta.clientConfig`
+- **Transport:** REST over oRPC's OpenAPI handler (query).
+- **Handler:** F-58.
+- **Auth:** public (`PUBLIC_PROCEDURES`). Exempt from the client-version check.
+- **Request:** no parameters.
+- **Response 200:**
+  ```json
+  { "apiVersion": "1.0",
+    "android": { "minimumVersionCode": 0, "latestVersionCode": 0, "downloadUrl": null },
+    "web": { "minimumBuild": 0 } }
+  ```
+- **Errors:**
+
+  | Error key | Status | When |
+  | --------- | ------ | ---- |
+  | `RATE_LIMITED` | 429 | More than 300 requests a minute from one IP (coarse limit). |
+  | `SERVICE_UNAVAILABLE` | 503 | Maintenance switch on (answered by Caddy). |
+
+### 5.3 Non-contract routes
+
+| Route | Handler | Auth | Response |
+| ----- | ------- | ---- | -------- |
+| `GET /health/live` | F-57 | none | `200 {"status":"ok"}`. Reachable only inside the Docker network; Caddy doesn't proxy it. |
+| `GET /health/ready` | F-57 / Caddy | none | `200 {"status":"ready"}`; `503 {"status":"not_ready","reason":"database_unreachable"\|"schema_behind"\|"schema_ahead"}`; `503 {"status":"maintenance"}` from Caddy. |
+| `GET /version.json` | Caddy static file | none | `200 {"buildNumber":n}`, `Cache-Control: no-store`. |
+| `GET /dev/objects/:token` | F-145 | signed token | Development only. |
+| `OPTIONS /api/v1/*` | F-52 rule 4 | none | `404 NOT_FOUND` envelope (no CORS). |
+
+## 6. Error catalog
+
+| Class (file) | Key | Status | `message` (fixed) | `data` | Thrown by | When |
+| ------------ | --- | ------ | ----------------- | ------ | --------- | ---- |
+| `ValidationFailedError` (`platform/errors/platformErrors.ts`) | `VALIDATION_FAILED` | 400 | "Validation failed" | `{ issues }` | F-52 (input validation), F-62 (bad JSON, unsupported media type), F-102 (bad Idempotency-Key), F-103 (bad cursor) | Input doesn't match the contract. |
+| `ClientUpdateRequiredError` | `CLIENT_UPDATE_REQUIRED` | 400 | "Client update required" | `{ minimumVersion }` | F-56 | Client version below the configured minimum. |
+| `UnauthenticatedError` | `UNAUTHENTICATED` | 401 | "Authentication required" | none | F-53 | A non-public procedure without a principal. |
+| `ForbiddenError` | `FORBIDDEN` | 403 | "Forbidden" | none | F-53 (`ownerProcedure`), modules | The caller can't change the resource. |
+| `NotFoundError` | `NOT_FOUND` | 404 | "Not found" | none | F-52 (unmatched route), F-145, modules | The resource doesn't exist or isn't visible. |
+| `ConflictError` | `CONFLICT` | 409 | "Conflict" | optional | Modules | State conflict. |
+| `IdempotencyKeyReusedError` | `IDEMPOTENCY_KEY_REUSED` | 409 | "Idempotency key reused with a different request" | none | F-100 | Same key, different procedure or input. |
+| `PayloadTooLargeError` | `PAYLOAD_TOO_LARGE` | 413 | "Payload too large" | none | F-62 | Body over the limit. |
+| `RateLimitedError` | `RATE_LIMITED` | 429 | "Too many requests" | `{ retryAfterSeconds }` | F-65 | Limit exceeded. |
+| (built by F-52) | `INTERNAL` | 500 | "Internal error" | `{ outcome }` | F-52, F-62 | Any non-`BudmonError` failure. |
+| `ServiceUnavailableError` | `SERVICE_UNAVAILABLE` | 503 | "Service unavailable" | `{ outcome }` | F-52 rule 5; Caddy maintenance | The database is unavailable, or maintenance is on. |
+
+**Internal (non-HTTP) error classes**, all plain `Error` subclasses that F-52 maps to `INTERNAL` if they ever reach the API:
+
+| Class | File | Thrown by |
+| ----- | ---- | --------- |
+| `ConfigError` | `platform/config/loadConfig.ts` | F-11 |
+| `SchemaStepError(code, subject?)`, codes `invalid_verifier`, `password_form_in_production`, `table_without_grants`, `credential_table_granted_to_capture`, `minor_units_changed`, `queue_schema_ahead`, `queue_policy_changed` | `platform/db/schemaStep.ts` | F-15, F-16, F-21, F-74, F-75 |
+| `PushTargetNotEmptyError` | `platform/db/schemaPush.ts` | F-17 |
+| `UnknownMigrationError` | `platform/db/migrations.ts` | F-18 |
+| `ResetRefusedError` | `platform/db/reset.ts` | F-20 |
+| `JobPayloadInvalidError`, `UnsafeJobPayloadError`, `MissingQueueError`, `JobFailure` | `platform/queue/*` | F-72, F-73, F-76, F-78 |
+| `EnvelopeFormatError`, `EnvelopeAuthError`, `UnknownKeyVersionError`, `KmsUnavailableError` | `platform/crypto/*` | F-110 to F-118 |
+| `OAuthExchangeError`, `EgressDeniedError` | `platform/crypto/*` | F-120, F-121 |
+| `UnknownCurrencyError`, `FxProviderError` | `platform/fx/*` | F-132, F-133 |
+| `ObjectStoreError` | `platform/storage/objectStore.ts` | F-140, F-141 |
+| `NoErasureHandlerError` | `platform/ops/erasureReplay.ts` | F-151 |
+| `CurrencyMismatchError`, `MoneyRangeError` | `packages/shared` | F-301, F-304 |
+
+## 7. Integrations
+
+### 7.1 Google Cloud KMS
+- **Client:** `@google-cloud/kms` `KeyManagementServiceClient({ credentials: <service-account JSON>, apiEndpoint: "cloudkms.googleapis.com" })`.
+- **Call:** `asymmetricDecrypt({ name: <keyVersion>, ciphertext: <wrapped DEK> })`, timeout 5 s, no client-side retry (the job retries).
+- **Key:** `projects/<p>/locations/europe-west3/keyRings/budmon/cryptoKeys/capture-credentials/cryptoKeyVersions/<n>`, algorithm `RSA_DECRYPT_OAEP_3072_SHA256`.
+- **Public key:** fetched by the owner (`gcloud kms keys versions get-public-key`) into `CAPTURE_PUBLIC_KEY_FILE`, which isn't secret but is kept with the deployment's secrets so it changes with the key version.
+
+### 7.2 Google OAuth token endpoint
+- **Call:** F-120. `POST https://oauth2.googleapis.com/token`, form-encoded, timeout 10 s, no automatic retry inside the function.
+- **Ownership:** the job that calls it (owned by `sources`) decides on retries from `retryable`.
+
+### 7.3 FX providers
+- **Calls:** F-133 and F-137.
+- **Primary:** Open Exchange Rates historical endpoint; `app_id` from `FX_PRIMARY_APP_ID_FILE`; about 31 requests a month.
+- **Fallback:** `fawazahmed0` via jsDelivr, with the Cloudflare Pages mirror; no key.
+- **Schedule:** daily at 00:30 UTC. Retries every 30 min; the fallback after 6 h.
+- **Timeouts:** 10 s per request.
+- **Idempotency:** stored days are final (`ON CONFLICT DO NOTHING`).
+
+### 7.4 Backblaze B2 (S3 API)
+- **Buckets and keys:** F-177. AWS SDK v3 against `S3_ENDPOINT` (e.g. `https://s3.eu-central-003.backblazeb2.com`), region `eu-central-003`.
+- **pgBackRest repository** (`infra/deploy/main/pgbackrest/pgbackrest.conf`):
+  - `repo1-type=s3`, `repo1-s3-endpoint`, `repo1-s3-bucket=budmon-backups`, `repo1-s3-region`, `repo1-s3-uri-style=path`;
+  - `repo1-path=/<deployment>`;
+  - `repo1-cipher-type=aes-256-cbc`, with `repo1-cipher-pass` from the secret;
+  - `repo1-retention-full-type=time`, `repo1-retention-full=7`;
+  - `archive-async=y`, `spool-path=/var/lib/postgresql/data/pgbackrest-spool`;
+  - `compress-type=zst`, `process-max=2`, `log-level-console=info`, `log-level-file=off`;
+  - stanza `budmon`.
+
+### 7.5 Grafana Cloud (alerting, synthetic check) and Sentry
+- **Grafana:** OTLP and Prometheus remote-write endpoints and tokens are in the `alloy` secret. Alert rules are provisioned by OpenTofu (F-177). The contact point emails the owner (A-7).
+- **Alert rules active from stage 0** (title `Budmon <name>`, e-mail subject `[Budmon] <name>`):
+
+  | Name | Expression (PromQL or LogQL) | For |
+  | ---- | ---------------------------- | --- |
+  | API down | Synthetic check `probe_success{job="budmon-ready"} == 0` | 5m |
+  | Worker heartbeat missing | `time() - max by (service) (worker_heartbeat_timestamp_seconds) > 120` or absent | 5m |
+  | API errors | `sum(rate(http_server_requests_total{status_class="5xx"}[10m])) / sum(rate(http_server_requests_total[10m])) > 0.05` | 10m |
+  | Jobs dead-lettered (capture) | `increase(jobs_dead_lettered_total{queue=~"capture\\..*\|sources\\..*"}[15m]) > 0` | 0m |
+  | Jobs dead-lettered (any) | `increase(jobs_dead_lettered_total[1h]) > 5` | 0m |
+  | No new FX day | `time() - max(fx_last_day_timestamp_seconds) > 129600` (gauge set by F-137 on store) | 0m |
+  | KMS errors | `increase(kms_errors_total[15m]) > 0` | 0m |
+  | Disk usage | `1 - node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes > 0.8` | 10m |
+  | Memory | `1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes > 0.9` | 10m |
+  | Postgres connections | `sum(pg_stat_activity_count) / 100 > 0.8` | 5m |
+  | Backup overdue | `time() - max(pgbackrest_last_backup_completed_timestamp_seconds) > 93600` | 0m |
+  | WAL archiving failing | `pg_stat_archiver_last_failed_time > pg_stat_archiver_last_archive_time` and the last failure is within 15 min | 15m |
+  | Certificate expiring | Synthetic check `probe_ssl_earliest_cert_expiry - time() < 1209600` | 1h |
+  | Telemetry dropped | `increase(telemetry_attributes_dropped_total[15m]) > 0 or increase(budmon_alloy_log_fields_dropped_total[15m]) > 0` | 0m |
+  | Gmail backlog and stale connections | Defined by `sources` (labels from F-41). | (sources) |
+
+  `fx_last_day_timestamp_seconds` is added to F-42 (observable gauge, no labels; value = the epoch seconds of the latest stored `rate_date` + 1 day).
+- **Sentry:** one organisation, projects `budmon-server`, `budmon-web`, `budmon-android`; DSNs in config. Source maps for web are uploaded in CI with `SENTRY_AUTH_TOKEN` (CI secret only).
+
+### 7.6 GitHub Container Registry and signing
+- **Images:** `ghcr.io/<owner>/budmon/{server,web,postgres,budmon-deploy-main,budmon-deploy-capture}`.
+- **Signing:** CI pushes and runs `cosign sign --yes <ref@digest>` (keyless, GitHub OIDC, `id-token: write`).
+- **Hosts:** pull with a read-only fine-grained token (`/etc/budmon/registry-token`, used by `crane auth login` and `docker login` at deploy).
+
+## 8. Frontend
+
+### 8.1 Web
+
+**Stack and files:** F-200 to F-221. Tailwind with logical utilities only (F-2). Kobalte for the toast region, dialogs and menus (DV-3).
+
+**Routes:**
+
+| Path | Component | Notes |
+| ---- | --------- | ----- |
+| `/` | `HomePlaceholder` | Replaced by `identity` / `accounts`. |
+| (not found) | `NotFound` | |
+| `/__fixtures/virtual-table` | `VirtualTableFixture` | Only when `VITE_FIXTURES=1`: 100,000 synthetic rows served by an MSW handler implementing keyset paging (S-12 performance test). |
+| `/__fixtures/rtl-probe` | `RtlProbeFixture` | Only with `VITE_FIXTURES=1`: renders every platform component (banner, toast, error fallback, form errors, icons) for the pseudo-RTL run. |
+
+**Component tree:**
+
+```
+App (F-200)
+├─ I18nProvider (F-206)
+│  └─ QueryClientProvider (F-204)
+│     ├─ OfflineBanner (F-211)            – fixed at the top, above the router outlet
+│     ├─ RouterProvider (F-216)
+│     │  └─ rootRoute layout: <header><main id="main"><h1 tabindex=-1/>…</main>
+│     │     └─ errorComponent: ErrorFallback (F-209)
+│     ├─ UpdateNotifier (F-210)           – toast or persistent banner
+│     ├─ Toaster (F-212)
+│     └─ live regions #live-polite, #live-assertive (F-218)
+```
+
+**UX states and feedback** (HLD §4):
+
+| Behaviour | Implementation | Test |
+| --------- | -------------- | ---- |
+| **S-2 error fallback** | `<h1>` `error.fallback.title` ("Something went wrong on our side"); body `error.fallback.body`; button **Try again** (`error.fallback.retry`) calling `onRetry`. While retrying, the button shows a spinner and has `aria-busy="true"` and `disabled`. If the retry fails, `error.fallback.stillFailing` ("Still not working.") is appended. The link **Go to home** (`error.fallback.home`) goes to `/`. `Reference: {ref}` (`error.reference`) shows the first 8 characters of `requestId` when present, inside `<bdi dir="ltr">`. | TP-11.7, TP-11.8 |
+| **J-1 generic errors in forms and toasts** | F-203 picks the message. Read failures on a whole screen use S-2; mutation failures show a toast (`tone: "error"`). Form input is kept. A create with outcome `unknown` keeps **Try again** enabled. The retry reuses the same idempotency key while the input is unchanged (F-205), so it can't create a duplicate. | TP-11.3 to TP-11.5 |
+| **J-2 validation** | F-213: field outline (`aria-invalid="true"`), icon plus message below (`aria-describedby`), focus to the first invalid field, `FormErrorSummary` (`role="alert"`) for unmapped fields. | TP-11.9 |
+| **J-3 rate limit** | F-214: notice plus a disabled submit with the remaining minutes in text. | TP-11.10 |
+| **J-6 web update** | F-210. | TP-11.11, TP-11.12 |
+| **J-7 unavailable** | `SERVICE_UNAVAILABLE` or network → `error.unavailable` in a toast or in S-2. | TP-11.5 |
+| **C-1 offline (web)** | F-211. | TP-11.13 |
+| **Accessibility** | Landmarks (`header`, `main`, `nav` when present); focus on route change (F-216); live regions (F-218); contrast checked on the design tokens in `apps/web/src/ui/tokens.css` by `tools/ci/checkContrast.ts` (report-only, D-39); axe in every Playwright test (report-only, D-39). | TP-11.14, TP-11.15 |
+| **Responsive layout** | 360 px to desktop. The platform's screens are single-column with `max-inline-size: 40rem` centred; nothing overflows horizontally at 360 px. | TP-11.16 |
+| **RTL** | `dir` from the locale (F-206); logical utilities (F-2); icons (F-215); bidi isolation (F-206 `t`, `<bdi>` for references). | TP-11.17, TP-11.18 |
+
+**Web message catalog** (`apps/web/src/i18n/messages/en.json`, the platform's IDs):
+
+| ID | English |
+| -- | ------- |
+| `error.generic.notChanged` | Something went wrong on our side. Nothing was changed. Try again in a moment. |
+| `error.generic.unknownOutcome` | We couldn't confirm this was saved. Check before trying again. |
+| `error.generic.read` | Something went wrong on our side. Try again in a moment. |
+| `error.reference` | Reference: {ref} |
+| `error.validation.form` | Some details need fixing. |
+| `error.validation.unknownField` | Something in this form isn't valid: {label} |
+| `error.rateLimited` | {minutes, plural, one {Too many attempts. Try again in # minute.} other {Too many attempts. Try again in # minutes.}} |
+| `error.unavailable` | Budmon is temporarily unavailable. Try again in a few minutes. |
+| `error.notFound` | This item doesn't exist or you no longer have access to it. |
+| `error.notFound.title` | Page not found |
+| `error.forbidden` | You don't have permission to do this. |
+| `error.fallback.title` | Something went wrong on our side |
+| `error.fallback.body` | Try again in a moment. If it keeps happening, share this reference with the person who invited you. |
+| `error.fallback.retry` | Try again |
+| `error.fallback.home` | Go to home |
+| `error.fallback.stillFailing` | Still not working. |
+| `offline.banner.web` | You're offline. |
+| `offline.back` | Back online. |
+| `update.web.available` | Budmon has been updated. Reload to get the latest version. |
+| `update.web.reload` | Reload |
+| `update.required.web` | This version of Budmon is out of date. Reload to continue. |
+| `home.placeholder` | Nothing here yet. |
+| `validation.invalid`, `validation.invalid_type`, `validation.too_small`, `validation.too_big`, `validation.invalid_format`, `validation.unrecognized_keys` | "Enter a valid value." / "Enter a valid value." / "This is too short or too small." / "This is too long or too large." / "Check the format." / "Remove the unexpected field." |
+
+### 8.2 Android
+
+**Screens and components** (Compose, Material 3, `ui/platform/`):
+
+| Component | Behaviour | Strings (`res/values/strings.xml`) |
+| --------- | --------- | ---------------------------------- |
+| `UpdateRequiredScreen` (S-1) | Full screen, shown by the nav host whenever `UpdateState.Required`. Icon, title, body. The pending-count note shows only when `pending > 0`, with `pluralStringResource` and `999+` above 999 (rendered "1,000+" using the plural resource with a `%s` for the formatted count). Primary button opens `downloadUrl` in a Custom Tab; if it's null or fails, inline text `update_download_failed`. Secondary text button **Record an entry offline** navigates to the route `transactions/new-offline` (registered by `transactions`; until then, the button is hidden). | `update_required_title` "Update Budmon to continue", `update_required_body` "This version is no longer supported. Updating takes about a minute.", `update_required_pending` (plural) "%1$s entries you saved offline are kept and will sync after you update.", `update_required_button` "Update Budmon", `update_required_offline` "Record an entry offline", `update_download_failed` "Couldn't open the download. Ask the person who invited you for the latest version." |
+| `UpdateCard` (C-4) | On home when `UpdateState.Available`: text plus **Update** and **Later** (`dismissAvailable`, hidden for 3 days). | `update_available` "A new version of Budmon is available.", `update_action` "Update", `update_later` "Later" |
+| `ErrorFallbackScreen` (S-2) | Same behaviour as the web version, with `Reference: %1$s` (LTR isolated with `BidiFormatter`). | `error_fallback_title`, `error_fallback_body`, `error_fallback_retry`, `error_fallback_home`, `error_fallback_still_failing`, `error_reference` |
+| `OfflineBanner` (C-1) | Shown when `ConnectivityMonitor.isOnline` is false; `liveRegion = Polite`. "Back online. Syncing %d entries…" for 3 s when connectivity returns and pending > 0, else "Back online." | `offline_banner` "You're offline. New entries are saved on this phone and sync when you're back online.", `offline_nothing_loaded` "You're offline. Connect to see this.", `offline_last_updated` "Offline: last updated %1$s", `back_online_syncing` (plural), `back_online` |
+| `SyncIndicator` (C-2) | App-bar chip with an icon and text: "%d waiting to sync" (plural; "99+" above 99); "Syncing %d…" while the worker runs; "%d needs attention" (plural) when failed > 0. Hidden when all counts are 0. TalkBack reads the full text. | `sync_waiting`, `sync_in_progress`, `sync_attention` (plurals) |
+| `SyncChip` (C-2) | Per entry: "Not yet synced" / "Couldn't sync: tap to fix" / "Check before syncing", each with an icon. | `chip_not_synced`, `chip_failed`, `chip_needs_confirmation` |
+
+**Error strings:** the same IDs and texts as web §8.1, as `error_generic_not_changed`, `error_generic_unknown_outcome`, `error_generic_read`, `error_validation_form`, `error_rate_limited` (plural), `error_unavailable`, `error_not_found`, `error_forbidden`.
+
+**State:** ViewModels expose `StateFlow`. `UpdateRepository.state`, `OutboxDao.observeCounts()` and `ConnectivityMonitor.isOnline` are app-scoped and combined in `PlatformStatusViewModel`.
+
+**Accessibility:** touch targets ≥ 48 dp (`Modifier.minimumInteractiveComponentSize()`); font scaling to 200% tested; every icon has a `contentDescription` from resources or `null` when decorative; meaning never by colour alone (chips have icon plus text).
+
+## 9. Slices
+
+The platform's slices are **capability slices** rather than one story each. Each one delivers part of one or more stories end to end (code, configuration, tests). They're ordered by dependency. Status for all: not started.
+
+| Slice | Delivers | Depends on |
+| ----- | -------- | ---------- |
+| S-0 Repository, clean-up, lint and CI skeleton | US-1, US-14, US-12 (part) | none |
+| S-1 Shared money, time and ID library | US-8 (part) | S-0 |
+| S-2 Configuration, database, schema step, local stack and test tooling | US-5, US-2, US-7 (development part) | S-1 |
+| S-3 Observability and privacy layers | US-10, US-11 (part), PLT-BR-1 | S-2 |
+| S-4 Contract, OpenAPI, API server and error model | US-3, US-9 | S-3 |
+| S-5 Security baseline | US-13 | S-4 |
+| S-6 Jobs and workers | US-4 | S-4 |
+| S-7 Idempotency and cursors | D-13, D-32 (US-9, XC-22) | S-6 |
+| S-8 Credential encryption and capture plumbing | US-6, PLT-BR-2 | S-6 |
+| S-9 FX rates and conversion | US-8 | S-6 |
+| S-10 Object storage, erasure log and restore verification | US-15 (part), D-35 | S-6 |
+| S-11 Web skeleton | D-7, D-37 to D-39, J-1 to J-3, J-6, J-7 (web) | S-4 |
+| S-12 Web virtualised table | D-7 | S-11 |
+| S-13 Android skeleton | D-8, J-1, J-2, J-4, J-5 (Android) | S-4, S-7 |
+| S-14 Release-migration tooling | US-7 | S-2 |
+| S-15 Stage-0 deployment, backups and alerts | US-15, US-11, D-29 stage 0 | S-5 to S-10, S-14 |
+| S-16 Release rehearsal and release workflow | D-41, D-27 step 7 | S-15 |
+
+### S-0: Repository, clean-up, lint and CI skeleton (US-1, US-14, US-12)
+- **Depends on:** none
+- **Functions:** F-1, F-2 (rule file only; tested in S-11), F-3 (same), F-5, F-6; root `package.json`, workspace files, `.gitignore`, README; `.github/workflows/ci.yml` steps 1 to 3; the removals in §2.1.
+- **Scenarios:**
+
+| Scenario | Happy / unhappy | Expected | Tests |
+| -------- | --------------- | -------- | ----- |
+| Old code and artefacts removed | happy | The paths in §2.1 are absent and `server/dist` isn't tracked. | TP-0.1 |
+| Router imports a repo; service imports drizzle | unhappy | Lint fails. | TP-0.2 |
+| `pino` imported outside observability; `console` in platform code | unhappy | Lint fails. | TP-0.3 |
+| `parseFloat` / `Number()` / `bigint({ mode: "number" })` | unhappy | Lint fails; a described disable passes. | TP-0.4 |
+| Migration file changed on a feature branch | unhappy | `checkMigrationFiles` fails; release/hotfix/infra/merge-back branches pass. | TP-0.5 |
+| `pnpm check` on the skeleton | happy | Format, lint, type-check and unit tests pass. | TP-0.6 |
+| Strict TypeScript | unhappy | An unchecked index access fails type-check. | TP-0.7 |
+
+- **Acceptance criteria:**
+  1. `pnpm install && pnpm check` passes on a fresh clone.
+  2. CI runs steps 1 to 3 on pull requests.
+  3. The README has Layout, Prerequisites, Commands and Environments sections.
+  4. The PR proposes CLAUDE.md's "Project conventions" text (D-34, A-13) as a separate file `docs/proposals/claude-md-conventions.md` for the user. It isn't written into CLAUDE.md.
+
+### S-1: Shared money, time and ID library (US-8)
+- **Depends on:** S-0
+- **Functions:** F-300 to F-306, F-310 to F-313.
+- **Scenarios:**
+
+| Scenario | Happy / unhappy | Expected | Tests |
+| -------- | --------------- | -------- | ----- |
+| Exact decimal parsing and half-even rounding | happy | As in F-300 and the vectors. | TP-1.1, TP-1.2 |
+| `Money` printed, logged or serialised | unhappy | Always `[redacted]`. | TP-1.3 |
+| Arithmetic across currencies | unhappy | `CurrencyMismatchError`. | TP-1.4 |
+| Allocation sums exactly; ties; negatives | happy | As in F-302. | TP-1.5 |
+| Invalid allocation weights | unhappy | `RangeError`. | TP-1.5 |
+| Conversion with rates | happy | Matches the vectors. | TP-1.6 |
+| Out-of-range wire values | unhappy | `MoneyRangeError`. | TP-1.7 |
+| Formatting per currency decimals and locale | happy | Matches the vectors. | TP-1.8 |
+| Canonical JSON | happy and unhappy | Sorted keys; `TypeError` for unsupported values. | TP-1.9 |
+| Vectors complete | happy | The minimum set exists. | TP-1.10 |
+| Today in a zone at a day boundary; invalid zone | happy and unhappy | As in F-310. | TP-1.11 |
+| UUIDv7 | happy | Format and time ordering. | TP-1.12 |
+| Locale resolution, direction, isolation | happy | As in F-312. | TP-1.13 |
+
+- **Acceptance criteria:** the library has no I/O. 100% of the branches in `money/` are covered by TP-1.x.
+
+### S-2: Configuration, database, schema step, local stack and test tooling (US-5, US-2, US-7 development)
+- **Depends on:** S-1
+- **Functions:** F-7, F-10 to F-23, F-90 to F-92 (start-up and config handling only), F-94, F-95, F-96 (base members), §3 tables, `infra/compose.yaml`, test tooling (§10.1).
+- **Scenarios:**
+
+| Scenario | Happy / unhappy | Expected | Tests |
+| -------- | --------------- | -------- | ----- |
+| Valid configuration per process kind | happy | A frozen `Config`; secrets wrapped. | TP-2.1 |
+| Missing or invalid variables | unhappy | `ConfigError` with names only; values never printed; exit 78. | TP-2.2, TP-2.6 |
+| Production-only rules | unhappy | Each forbidden combination is reported. | TP-2.3 |
+| `rehearsal` environment | happy and unhappy | Local KMS allowed; fs object store refused. | TP-2.4 |
+| Unreadable `*_FILE` | unhappy | "file not readable". | TP-2.5 |
+| `.env.example` drift | unhappy | `checkEnvExample` lists the differences. | TP-2.7 |
+| Transactions: commit, rollback, serialisation retry | happy and unhappy | As in F-13. | TP-2.8 |
+| Cluster bootstrap twice | happy | Idempotent. | TP-2.9 |
+| Roles and passwords; invalid verifier; password form in production | happy and unhappy | As in F-15. | TP-2.10 |
+| Grants: app vs capture; missing entry; credential table granted to capture | happy and unhappy | As in F-16. | TP-2.11 |
+| Push onto an empty database; non-empty target | happy and unhappy | Tables created, `rate_limit_counters` UNLOGGED; `PushTargetNotEmptyError`. | TP-2.12 |
+| Committed migrations; an unknown recorded migration | happy and unhappy | Applied; `UnknownMigrationError`. | TP-2.13 |
+| Reference data load; `minor_units` changed | happy and unhappy | Upserted; error and rollback. | TP-2.14 |
+| Schema step end to end, twice | happy | The report; the second run is a no-op. | TP-2.15 |
+| `db:reset` against a non-local host or in production | unhappy | `ResetRefusedError`, exit 2. | TP-2.16 |
+| Test tooling | happy | Per-file database from the template; connects as `budmon_app`. | TP-2.17 |
+| Local stack | happy | `pnpm dev` serves `/health/ready` 200 within 90 s. | TP-2.18 |
+
+- **Acceptance criteria:**
+  1. `pnpm dev` works from a fresh clone with only Docker, Node 24 and pnpm installed.
+  2. No migration files exist.
+  3. Integration tests never connect as a superuser except in the global setup.
+
+### S-3: Observability and privacy layers (US-10, US-11 part, PLT-BR-1)
+- **Depends on:** S-2
+- **Functions:** F-30 to F-38, F-40 to F-42; the privacy canary harness (§10.1).
+- **Scenarios:**
+
+| Scenario | Happy / unhappy | Expected | Tests |
+| -------- | --------------- | -------- | ----- |
+| Unknown or invalid log fields | unhappy | Dropped or `[invalid]`, and counted. | TP-3.1, TP-3.2 |
+| `Secret` in any output | unhappy | `[redacted]`. | TP-3.3 |
+| Error sanitisation (Budmon, pg, Node, Gaxios, frames, aggregate) | unhappy | No message, config or body. | TP-3.4 |
+| Sentry event scrubbing and reporting; no DSN | happy and unhappy | Allowlisted fields only; no-op without a DSN. | TP-3.5, TP-3.6 |
+| Span attributes and events outside the allowlist | unhappy | Removed and counted. | TP-3.7 |
+| Metric labels outside the allowlist | unhappy | Registration throws; record-time drops counted. | TP-3.8 |
+| URL query stripping | happy | As in F-37. | TP-3.9 |
+| Canary baseline: an error carrying canaries is logged and reported | unhappy | No canary in any captured output. | TP-3.10 |
+
+- **Acceptance criteria:** the canary harness exists and every later slice adds flows to it.
+
+### S-4: Contract, OpenAPI, API server and error model (US-3, US-9)
+- **Depends on:** S-3
+- **Functions:** F-8, F-50 to F-58, F-90 (complete), F-96 (API members used so far), F-340 to F-349, CI step 2 (contract checks: drift, `oasdiff`, F-8, F-348).
+- **Scenarios:**
+
+| Scenario | Happy / unhappy | Expected | Tests |
+| -------- | --------------- | -------- | ----- |
+| `openapi.json` drift | unhappy | CI fails. | TP-4.1 |
+| Money in inputs and outputs emitted as int64 with bounds; web type `number`; Kotlin `Long` (spike) | happy | As stated. | TP-4.2 to TP-4.4 |
+| Contract rule violations R1 to R6 | unhappy | Each reported. | TP-4.5 |
+| Contract changed without an `API_MINOR` bump | unhappy | F-8 fails. | TP-4.6 |
+| `GET /meta/client-config` | happy | 200, exact shape and headers. | TP-4.7 |
+| Every non-public procedure without credentials | unhappy | 401 `UNAUTHENTICATED`. | TP-4.8 |
+| Error mapping for every rule | unhappy | Exact envelopes; no input values. | TP-4.9, TP-4.10 |
+| Old client | unhappy | 400 `CLIENT_UPDATE_REQUIRED`; `client-config` exempt. | TP-4.11 |
+| Readiness window; database down | happy and unhappy | As in F-57. | TP-4.12, TP-4.13 |
+| `OPTIONS` / CORS; unknown route | unhappy | 404 envelope; no CORS headers. | TP-4.14, TP-4.15 |
+| Procedure bases; failing auth hook | happy and unhappy | As in F-53/F-54. | TP-4.16 |
+| Request log | happy | Allowlisted fields only. | TP-4.17 |
+| Invalid `BudmonError` construction | unhappy | `TypeError`. | TP-4.18 |
+
+- **Acceptance criteria:**
+  1. `createApiServer(c, { contract, router })` accepts a test contract and router (F-55 option), so the test-architect can add test-only procedures.
+  2. The spike outputs (TP-4.2 to TP-4.4) are recorded in the PR.
+
+### S-5: Security baseline (US-13)
+- **Depends on:** S-4
+- **Functions:** F-61 to F-66, F-80 (rate-limit purge only, scheduled once S-6 lands).
+- **Scenarios:**
+
+| Scenario | Happy / unhappy | Expected | Tests |
+| -------- | --------------- | -------- | ----- |
+| Security headers | happy | Present on API responses. | TP-5.1 |
+| Malformed JSON, large body, unsupported content type | unhappy | 400 / 413 / 400 envelopes; no echo of the body. | TP-5.2 to TP-5.4 |
+| Shared limiter: within limit, exceeded, new window, HMAC keys, counts survive rollback | happy and unhappy | As in F-63. | TP-5.5 |
+| A rate-limited procedure | unhappy | 429 with `Retry-After`. | TP-5.6 |
+| Coarse per-IP limit; health exempt | unhappy | 429 on request 301. | TP-5.7 |
+| Expired counters deleted | happy | As in F-64. | TP-5.8 |
+| Hashing utilities | happy and unhappy | As in F-66. | TP-5.9 |
+
+### S-6: Jobs and workers (US-4)
+- **Depends on:** S-4
+- **Functions:** F-70 to F-81, F-91, F-93 (`jobs:dead` commands), F-19 steps 3 and 6 (extending S-2), healthcheck entry (F-172 note).
+- **Scenarios:**
+
+| Scenario | Happy / unhappy | Expected | Tests |
+| -------- | --------------- | -------- | ----- |
+| Job definition and registry validation | unhappy | `TypeError`s. | TP-6.1, TP-6.2 |
+| Unsafe payload values | unhappy | `UnsafeJobPayloadError` with the path, not the value. | TP-6.3 |
+| Queue schema installed and owned by `budmon_queue` | happy | As in F-74. | TP-6.4 |
+| Enqueue inside a transaction; rollback | happy and unhappy | Job present only after commit. | TP-6.5 |
+| Queue sync; policy change | happy and unhappy | As in F-75. | TP-6.6 |
+| Handler success and failure; dead-lettering | happy and unhappy | No output on success; sanitised failure output; dead-letter after the retry limit. | TP-6.7 |
+| worker-capture as `budmon_capture` | happy and unhappy | Can process jobs; can't read platform tables it isn't granted. | TP-6.8 |
+| Missing queue at start-up; schedules | unhappy and happy | Exit 1; cron in UTC for general only. | TP-6.9 |
+| Heartbeat and health check | happy and unhappy | As in F-79/F-172. | TP-6.10 |
+| Dead-letter list and redrive | happy | As in F-81. | TP-6.11 |
+| Maintenance purges | happy | As in F-80. | TP-6.12 |
+| Graceful stop | happy | `SIGTERM` stops within 30 s. | TP-6.13 |
+
+### S-7: Idempotency and cursors (D-13, D-32)
+- **Depends on:** S-6
+- **Functions:** F-100 to F-105, F-343, F-344.
+- **Scenarios:**
+
+| Scenario | Happy / unhappy | Expected | Tests |
+| -------- | --------------- | -------- | ----- |
+| First create; replay | happy | 201; replay returns the stored result with `Idempotent-Replayed`. | TP-7.1, TP-7.2, TP-7.15 |
+| Key reused with a different input or procedure | unhappy | 409 `IDEMPOTENCY_KEY_REUSED`. | TP-7.3 |
+| Same key, different users | happy | Independent. | TP-7.4 |
+| Concurrent duplicates | unhappy | One execution. | TP-7.5 |
+| Failing work | unhappy | No record left behind. | TP-7.6 |
+| Missing or invalid key header | unhappy | 400. | TP-7.7 |
+| Canonical hash; outside a transaction | happy and unhappy | As in F-100. | TP-7.8, TP-7.9 |
+| Cursor round trip; tampered, expired, mismatched or oversized | happy and unhappy | `invalid_cursor` for all. | TP-7.10 |
+| No plaintext in cursors | unhappy | A canary sort key isn't visible. | TP-7.11 |
+| Pagination and filter hash | happy | As in F-104/F-105. | TP-7.12, TP-7.13 |
+| `createRoute` OpenAPI shape | happy | As in F-343. | TP-7.14 |
+
+### S-8: Credential encryption and capture plumbing (US-6, PLT-BR-2)
+- **Depends on:** S-6
+- **Functions:** F-110 to F-122, F-93 (`secrets:rewrap-api`, `jobs:capture-rewrap`).
+- **Scenarios:**
+
+| Scenario | Happy / unhappy | Expected | Tests |
+| -------- | --------------- | -------- | ----- |
+| Envelope format; malformed envelopes | happy and unhappy | As in F-110. | TP-8.1, TP-8.2 |
+| Seal and unseal (local); wrong context; tampering; weak key | happy and unhappy | As in F-111/F-113. | TP-8.3, TP-8.4 |
+| KMS unseal; KMS failure | happy and unhappy | As in F-112. | TP-8.5 |
+| `api-secrets` seal, unseal and rotation | happy and unhappy | As in F-114. | TP-8.6 |
+| Re-wrap commands | happy and unhappy | As in F-117/F-118. | TP-8.7, TP-8.8 |
+| Registry validation | unhappy | `TypeError`. | TP-8.9 |
+| PKCE and authorisation URL | happy | RFC 7636 vector; exact parameters. | TP-8.10, TP-8.11 |
+| Token exchange outcomes | happy and unhappy | As in F-120. | TP-8.12 |
+| Egress guard | unhappy | `EgressDeniedError`. | TP-8.13 |
+| Proxy wiring with and without proxy variables | happy | Through the proxy; direct; `NO_PROXY` honoured. | TP-8.14 |
+| The API can't unseal capture secrets | unhappy | No unsealer and no credential in the API container or config. | TP-8.15 |
+
+### S-9: FX rates and conversion (US-8)
+- **Depends on:** S-6
+- **Functions:** F-130 to F-138, F-23 (FX seeder), `fx_last_day_timestamp_seconds` (F-42).
+- **Scenarios:**
+
+| Scenario | Happy / unhappy | Expected | Tests |
+| -------- | --------------- | -------- | ----- |
+| Lossless parsing and normalisation | happy and unhappy | As in F-130. | TP-9.1 |
+| Conversion: same currency, exact day, provisional | happy | As in F-132. | TP-9.2 to TP-9.4 |
+| No rate: no day (backfill enqueued), currency missing, unknown currency | unhappy | As in F-132. | TP-9.5 to TP-9.7 |
+| Sum with per-item rounding | happy | As in F-132. | TP-9.8 |
+| Daily fetch, rates-added fan-out; fallback after 6 h | happy and unhappy | As in F-137/F-138. | TP-9.9, TP-9.10 |
+| Bad provider data | unhappy | Rejected and counted; zero rows → retry. | TP-9.11 |
+| Provider adapters | happy and unhappy | As in F-133. | TP-9.12, TP-9.13 |
+| Backfill; date not available | happy and unhappy | Stored; completes with metric. | TP-9.14 |
+| Subscriber validation; stored days final; freshness gauge | unhappy and happy | As stated. | TP-9.15 to TP-9.17 |
+
+### S-10: Object storage, erasure log and restore verification (US-15 part, D-35)
+- **Depends on:** S-6
+- **Functions:** F-140 to F-146, F-150, F-151, F-80 (exports purge), F-93 (`restore:verify`, `erasure:replay`).
+- **Scenarios:**
+
+| Scenario | Happy / unhappy | Expected | Tests |
+| -------- | --------------- | -------- | ----- |
+| Key validation | unhappy | `RangeError`. | TP-10.1 |
+| Filesystem store and dev route; expired or tampered token | happy and unhappy | As in F-142/F-145. | TP-10.2 |
+| S3 store against MinIO; presigned URL expiry | happy and unhappy | As in F-141. | TP-10.3 |
+| Memory store parity | happy | As in F-143. | TP-10.4 |
+| Exports older than 7 days purged | happy | As in F-144. | TP-10.5 |
+| Erasure log append and list | happy | As in F-146. | TP-10.6 |
+| Replay with and without a handler; handler failure | happy and unhappy | As in F-151. | TP-10.7, TP-10.8 |
+| Restore verification | happy and unhappy | As in F-150. | TP-10.9, TP-10.10 |
+
+### S-11: Web skeleton (D-7, D-37 to D-39, J-1 to J-3, J-6, J-7)
+- **Depends on:** S-4
+- **Functions:** F-2, F-3, F-4, F-9, F-200 to F-218, F-221; CI step 5 (Playwright, pseudo-RTL run, axe report).
+- **Scenarios:**
+
+| Scenario | Happy / unhappy | Expected | Tests |
+| -------- | --------------- | -------- | ----- |
+| API client headers; update-required callback | happy and unhappy | As in F-201. | TP-11.1 |
+| Error classification and messages | unhappy | As in F-202/F-203. | TP-11.2, TP-11.3 |
+| Retry rules | unhappy | As in F-204. | TP-11.4 |
+| Idempotent create keys | happy and unhappy | As in F-205. | TP-11.5 |
+| Locale, direction, relative times | happy | As in F-206. | TP-11.6 |
+| S-2 fallback and error boundary | unhappy | As in §8.1. | TP-11.7, TP-11.8 |
+| Server validation issues on a form | unhappy | Fields and summary; focus. | TP-11.9 |
+| Rate-limited form | unhappy | Disabled submit and text countdown. | TP-11.10 |
+| New web build; update required | happy and unhappy | Toast; persistent banner. | TP-11.11, TP-11.12 |
+| Offline and back online | unhappy | Banner texts. | TP-11.13 |
+| Accessibility report is non-blocking; focus on navigation; 360 px | happy | As in §8.1. | TP-11.14 to TP-11.16 |
+| Pseudo-RTL run | happy and unhappy | Probes, mirrors, no overflow. | TP-11.17 |
+| Lint guards (Tailwind, icons, stylelint, formatjs, blocking a11y rules) | unhappy | Each fails on its fixture. | TP-11.18 to TP-11.22 |
+| Catalog completeness; pseudo-locale generation | unhappy and happy | As in F-9/F-207. | TP-11.23, TP-11.24 |
+| Web Sentry scrubbing | unhappy | As in F-217. | TP-11.25 |
+| Icons; `version.json` | happy | As in F-215/F-221. | TP-11.26, TP-11.27 |
+
+- **Acceptance criteria:**
+  1. AC-11.1: `pnpm --filter @budmon/web build` produces `dist/` and `version.json`.
+  2. AC-11.2: the axe report is uploaded as a CI artifact.
+  3. AC-11.3: no physical Tailwind or CSS properties exist outside `rtl-exempt` comments.
+  4. AC-11.4: the Kobalte spike (dialog, combobox, date field, menu in `/__fixtures/kobalte-spike`) is keyboard-operable in Playwright (TP-11.28). If not, the planner is asked for an amendment (DV-3).
+
+### S-12: Web virtualised table (D-7)
+- **Depends on:** S-11
+- **Functions:** F-219, F-220, the fixture route.
+- **Scenarios:**
+
+| Scenario | Happy / unhappy | Expected | Tests |
+| -------- | --------------- | -------- | ----- |
+| Paging, dropping and refetching pages | happy and unhappy | Stable indexes; errors stop fetching. | TP-12.1 |
+| Grid semantics and placeholders | happy | As in F-219. | TP-12.2 |
+| Keyboard, including RTL | happy | As in F-219. | TP-12.3 |
+| Performance targets on 100,000 rows | happy | D-7 targets met. | TP-12.4 |
+| End-aligned numeric columns | happy | `text-end`. | TP-12.5 |
+
+### S-13: Android skeleton (D-8, J-1, J-2, J-4, J-5)
+- **Depends on:** S-4, S-7
+- **Functions:** F-250 to F-263, the generated client; CI step 6.
+- **Scenarios:**
+
+| Scenario | Happy / unhappy | Expected | Tests |
+| -------- | --------------- | -------- | ----- |
+| Headers and idempotency key | happy | As in F-251. | TP-13.1 |
+| Error parsing and messages | unhappy | As in F-252/F-253. | TP-13.2, TP-13.3 |
+| Outbox storage | happy | As in F-254. | TP-13.4 |
+| Sync outcomes: success, replay, 4xx, 5xx, offline, update required, entries older than 60 days | happy and unhappy | As in F-255. | TP-13.5 |
+| Update states | happy and unhappy | As in F-257. | TP-13.6 |
+| Platform UI states, including RTL and font scale | happy and unhappy | As in §8.2. | TP-13.7 |
+| Sentry scrubbing | unhappy | As in F-260. | TP-13.8 |
+| Money vectors | happy | Shared vectors pass. | TP-13.9 |
+| Custom lint | unhappy | Literal strings in Compose text fail. | TP-13.10 |
+| Backup exclusion | happy | Database excluded. | TP-13.11 |
+| Generated client against `client-config` | happy | Parses. | TP-13.12 |
+| Emulator smoke (release candidates) | happy | Launches; S-1 shown when the minimum is raised. | TP-13.13 |
+
+### S-14: Release-migration tooling (US-7)
+- **Depends on:** S-2
+- **Functions:** F-180 to F-185, the CI wiring for branch types (D-12).
+- **Scenarios:**
+
+| Scenario | Happy / unhappy | Expected | Tests |
+| -------- | --------------- | -------- | ----- |
+| Generation with prompts answered; no changes; timeout; bad version | happy and unhappy | As in F-180. | TP-14.1, TP-14.2 |
+| Pending report doesn't touch the repository | happy | As in F-181. | TP-14.3 |
+| Check (i): match, mismatch, stale snapshot, no migrations | happy and unhappy | As in F-182. | TP-14.4 |
+| Risky statements; reviewed comment | unhappy and happy | As in F-184. | TP-14.5 |
+| Release sequence | happy | As in F-185. | TP-14.6 |
+| Upgrade harness at the baseline | happy | Skipped. | TP-14.7 |
+| CI branch-type wiring | happy | As in D-12. | TP-14.8 |
+
+### S-15: Stage-0 deployment, backups and alerts (US-15, US-11, D-29 stage 0)
+- **Depends on:** S-5 to S-10, S-14
+- **Functions:** F-170 to F-177, F-190 to F-192; `images/*`; `infra/**` for stage 0, plus the stage-1 Compose and proxy files used by the rehearsal; runbooks.
+- **Scenarios:**
+
+| Scenario | Happy / unhappy | Expected | Tests |
+| -------- | --------------- | -------- | ----- |
+| Postgres boot safeguards | unhappy and happy | As in F-170. | TP-15.1 |
+| Postgres logs don't leak | unhappy | No canary. | TP-15.2 |
+| `pg_hba` rules, stage 0 | happy and unhappy | As in F-175. | TP-15.3 |
+| Bootstrap: tag, sequence, verification, self-update | unhappy and happy | As in F-171/F-174. | TP-15.4 to TP-15.7 |
+| Deploy steps: order, rollback, secrets, placeholders | happy and unhappy | As in F-172. | TP-15.8, TP-15.9 |
+| Host `budmonctl` | happy | As in F-173. | TP-15.10 |
+| Owner `budmonctl`: SCRAM, rotation, init | happy and unhappy | As in F-190 to F-192. | TP-15.11, TP-15.12 |
+| Caddy behaviour | happy and unhappy | As in F-175. | TP-15.13 |
+| Alloy log pipeline | unhappy | Unknown keys dropped and counted. | TP-15.14 |
+| Backup and restore | happy | As in §7.4/F-150. | TP-15.15 |
+| Static validation (shellcheck, bats, `compose config`, cloud-init schema, `tofu validate`, actionlint) | unhappy | CI fails on errors. | TP-15.16 |
+
+- **Acceptance criteria:**
+  1. AC-15.1: the first-deploy runbook (`infra/runbooks/first-deploy.md`) covers: buying the domain (D-36); `tofu apply` with `stage0.tfvars`; installing the age key and registry token over SSH; `budmonctl secrets init-deployment prod-s0` and filling in the placeholders; the first deploy with `BUDMON_FIRST_SETUP=1`; `pgbackrest stanza-create`; a full backup; checking that every stage-0 alert rule exists; and test-firing "API down" by turning maintenance on for 6 minutes.
+  2. AC-15.2: **the first restore drill** (D-30, soon after the first deploy) is executed with `infra/runbooks/restore-drill.md`: a temporary CX23 with drill isolation (no workers, API, Alloy or Sentry DSNs; outbound only to B2), then restore, `cli restore:verify`, `cli erasure:replay`, time recorded, VM deleted. The result is recorded in `docs/operations/restore-drills.md`. This is a manual acceptance item (TP-15.17).
+  3. AC-15.3: alert rules provisioned and each stage-0 rule test-fired once (TP-15.18).
+
+### S-16: Release rehearsal and release workflow (D-41, D-27 step 7)
+- **Depends on:** S-15
+- **Functions:** F-195 to F-199, F-185, `.github/workflows/{rehearsal,release}.yml`.
+- **Scenarios:**
+
+| Scenario | Happy / unhappy | Expected | Tests |
+| -------- | --------------- | -------- | ----- |
+| Canary scanning in all encodings | unhappy | Hits found. | TP-16.1 |
+| Fake Google modes | happy | As in F-196. | TP-16.2 |
+| Harness step order, stop on failure, infra mode | happy and unhappy | As in F-195. | TP-16.3 |
+| Full rehearsal on a release candidate | happy | All steps green. | TP-16.4 |
+| Canary flows (platform) | unhappy | No canary anywhere. | TP-16.5 |
+| Stage setting or cross-role mount injected | unhappy | Steps 9 and 10 fail. | TP-16.6 |
+| Stage-0 overlay | happy and unhappy | Ready; worker-capture can't reach Postgres except through `capture-db`. | TP-16.7 |
+| Release workflow structure | happy | Tag after check (i), signed images, approval gate, deploy. | TP-16.8 |
+
+- **Release workflow** (`release.yml`):
+  - **Triggers:** `push` to `main` whose head commit is a merge of a `release/*` pull request (detected through the GitHub API); and `workflow_dispatch` with input `ref` (a `hotfix/*` or `infra/*` branch whose pull request checks passed).
+  - **Jobs:**
+    1. `verify`: check (i) on the commit (release/hotfix), or F-6 plus the infra-only diff rule (infra).
+    2. `tag`: creates `vX.Y.Z[-hotfix.N|-infra.N]` on that commit, with the version from the branch name.
+    3. `build`: `BUDMON_BUILD_NUMBER = releaseSequence(tags)`. Builds the images and both bundles (infra: bundles only, reusing the previous manifest's image digests). Pushes them and runs `cosign sign`.
+    4. `rehearse`: calls `rehearsal.yml` on the pushed digests.
+    5. `deploy`: `environment: production` (required reviewer: the user). Runs `ssh -i $DEPLOY_KEY deploy@$HOST "deploy <tag>"`, with the host key pinned in the `known_hosts` secret.
+    6. `android`: uploads the release APK to Firebase App Distribution (A-12) after `deploy` succeeds (release and hotfix only).
+- **Acceptance criteria:** the rehearsal passes for the first release candidate. The production deploy uses exactly the digests the tagged rehearsal ran.
+
+## 10. Test plan
+
+### 10.1 Tooling
+
+The repository has no test tooling yet. The test-architect sets it up in S-0 to S-2 as follows.
+
+- **Runner:** Vitest 5 with a root `vitest.workspace.ts`.
+
+  | Project | Environment | Includes |
+  | ------- | ----------- | -------- |
+  | `shared` | node | `packages/shared/test/**/*.test.ts` |
+  | `contract` | node | `packages/contract/test/**/*.test.ts` |
+  | `server-unit` | node | `apps/server/test/unit/**/*.test.ts` |
+  | `server-int` | node, `globalSetup` | `apps/server/test/integration/**/*.test.ts` |
+  | `web-unit` | jsdom, `@solidjs/testing-library`, MSW | `apps/web/test/**/*.test.tsx?` |
+  | `tools` | node | `tools/*/test/**/*.test.ts`, `infra/budmonctl/test/**/*.test.ts`, `packages/config/test/**/*.test.ts` |
+- **Scripts:** root `pnpm test` runs all projects except `server-int`. `pnpm test:int` runs `server-int`. `pnpm test:e2e` runs Playwright. `pnpm check` = format + lint + typecheck + `test` + `test:int`.
+- **Integration database** (`apps/server/test/setup/globalSetup.ts`):
+  1. Start `postgres:18` (same digest as `images/postgres`'s base) with Testcontainers, or use `TEST_DATABASE_URL` (a superuser URL) if set.
+  2. `bootstrapCluster` (F-14), then `runSchemaStep` into database `budmon_template`, with mode `push`, or `migrate` when `BUDMON_SCHEMA_MODE=migrate` (CI sets it on `release/*` and `hotfix/*`), using test role passwords.
+  3. Each test file gets `CREATE DATABASE t_<random> TEMPLATE budmon_template` and connects as **`budmon_app`** (or `budmon_capture` / `budmon_queue` where the test needs it) through `createTestDatabase(role)`.
+  4. `resetBetweenTests(db)` truncates every `public` table except `currencies`, and runs `DELETE FROM pgboss.job` as `budmon_queue`.
+- **Helpers** (`apps/server/test/support/`):
+  - factories per table in `test/factories/`;
+  - `fixedClock` (F-310), `sequentialIds()`;
+  - `fakeKmsClient()`, `fakeFetch(routes)`;
+  - `createMemoryObjectStore` (F-143), `createMemoryErrorReporter` (F-34);
+  - `inMemoryTelemetry()` (an InMemorySpanExporter and metric reader);
+  - `logCapture()` (a pino destination collecting lines);
+  - `buildApiContainer(overrides)` and `buildWorkerContainer(overrides)` (F-96);
+  - `injectJson(app, method, url, body?, headers?)` around Fastify's `inject`.
+- **Privacy canary suite** (`apps/server/test/privacy/`): `CANARIES` from F-198. Each flow puts canaries into every sensitive field, captures logs, spans, metrics, `ErrorReporter` events and `pgboss.job.output`, and asserts `scanForCanaries` finds nothing. Platform flows: TP-3.10, TP-4.9, TP-5.2, TP-6.7, TP-8.12, TP-9.11. Modules add flows in their LLDs.
+- **Playwright** (`apps/web/e2e/`):
+  - `webServer` runs `pnpm --filter @budmon/server e2e:serve`, which starts Testcontainers Postgres, the schema step, seeders, API and worker, then serves `vite preview` built with `VITE_FIXTURES=1 VITE_PSEUDO_LOCALES=1`.
+  - The fixture `withAxe` runs `@axe-core/playwright` after each test and attaches the JSON report. It never fails the test (D-39).
+  - Projects: `chromium` (PRs); `firefox` and `webkit` (release candidates); `pseudo-rtl` (locale `ar-XB`, PRs); `perf` (release candidates, Chromium, CPU throttling 4× through CDP `Emulation.setCPUThrottlingRate`).
+- **Android:** JUnit 4 + Robolectric 4.17 + MockK + Turbine. Room in-memory database. OkHttp `MockWebServer`. Compose UI tests (`createComposeRule`) with `LocalLayoutDirection provides LayoutDirection.Rtl` variants and `fontScale = 2f`. Shared vectors through the test resources source dir. `./gradlew testDebugUnitTest lint ktlintCheck`; `connectedDebugAndroidTest` on release candidates (emulator API 34).
+- **Bash:** `bats-core` (pinned) in `infra/deploy/bootstrap/test/*.bats` and `infra/budmonctl/host/test/*.bats`, with stub `cosign`, `crane`, `docker`, `sops` and `curl` on `PATH` recording calls. shellcheck on every script.
+- **CI jobs** (`ci.yml`):
+
+  | Job | Steps (D-27) | Runs |
+  | --- | ------------ | ---- |
+  | `check` | 1 to 4, including `server-int` | Every PR |
+  | `contract` | Drift, `oasdiff` against main, F-8, F-348 | Every PR |
+  | `e2e` | 5 | Every PR |
+  | `android` | 6 | Path filter, release candidates |
+  | `infra-lint` | TP-15.16 | Changes to `infra/`, `images/`, `.github/` |
+  | `migrations` | F-6 + report, or checks (i), (iii), (iv) | By branch type |
+  | `rehearsal` | `rehearsal.yml` | `release/*`, `hotfix/*`, `infra/*` PRs |
+  | `dev-smoke` | TP-2.18 | `main` only |
+
+### 10.2 Cases
+
+Types: **U** unit, **I** integration (real Postgres and/or HTTP in-process), **E** end-to-end (Playwright, emulator, or the rehearsal), **S** static/CI check. "Vectors" means the shared test-vector files.
+
+| ID | Slice | Type | Target | Setup | Input / action | Expected |
+| -- | ----- | ---- | ------ | ----- | -------------- | -------- |
+| TP-0.1 | S-0 | S | repo layout | checkout | Check the paths | `server/`, root `compose.yaml`, `code-bites.md` and `.prettierrc` don't exist; `git ls-files` has no `dist/` |
+| TP-0.2 | S-0 | U | F-1 layering | ESLint API on fixture files | `x/xRouter.ts` imports `./xRepo.js`; `x/xService.ts` imports `drizzle-orm`; `x/xRepo.ts` imports `drizzle-orm` | Errors on the first two; none on the third |
+| TP-0.3 | S-0 | U | F-1 logging | same | `import pino from "pino"` in `platform/http/x.ts`; `console.log` in `platform/x.ts`; `console.log` in `main/x.ts` | Error, error, none |
+| TP-0.4 | S-0 | U | F-1 money | same | `parseFloat(a)`; `Number(a)`; `bigint({ mode: "number" })`; `// eslint-disable-next-line no-restricted-syntax -- reason` before `Number(a)`; the same without `-- reason` | Errors; none; error |
+| TP-0.5 | S-0 | U | F-6 | none | branch `feat/x` + `apps/server/drizzle/0001.sql`; `release/v1.0.0` + same; `feat/x` without; merge-back true; `infra/v1.0.0-infra.1` | `ok:false` with the file listed; ok; ok; ok; ok |
+| TP-0.6 | S-0 | S | `pnpm check` | clean clone | Run | Exit 0 |
+| TP-0.7 | S-0 | S | F-5 | fixture `const a: number[] = []; const b: number = a[0];` | `tsc -p` fixture | TS2322 error (`noUncheckedIndexedAccess`) |
+| TP-1.1 | S-1 | U | F-300 `parseDecimal` | none | "0.1", "-12.50", "1.5e-3", "1e3", "", "1.", "abc", "1e9999" | 1/10, −25/2, 3/2000, 1000/1; `RangeError` ×4 |
+| TP-1.2 | S-1 | U | F-300 `roundHalfEven` | vectors | each case | `expected` |
+| TP-1.3 | S-1 | U | F-301 redaction | `m = Money.of(987654321n, EGP)` | `String(m)`, `JSON.stringify({m})`, `util.inspect(m)`, `` `${m}` `` | All contain `[redacted]` and no `987654321` |
+| TP-1.4 | S-1 | U | F-301 arithmetic | EGP and USD values | `add`, `subtract`, `sum`, `compare`, `ratio` mixed; `sum([], EGP)`; `ratio(x, zero)` | `CurrencyMismatchError` (message contains "EGP" and "USD", no digits of amounts); zero EGP; `RangeError` |
+| TP-1.5 | S-1 | U | F-302 | vectors + `allocate(m, [])`, `[-1n]`, `[0n, 0n]` | | Vector outputs; parts sum to `m`; `RangeError` ×3 |
+| TP-1.6 | S-1 | U | F-303 | vectors; same-currency input; `unitsPerUsd` 0 | | Vector outputs; same instance; `RangeError` |
+| TP-1.7 | S-1 | U | F-304 | vectors; `toMoney(1.5, EGP)`; `toMoney(2**53, EGP)` | | ±(2^53−1) ok; `MoneyRangeError` for others |
+| TP-1.8 | S-1 | U | F-305 | vectors (normalised spaces) | | `expected`; `minorUnits: 5` → `RangeError` |
+| TP-1.9 | S-1 | U | F-306 | `{b:1,a:{d:2,c:[3,{f:1,e:0}]},u:undefined}`; `1n`; `NaN`; `new Date()` | | `{"a":{"c":[3,{"e":0,"f":1}],"d":2},"b":1}`; `TypeError` ×3 |
+| TP-1.10 | S-1 | S | F-313 | vector files | Count cases | rounding ≥ 10 including ±1/2, ±3/2, ±5/2, 7/2, 1/3, −1/3; allocate ≥ 6 including 100/[1,1,1], −100/[1,1,1], 0/[1,2], 1/[0,1], 5/[1,1]; convert ≥ 6 including EGP→JPY, JPY→KWD, USD→EGP, 9000000000000000 EGP→USD; wire ±2^53−1 and ±2^53; format EGP/JPY/KWD in en-US and de-DE plus negatives |
+| TP-1.11 | S-1 | U | F-310 | `fixedClock("2026-10-05T22:30:00Z")` | `todayIn(c, "Africa/Cairo")`, `todayIn(c, "UTC")`, `todayIn(c, "Mars/Base")`; `advance({ hours: 2 })` then `utcDateOf` | 2026-10-06, 2026-10-05, `RangeError`, 2026-10-06 |
+| TP-1.12 | S-1 | U | F-311 | none | 1000 × `next()` | All match the UUIDv7 regex; lexicographically non-decreasing |
+| TP-1.13 | S-1 | U | F-312 | none | `resolveLocale("ar-EG", ["en","ar"])`, `("fr", ["en"])`, `directionOf("ar-XB")`, `("he")`, `("en")`, `isolate("x")` | "ar", "en", rtl, rtl, ltr, "⁨x⁩" |
+| TP-2.1 | S-2 | U | F-11 | env and file map for each kind (development) | `loadConfig` | `Object.isFrozen`; secrets are `Secret` instances; defaults applied |
+| TP-2.2 | S-2 | U | F-11 | env missing `DB_HOST`, `DB_PORT=abc`, a file content with sentinel `S3NT1NEL` failing validation | `loadConfig` | `ConfigError` with problems `DB_HOST: required`, `DB_PORT: …`; `S3NT1NEL` absent from message and problems |
+| TP-2.3 | S-2 | U | F-11 | `APP_ENV=production` with `OBJECT_STORE_KIND=fs`, `KMS_PROVIDER=local`, `FX_PROVIDER=fixed`, `DB_SSLMODE=disable` and `WORKER_ROLES=capture`, password-form role secrets, no `TRUSTED_PROXY` | each separately | One problem each with rule "not allowed in production" (or "required") |
+| TP-2.4 | S-2 | U | F-11 | `APP_ENV=rehearsal` | `KMS_PROVIDER=local`; `OBJECT_STORE_KIND=fs` | Accepted; problem |
+| TP-2.5 | S-2 | U | F-11 | `readFile` throws for `CURSOR_KEY_FILE` | | Problem `CURSOR_KEY_FILE: file not readable` |
+| TP-2.6 | S-2 | I | F-90 | spawn `node dist/main/api.js` with `DB_HOST` unset | | stderr has `Configuration invalid:` and `  - DB_HOST: required`; exit 78; no port open |
+| TP-2.7 | S-2 | U | F-7 | keys `[A,B]`; example `A=1` / `A=1\nB=2\nC=3` | | missing `[B]`; unknown `[C]` |
+| TP-2.8 | S-2 | I | F-13 | test table | (a) insert, resolve; (b) insert, throw; (c) `fn` throws a 40001 error twice then succeeds; (d) throws 40001 four times | (a) row present, `tracker.committed` true; (b) no row, rethrown, committed false; (c) 3 calls, success, `sleep` called twice with 10..49; (d) 4 calls, rethrown |
+| TP-2.9 | S-2 | I | F-14 | fresh container | Run twice | Second run succeeds; `budmon_migrator` owns the database; `CREATE` on `public` revoked from `PUBLIC` |
+| TP-2.10 | S-2 | I | F-15 | after F-14 | (a) password forms; (b) a verifier from F-190 for `budmon_app`; (c) verifier `"SCRAM-SHA-256$bad"`; (d) password form with `appEnv: "production"` | (a) roles exist, NOINHERIT; (b) login as `budmon_app` with the password succeeds; (c) `SchemaStepError("invalid_verifier","budmon_app")` and no role altered; (d) `password_form_in_production` |
+| TP-2.11 | S-2 | I | F-16 | template DB | As `budmon_app`: `SELECT` from and `INSERT` into `currencies`; as `budmon_capture`: `SELECT` from `idempotency_records`; F-16 with a grants map missing `currencies`; a map with `credential: true, capture: ["SELECT"]` | ok; 42501; 42501; `table_without_grants`; `credential_table_granted_to_capture` |
+| TP-2.12 | S-2 | I | F-17 | empty database; non-empty database | Push | Four tables exist; `relpersistence` of `rate_limit_counters` = `u`; `PushTargetNotEmptyError` |
+| TP-2.13 | S-2 | I | F-18 | fixture migrations folder (2 migrations); a database with an extra recorded hash | Apply | `{applied:2}` then `{applied:0, verified:2}`; `UnknownMigrationError` |
+| TP-2.14 | S-2 | U+I | F-21, `iso4217.json` | file; database | (U) invariants; (I) load, then change a name in the input, then change EGP's `minorUnits` | (U) unique codes; EGP 2, JPY 0, KWD 3, BHD 3, USD 2; none of XAU, XAG, XPT, XPD, XDR, XTS, XXX, CLF, BOV; (I) upserted count; name updated; `minor_units_changed` and nothing changed |
+| TP-2.15 | S-2 | I | F-19 | empty database | Push mode twice | Report fields populated; second report `currenciesUpserted: 0`, `queuesCreated: 0` |
+| TP-2.16 | S-2 | U | F-20 | fake deps | `appEnv: "production"`; host `db.example.com`; `localhost` + development | `ResetRefusedError` ×2 (deps not called); deps called in order |
+| TP-2.17 | S-2 | I | test tooling | any integration test | `SELECT current_user, current_database()` | `budmon_app`; a per-file `t_` database |
+| TP-2.18 | S-2 | E | F-22 | CI `dev-smoke` | `pnpm dev &`, poll `/health/ready` | 200 within 90 s |
+| TP-3.1 | S-3 | U | F-30 | none | `{userId:"u1", payee:"x", count:-1, route:"/a b", rateDate:"2026-10-05"}` | `{userId:"u1", count:"[invalid]", route:"[invalid]", rateDate:"2026-10-05"}`, `dropped: 3` |
+| TP-3.2 | S-3 | U | F-31 | `logCapture`, `onDrop` spy | `info("Bad Event!", {payee: CANARIES.payee})`; `error("x_failed", {}, new Error(CANARIES.message))` | Line 1 `event:"invalid_event"`, `dropped:2`, `onDrop(2)`; line 2 has `err.class:"Error"`; the canary is absent from all lines |
+| TP-3.3 | S-3 | U | F-32 | `Secret.of(CANARIES.token)` | `JSON.stringify`, `util.inspect({s})`, template, `console.log` captured | `[redacted]`; no canary |
+| TP-3.4 | S-3 | U | F-33 | errors: `BudmonError("NOT_FOUND",404)`; pg `DatabaseError` code `23505` detail with canary; `Object.assign(new Error("x"),{code:"ECONNREFUSED"})`; a Gaxios-like `{response:{status:403,data:{error:{errors:[{reason:"rateLimitExceeded"}]}}}, config:{headers:{Authorization:"Bearer "+token}}}`; an error whose stack contains a line with canary text; `AggregateError`; `"str"` | | `{class:"BudmonError",key:"NOT_FOUND"}`; `{class:"DatabaseError",code:"23505"}`; `code:"ECONNREFUSED"`; `{status:403, reason:"rateLimitExceeded"}`; the frame with canary text dropped; `class:"AggregateError"`; `class:"NonError"`; no canary anywhere |
+| TP-3.5 | S-3 | U | F-35 | event with `request`, `extra`, `user.email`, tag `foo`, `exception.values[0].value = CANARIES.message`, breadcrumbs `console` and `http` with a query URL | `scrubSentryEvent` | Only allowlisted keys; value = type; console breadcrumb gone; http URL without query |
+| TP-3.6 | S-3 | U | F-34 | Sentry test transport | `report(new Error(CANARIES.message), {requestId:"r1"})`; no DSN | One envelope with type `Error`, value `Error`, tag-free of the canary; no-op |
+| TP-3.7 | S-3 | U | F-40 | InMemory exporter | A span with `http.route`, `url.full` with a query, `user.email`, an exception event | Exported span has `http.route` only from those; no events; `onDrop(3)` |
+| TP-3.8 | S-3 | U | F-41 | `MeterProvider` + `InMemoryMetricExporter` | Register with label `user_id`; record with undeclared label `foo` and value `"a b"` | Throws; recorded without `foo`, value `"invalid"`; `onDrop` called twice |
+| TP-3.9 | S-3 | U | F-37 | none | `https://x.io/a/b?app_id=1#f`; `nope` | `https://x.io/a/b`; `[invalid-url]` |
+| TP-3.10 | S-3 | I | privacy harness | full capture | Logger and reporter receive an error with every canary in message, cause and properties | `scanForCanaries` = [] |
+| TP-4.1 | S-4 | S | F-347 | CI | `pnpm contract:openapi && git diff --exit-code` | Passes; fails when the committed file is stale (fixture) |
+| TP-4.2 | S-4 | U | F-340, F-347 | spike contract (`packages/contract/test/fixtures/spikeContract.ts`) with money in input and output, a nested object, a discriminated union, a nullable field, an enum | Emit | Both input and output `amount` schemas are `{type:"integer",format:"int64",minimum:-9007199254740991,maximum:9007199254740991}` |
+| TP-4.3 | S-4 | S | Kotlin generation | spike OpenAPI | Generate with §4.19's generator configuration into a temp project and compile | Compiles; the `amount` property type is `kotlin.Long` |
+| TP-4.4 | S-4 | U | contract types | spike contract | `expectTypeOf<InferContractRouterOutputs<typeof spike>["p"]["amount"]>().toEqualTypeOf<number>()` | Type-checks |
+| TP-4.5 | S-4 | U | F-348 | fixture documents | One violating each of R1 to R6, one clean | One violation each with rule and location; clean → [] |
+| TP-4.6 | S-4 | U | F-8 | base/head documents | Same content; changed with minor 0→1; changed with minor unchanged | ok; ok; not ok |
+| TP-4.7 | S-4 | I | §5.2 | API in-process, `CLIENT_MIN_ANDROID=3`, `CLIENT_LATEST_ANDROID=5` | `GET /api/v1/meta/client-config` | 200 with the exact body; `X-Request-Id` (32 hex); `X-Budmon-API-Version: 1.0` |
+| TP-4.8 | S-4 | I | F-53 default deny | test contract + router: the platform contract plus `test.authedThing` (GET) and `test.createThing` (create) | For each `listProcedures` entry not in `PUBLIC_PROCEDURES`, call without credentials | 401 envelope `UNAUTHENTICATED` for all |
+| TP-4.9 | S-4 | U | F-52 `mapError` | none | BudmonError; input validation error with `cause.issues` containing the canary as received value; output validation (committed true); oRPC NOT_FOUND; pg `57P01`; plain Error (committed false / true) | Exact key, status, data; issues have fixed messages and no canary; INTERNAL `{outcome:"unknown"}`; NOT_FOUND; 503 `{outcome}`; INTERNAL `not_applied` / `unknown`; `report` flags as in F-52 |
+| TP-4.10 | S-4 | I | F-52 interceptor | test router whose handlers throw: `RateLimitedError(30)`, `new Error(CANARIES.message)` | Call through HTTP | 429 with `Retry-After: 30`, no report; 500 envelope `{"defined":true,"code":"INTERNAL","status":500,"message":"Internal error","data":{"outcome":"not_applied"}}`, one report without the canary, one `request_failed` log line |
+| TP-4.11 | S-4 | U+I | F-56 | min android 5, min web 2 | Headers `android/4`, `android/5`, `web/1`, `ios/1`, missing; and `android/1` on `meta.clientConfig` | 400 `CLIENT_UPDATE_REQUIRED` `{minimumVersion:5}`; pass; 400 `{minimumVersion:2}`; pass (other); pass; pass |
+| TP-4.12 | S-4 | U | F-57 `schemaWindow` | journals | applied = journal; journal + 1 extra; + 2 extra; missing one | ok; ok; ahead; behind |
+| TP-4.13 | S-4 | I | F-57 routes | (a) database up; (b) pool pointed at a closed port; (c) `appEnv: "production"` with the journal one entry ahead of the database | `GET /health/ready`, `GET /health/live` | (a) 200 ready; (b) 503 `database_unreachable`; (c) 503 `schema_behind`; live always 200; `Cache-Control: no-store` |
+| TP-4.14 | S-4 | I | F-55 | API | `OPTIONS /api/v1/meta/client-config` with `Origin: https://evil.example` | 404 envelope; no `Access-Control-*` headers |
+| TP-4.15 | S-4 | I | F-52 | API | `GET /api/v1/nope` | 404, body exactly `{"defined":true,"code":"NOT_FOUND","status":404,"message":"Not found"}` |
+| TP-4.16 | S-4 | I | F-53, F-54 | test router with authed and owner procedures; auth hooks returning a principal, a non-owner, or throwing | Call | 200; owner procedure → 403 `FORBIDDEN`; throwing hook → 500 INTERNAL |
+| TP-4.17 | S-4 | I | F-38 | `logCapture` | `GET /api/v1/meta/client-config?x=CANARY` | One `http_request` line with route `/meta/client-config`, status 200, no `x`, no canary; `http_server_requests_total` incremented |
+| TP-4.18 | S-4 | U | F-50 | none | `new BudmonError("bad key", 400)`; `("OK_KEY", 200)` | `TypeError` ×2 |
+| TP-5.1 | S-5 | I | F-61 | API | `GET /api/v1/meta/client-config` | `content-security-policy` contains `default-src 'none'`; HSTS max-age 31536000; `referrer-policy: no-referrer`; `x-content-type-options: nosniff` |
+| TP-5.2 | S-5 | I | F-62 | API | `POST` to a test create with body `{"a":"CANARY` (invalid JSON) | 400 `VALIDATION_FAILED`, issues `[{path:[],code:"invalid_json",message:"Request body is not valid JSON."}]`; no canary in the response or logs |
+| TP-5.3 | S-5 | I | F-62 | API | 100 KiB + 1 body | 413 `PAYLOAD_TOO_LARGE` |
+| TP-5.4 | S-5 | I | F-62 | API | `POST` with `Content-Type: text/plain` | 400, issue code `unsupported_media_type` |
+| TP-5.5 | S-5 | I | F-63 | clock at `…:00:10`, spec limit 2, window 60 | hit ×3 with subject `CANARY@example`; advance 60 s, hit; inside a rolled-back transaction, then hit | allowed, allowed, `{allowed:false, retryAfterSeconds:50}`; allowed (new window); the counter row's `bucket_key` doesn't contain the subject; the rolled-back hit still counted |
+| TP-5.6 | S-5 | I | F-65 | test procedure with `rateLimited({spec:{limiter:"test",limit:1,windowSeconds:600}, subject: ip})` | Call twice | Second: 429 `RATE_LIMITED`, `data.retryAfterSeconds` ≥ 1, `Retry-After` header; `rate_limited_total{limiter="test"}` = 1 |
+| TP-5.7 | S-5 | I | F-65 coarse | API | 301 × `GET /api/v1/meta/client-config` from one IP; 301 × `/health/live` | 301st → 429 envelope; health never 429 |
+| TP-5.8 | S-5 | I | F-64 | 3 expired + 2 live rows | `deleteExpired(h, now, 2)` twice | 2 then 1; live rows remain |
+| TP-5.9 | S-5 | U | F-66 | none | `hashSecret("pw")` + verify("pw"), verify("x"), verify("garbage", …); `timingSafeEqualBytes` with different lengths; `randomToken()`, `randomToken(8)`; `hmacSha256("key","The quick brown fox jumps over the lazy dog")` | PHC starts `$argon2id$v=19$m=19456,t=2,p=1$`; true, false, false; false; 43 chars `[A-Za-z0-9_-]`; `RangeError`; hex `f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8` |
+| TP-6.1 | S-6 | U | F-70 | none | defaults; name `Bad`; cron on capture; cron `* *` | Defaults as specified; `TypeError` ×3 |
+| TP-6.2 | S-6 | U | F-71 | none | duplicate names; name `dead-letter.x` | `TypeError` ×2; `deadLetterQueue("general")` = `dead-letter.general` |
+| TP-6.3 | S-6 | U | F-72 | none | `{id: uuid, d:"2026-10-05", n: 3, ok: true}`; `{note: "has space"}`; `{a: "x".repeat(65)}`; `{a:{b:{c:1}}}`; `{a: Array(101).fill(1)}`; `{a: [CANARIES.payee + " x"]}` | Passes; `UnsafeJobPayloadError` with paths `note`, `a`, `a.b`, `a`, `a.0`; message never contains the value |
+| TP-6.4 | S-6 | I | F-74 | template DB | Query the owner of schema `pgboss`; run F-74 again; `budmon_app` sends a job | `budmon_queue`; `"current"`; send succeeds |
+| TP-6.5 | S-6 | I | F-73 | registered test job | Enqueue in a transaction, then commit; enqueue in a transaction, then roll back; invalid payload; unregistered definition | Job row exists; no row; `JobPayloadInvalidError` (message has paths only); `Error("job not registered: …")` |
+| TP-6.6 | S-6 | I | F-75 | registry with 2 jobs | sync; sync again; change a policy and sync; a queue `other.x` created manually | created 2 + 2 DLQs, then 0; options match; `queue_policy_changed`; `other.x` untouched + warn |
+| TP-6.7 | S-6 | I | F-76 | worker running a test job; handler returns `{secret: CANARIES.token}`; another throws `new Error(CANARIES.message)` with `retryLimit 1` | Run both | Completed job output null; failed job output has `message:"Error"` and frames only; after the final attempt a job is in `dead-letter.general` with `sourceName`; `jobs_dead_lettered_total` +1; canary absent from `pgboss.job` and logs |
+| TP-6.8 | S-6 | I | F-77 capture | worker container with `WORKER_ROLES=capture` (`budmon_capture`) and a capture test job | Process a job; then `SELECT * FROM idempotency_records` as `budmon_capture` | Job completed with no permission errors; 42501 |
+| TP-6.9 | S-6 | I | F-78 | registry has a job without a queue | start; start general with a cron job | `MissingQueueError`; `pgboss.schedule` has the cron with tz `UTC`; a capture-only worker registers no schedules |
+| TP-6.10 | S-6 | U+I | F-79, healthcheck | fake `setInterval`, `fixedClock` | tick; run `healthcheck.js` with a fresh vs a 61 s old `/tmp/heartbeat` | gauge = now; exit 0 / 1 |
+| TP-6.11 | S-6 | I | F-81 | one dead-lettered job | list; redrive the id; redrive an unknown id | 1 entry with `failure:"Error"`; `moved` 1 and the job back in its source queue; 0 |
+| TP-6.12 | S-6 | I | F-80 | 6000 expired + 1 live idempotency records | Run the purge handler | 6000 deleted in 2 batches; live remains |
+| TP-6.13 | S-6 | I | F-91 | worker process with a long job (2 s) | `SIGTERM` during the job | The job completes; process exits 0 within 30 s |
+| TP-7.1 | S-7 | I | F-100 | transaction; `work` spy returns `{id, createdAt}` | `run` | `replayed:false`, status 201; record has the result and `expires_at` = now + 90 d; `work` called once |
+| TP-7.2 | S-7 | I | F-100 | after TP-7.1 | Same key, same input | Stored result; `replayed:true`; `work` not called; `idempotent_replays_total` +1 |
+| TP-7.3 | S-7 | I | F-100 | after TP-7.1 | Same key with a different input; with a different procedure | `IdempotencyKeyReusedError` ×2 |
+| TP-7.4 | S-7 | I | F-100 | users A and B | Same key, each user | Both run `work` |
+| TP-7.5 | S-7 | I | F-100 | two connections | Both start `run` with the same key; the first `work` waits on a latch | Second blocks until the first commits, then returns `replayed:true`; `work` called once |
+| TP-7.6 | S-7 | I | F-100 | `work` throws | `run`, then retry with a working `work` | First rethrows and leaves no record; second runs `work` |
+| TP-7.7 | S-7 | I | F-102 | test create procedure | Header missing; `not-a-uuid`; upper-case UUID | 400 `VALIDATION_FAILED`, path `["headers","idempotency-key"]`, code `invalid_idempotency_key` |
+| TP-7.8 | S-7 | U | F-100 hash | none | inputs `{a:1,b:2}` vs `{b:2,a:1}` | Same hash |
+| TP-7.9 | S-7 | U | F-100 | `h.inTransaction=false` | `run` | `Error("idempotency requires a transaction")` |
+| TP-7.10 | S-7 | U | F-103 | key, `fixedClock` | encode then decode; flip one byte; advance 24 h + 1 s; wrong filter hash; a 513-character token; a non-base64 token | Round trip; then `ValidationFailedError` with the identical issue `invalid_cursor` for each |
+| TP-7.11 | S-7 | U | F-103 | sortKey `[CANARIES.payee]` | Encode; inspect the token and its base64 decode | The canary doesn't appear |
+| TP-7.12 | S-7 | U | F-105 | 51 rows, limit 50; 50 rows | `paginate` | 50 items + cursor; 50 items + null |
+| TP-7.13 | S-7 | U | F-104 | none | `{a:1,b:[1,2]}` vs `{b:[1,2],a:1}`; `{b:[2,1]}` | Equal (22 chars); different |
+| TP-7.14 | S-7 | U | F-343 | test contract with `createRoute("/things")` | Emit and check rules | R5 satisfied; header required, `format: uuid`; 201 |
+| TP-7.15 | S-7 | I | F-102 end to end | test create procedure inserting into a test table | POST twice with the same key, then with a new key | 201 + body; 201 + same body + `Idempotent-Replayed: true`; 201 + a new id; the table has 2 rows |
+| TP-8.1 | S-8 | U | F-110 | parts with keyVersion `local:1`, wrapped DEK 384 bytes, ciphertext 10 bytes | encode/decode; truncated buffers at each field; version byte 2; provider 9; L=0 | Exact byte layout per the table; round trip; `EnvelopeFormatError` for each malformed case |
+| TP-8.2 | S-8 | U | F-110 `aadFor` | none | `{table:"t",rowId:"r 1",purpose:"p"}` | `RangeError` |
+| TP-8.3 | S-8 | U | F-111, F-113 | RSA-3072 pair, version `local:1` | seal + unseal; unseal with `rowId` changed; flip a ciphertext byte | Plaintext equal; provider byte `0x02`; `EnvelopeAuthError` ×2 |
+| TP-8.4 | S-8 | U | F-111 | RSA-2048 key | construct | `TypeError` |
+| TP-8.5 | S-8 | U | F-112 | fake KMS client decrypting with a local private key; envelope with version `projects/p/…/cryptoKeyVersions/1` | unseal; client rejects; envelope with provider local | Plaintext; `asymmetricDecrypt` called with `{name, ciphertext}` and `timeout: 5000`; `KmsUnavailableError` + `kms_errors_total` 1; `EnvelopeFormatError` |
+| TP-8.6 | S-8 | U | F-114 | keys `{k1}`, then `{k1,k2}` current `k2` | seal with k1; unseal with the k1-only cipher; unseal the k1 envelope with the {k1,k2} cipher; unseal with the cipher holding only k2 | ok; ok; `UnknownKeyVersionError` |
+| TP-8.7 | S-8 | I | F-117 | test table `sealed_test(id uuid, secret bytea)` registered (provider api), 3 rows with k1, 1 with k2 | rewrap with current k2; one row updated concurrently between select and update (test hook) | `{rewrapped: 2, skipped: 1}`; all non-skipped rows now carry `k2` and unseal to the original plaintext |
+| TP-8.8 | S-8 | I | F-118 | test table with capture provider, envelopes `local:1`; config `local:2` with a new key pair; local unsealer holds both keys (test override) | Run the job handler | Rows re-sealed under `local:2` |
+| TP-8.9 | S-8 | U | F-115 | none | table `Bad-Name`; purpose `has space`; a duplicate | `TypeError` ×3 |
+| TP-8.10 | S-8 | U | F-119 | `randomBytes` returning RFC 7636 appendix B bytes | `createPkcePair` | verifier `dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk`, challenge `E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM` |
+| TP-8.11 | S-8 | U | F-119 | none | `buildGoogleAuthorizationUrl(...)` | Host, path and exactly the listed parameters |
+| TP-8.12 | S-8 | U | F-120 | `fakeFetch` | 200 full; 200 without refresh; 400 invalid_grant (description = canary); 403; 503; 429; network error; timeout | Tokens (`Secret`s), `expiresAt` = now + `expires_in`; `no_refresh_token`; `invalid_grant`; `rejected`; `server`; `server`; `network`; `network`. The request body has `grant_type`, `code`, `code_verifier`, `client_id`, `client_secret`, `redirect_uri`. The canary never appears in the errors' properties or messages |
+| TP-8.13 | S-8 | U | F-121 | inner fetch spy | `https://gmail.googleapis.com/x`; `http://gmail.googleapis.com/`; `https://evil.example/`; `https://gmail.googleapis.com:8443/`; `https://u:p@gmail.googleapis.com/` | Called with `redirect:"manual"`; `EgressDeniedError` ×4; inner not called |
+| TP-8.14 | S-8 | I | F-122 | local HTTPS target and a CONNECT proxy recording hosts (test helper) | (a) `HTTPS_PROXY` set; (b) set with `NO_PROXY` including the target; (c) unset — each in a child process calling `installProxySupport` then `fetch` | (a) the proxy saw a CONNECT to the target; (b), (c) no CONNECT; requests succeed |
+| TP-8.15 | S-8 | U | F-96, F-10 | API config | Build an `ApiContainer` | No `captureUnsealer` member; `configSchemaFor("api")` has no `KMS_PROVIDER`, `GCP_CREDENTIALS_FILE` or `CAPTURE_PRIVATE_KEY_FILE` keys |
+| TP-9.1 | S-9 | U | F-130 | none | `{"rates":{"EGP":48.123456789012345,"X":1e-3}}`; `normaliseRate("48.123456789012345")`, `("0")`, `("-1")`, `("1e12")`, `("abc")` | `"48.123456789012345"`, `"1e-3"` as strings; `"48.123456789012"`; null ×4 |
+| TP-9.2 | S-9 | I | F-132 | currencies loaded | `convert(EGP 100.00, EGP, d)` | Same money; provisional false; rateDate d |
+| TP-9.3 | S-9 | I | F-132 | day 2026-10-04: EGP 48.5, JPY 149.25 | `convert(EGP 123.45, JPY, 2026-10-04)` | JPY 380; provisional false |
+| TP-9.4 | S-9 | I | F-132 | only 2026-10-04 stored | `convert(…, 2026-10-05)` | rateDate 2026-10-04, provisional true |
+| TP-9.5 | S-9 | I | F-132 | first stored day 2026-10-01; clock 2026-10-05 | `convert(…, 2025-01-10)` inside a transaction that's rolled back; `convert(…, 2024-01-01)`; future date with no earlier day (empty table) | `no_rate/no_day`; a `platform.fx-backfill {rateDate:"2025-01-10"}` job exists after the rollback; no job for 2024-01-01 (before the floor); no job for the future date |
+| TP-9.6 | S-9 | I | F-132 | day stored without KWD | `convert(USD, KWD, day)` | `no_rate/currency_missing`; no job |
+| TP-9.7 | S-9 | I | F-132 | none | `convert` to `ZZZ` (a valid code, not in the table) | `UnknownCurrencyError` |
+| TP-9.8 | S-9 | I | F-132 | day with EGP 48.5 | `convertSum` of 3 × EGP 0.30 to USD; items on a stored day and an unstored later day; empty | USD 0.03 (each item 0.6186 cents → 1 cent; sum-then-round would give 0.02); `provisional: true`; USD 0.00, `provisional: false` |
+| TP-9.9 | S-9 | I | F-137, F-138 | clock 2026-10-05T00:30Z; fake primary; subscriber `test.fx-rates-added`; stored day 2026-10-07 exists (simulated backfill) | Run the fetch handler | Day 2026-10-04 stored with provider `openexchangerates`; one subscriber job `{rateDate:"2026-10-04", affectedFrom:"2026-10-04", affectedTo:"2026-10-06"}` in the same transaction; a second run doesn't fetch |
+| TP-9.10 | S-9 | I | F-137 | job `createdOn` 6 h 1 min before now; primary fails | Run | Fallback used; `provider = fawazahmed0` |
+| TP-9.11 | S-9 | I | F-137 | provider returns EGP valid, XAU (not in table), ZWL inactive, EUR `0`, GBP `"abc"` | Run; then a provider with only invalid values | EGP stored only; `fx_rates_rejected_total` = 2; second run throws `FxProviderError("invalid")` and stores nothing |
+| TP-9.12 | S-9 | U | F-133 OXR | `fakeFetch` | 200; base EUR; 400; 500; network | Map with exact strings; `invalid`; `not_found`; `http` status 500; `network`. The URL carries `app_id` and `base=USD`; the logged URL has no query |
+| TP-9.13 | S-9 | U | F-133 fawazahmed0 | `fakeFetch` | primary 503 then mirror 200; date mismatch; 404 | Mirror used; `invalid`; `not_found` |
+| TP-9.14 | S-9 | I | F-137 backfill | fallback 404; fallback 200 | Run | Completes, `fx_backfill_missing_total` 1; day stored with `fawazahmed0` |
+| TP-9.15 | S-9 | U | F-132 | none | register a subscriber with role capture | `TypeError` |
+| TP-9.16 | S-9 | I | F-131 | stored day | `insertDay` again with different values | Returns 0; values unchanged |
+| TP-9.17 | S-9 | I | F-42 gauge | latest day 2026-10-04 | Collect metrics | `fx_last_day_timestamp_seconds` = epoch(2026-10-05T00:00Z) |
+| TP-10.1 | S-10 | U | F-140 | none | Valid and invalid keys per bucket; prefix `users/`; ttl 30 and 901 | Pass/`RangeError` as per the rules |
+| TP-10.2 | S-10 | I | F-142, F-145 | temp directory, dev API | put/list/delete/deletePrefix; presign then GET; GET after expiry; tampered token | Behaviour per F-140; 200 with `attachment`; 404 envelope ×2 |
+| TP-10.3 | S-10 | I | F-141 | MinIO Testcontainer | Same operations; GET the presigned URL; after `ttlSeconds` | Works; 403 after expiry; `delete` of a missing key is fine; `put` to an unknown bucket → `ObjectStoreError` |
+| TP-10.4 | S-10 | U | F-143 | none | Same operations | Same results as TP-10.2's assertions |
+| TP-10.5 | S-10 | U | F-144 | memory store: objects at now − 8 d, now − 6 d | purge | Deletes 1 |
+| TP-10.6 | S-10 | U | F-146 | memory store | append 3 records out of order; `listSince(t2)` | Keys `records/20261005T120000Z_<uuid>.json`; records ≥ t2 sorted |
+| TP-10.7 | S-10 | U | F-151 | log with 2 records | handler spy; null handler; empty log + null handler; handler throwing on the second | Called in order, `{replayed:2}`; `NoErasureHandlerError`; `{replayed:0}`; rethrown after 1 |
+| TP-10.8 | S-10 | I | F-93 | CLI | `erasure:replay --since …` with records and no handler | Exit 2 |
+| TP-10.9 | S-10 | I | F-150 | migrated database (release-path template) | `verifyRestore` | `ok:true`; `indexesChecked` = the count of B-tree indexes in `public` + `pgboss`; table counts listed |
+| TP-10.10 | S-10 | I | F-93 | database missing one journal migration | `restore:verify` | Exit 6, report `schema:"behind"` |
+| TP-11.1 | S-11 | U | F-201 | MSW | Any call; a response `CLIENT_UPDATE_REQUIRED` | `X-Budmon-Client: web/<n>`; `traceparent` matches `^00-[0-9a-f]{32}-[0-9a-f]{16}-01$`; callback called once |
+| TP-11.2 | S-11 | U | F-202 | none | defined error; `TypeError("Failed to fetch")`; timeout abort; random | defined/network/timeout/unknown |
+| TP-11.3 | S-11 | U | F-203 | none | Each table row | The listed message IDs and values |
+| TP-11.4 | S-11 | U | F-204 | query client | Failures: 500 ×3 then OK; 404; network ×4; mutation 500 without meta; with `meta.idempotent` | Success after 3 retries; no retry; error after 3 retries; no retry; retried |
+| TP-11.5 | S-11 | U | F-205 | MSW records `Idempotency-Key` | mutate(A) fails by network and is retried automatically; manual mutate(A) after failure; mutate(B) | Same key across automatic retries and the manual retry with identical input; a new key for B; on success the listed queries are invalidated |
+| TP-11.6 | S-11 | U | F-206 | provider | `setLocale("ar-XB")`; `formatRelative(now − 2 h)`; `formatRelative(now − 8 d)`; `t` with a value | `<html lang="ar-XB" dir="rtl">`; "2 hours ago"; a date; the value wrapped in U+2068/U+2069 |
+| TP-11.7 | S-11 | U | F-209 | render with requestId `4bf92f35ab…`; `onRetry` rejects | Click **Try again** | Title, body, `Reference: 4bf92f35` in `<bdi>`; during the retry the button has `aria-busy="true"` and is disabled; after the failure, "Still not working." appears |
+| TP-11.8 | S-11 | E | F-216 | fixture route throwing | Navigate | Fallback shown; **Try again** re-runs the loader |
+| TP-11.9 | S-11 | U | F-213 | fields `amount`, `note` | issues `[amount too_small]`, `[unknown.path invalid_value]` | `amount` shows `validation.too_small` with `aria-invalid`; summary shows `error.validation.form` + `error.validation.unknownField` with the path; focus on the summary |
+| TP-11.10 | S-11 | U | F-214 | fake time | `block(125)`; advance 65 s; advance 60 s | "Try again in 3 minutes", submit disabled; "2 minutes"; enabled |
+| TP-11.11 | S-11 | U | F-210 | `buildNumber` 7; fetch returns 8; fetch returns 7; fetch rejects; two focus events 30 s apart | | Toast shown with **Reload**; none; none, no error; one fetch |
+| TP-11.12 | S-11 | U | F-210 | `clientUpdateRequired` signal set | render | Persistent banner `role="alert"` with **Reload** |
+| TP-11.13 | S-11 | U | F-211 | offline/online events, fake timers | offline; online; +3 s | "You're offline."; "Back online."; hidden |
+| TP-11.14 | S-11 | E | axe (D-39) | Playwright with a fixture violation (`/__fixtures/a11y-violation`) | Run the suite | Test passes; the axe report artifact lists the violation |
+| TP-11.15 | S-11 | E | F-216, F-218 | Playwright | Navigate `/` → not-found → `/` | Focus on `h1` each time; the polite live region contains the page title |
+| TP-11.16 | S-11 | E | layout | viewport 360×740 | Each platform route | `document.scrollingElement.scrollWidth ≤ 360` |
+| TP-11.17 | S-11 | E | pseudo-RTL | locale `ar-XB`, `/__fixtures/rtl-probe` | For each `data-rtl-probe` | `start` elements' right edge = container right edge ±1 px; `end` at the left edge; `mirror` icons' computed transform has `scaleX(-1)`; `no-mirror` none; no horizontal overflow; screenshot saved |
+| TP-11.18 | S-11 | U | F-2 | RuleTester | `class="ml-2"`, `"ms-2"`, `"rtl:ml-2"`, `"space-x-2"`, `"space-x-2 rtl:space-x-reverse"`, `"text-left"`, a line after `// rtl-exempt: logo`, `cn("pr-4")` | Error, ok, ok, error, ok, error, ok, error |
+| TP-11.19 | S-11 | U | F-3 | RuleTester | import from `lucide-solid` in a component; same in `ui/icons/registry.ts`; `<svg>` in a page | Error; ok; error |
+| TP-11.20 | S-11 | U | F-4 | stylelint API | `margin-left: 1px`; `margin-inline-start: 1px` | Error; ok |
+| TP-11.21 | S-11 | U | F-1 formatjs | ESLint | `<p>Hello</p>`; `<p>{t(m)}</p>` | Error; ok |
+| TP-11.22 | S-11 | U | F-1 a11y | ESLint | `<img src="a">`; `<button><Icon name="x"/></button>`; `<div aria-foo="1">`; `<div tabindex={1}>`; `<div onClick={f}>` | Error ×4 (blocking set); the last isn't reported (rule off) |
+| TP-11.23 | S-11 | U | F-9 | none | used `{a,b}`, en `{a}` | missing `{en:[b]}` |
+| TP-11.24 | S-11 | U | F-207 | none | `"{count, plural, one {# item} other {# items}} for {name}"` | Both outputs parse as ICU; arguments and keywords unchanged; literal text transformed |
+| TP-11.25 | S-11 | U | F-217 | event with `request.url` with a query, `exception.value` = canary | `scrubWebEvent` | URL without query; value replaced; init options without Replay |
+| TP-11.26 | S-11 | U | F-215 | none | `<Icon name="chevron-end"/>`, `<Icon name="check" label="Done"/>` | `aria-hidden`, `data-rtl-probe="mirror"`, class `rtl:-scale-x-100`; `role="img"`, `aria-label="Done"`, `no-mirror` |
+| TP-11.27 | S-11 | S | F-221 | `BUDMON_BUILD_NUMBER=12 vite build` | Read `dist/version.json` | `{"buildNumber":12}` |
+| TP-11.28 | S-11 | E | DV-3 spike | `/__fixtures/kobalte-spike` | Keyboard-only: open and close the dialog (focus returns), choose a combobox option, type a date, open a menu and pick an item | Each works without a mouse; focus is visible |
+| TP-12.1 | S-12 | U | F-220 | fake `fetchPage` with 100 pages of 100 | Load 60 pages sequentially; `ensurePage(0)`; a fetch error | Pages 0..9 dropped (`rowAt(5)` undefined) while `rowCount` = 6000; after `ensurePage(0)`, `rowAt(5)` equals the original row; `error()` set and fetching stopped |
+| TP-12.2 | S-12 | U | F-219 | source with 1,000 rows, page 2 dropped | render | `role="grid"`, `aria-rowcount`, rows with `aria-rowindex` = index + 2; placeholders `aria-busy="true"` with the same height |
+| TP-12.3 | S-12 | E | F-219 | fixture | ArrowDown ×3, End, Enter; in `ar-XB` ArrowLeft | Focus moves and is scrolled into view; `onRowActivate` called; ArrowLeft moves to the next cell (reversed) |
+| TP-12.4 | S-12 | E | D-7 targets | `perf` project, `/__fixtures/virtual-table` (100,000 rows) | 5 loads; scroll through 5,000 rows; scroll past 5,000 and back | Median first-rows-visible ≤ 300 ms after the first page response; p95 frame ≤ 33 ms; ≤ 5 long tasks > 100 ms; DOM rows < 200 throughout; the same row has the same `aria-rowindex` after returning |
+| TP-12.5 | S-12 | U | F-219 | column `align:"end"` | render | Cells have class `text-end` |
+| TP-13.1 | S-13 | U | F-251 | MockWebServer | Request with tag `IdempotencyKey(uuid)`; without the tag | Headers `X-Budmon-Client: android/<code>`, `traceparent` format, `Idempotency-Key` lower-case; none |
+| TP-13.2 | S-13 | U | F-252 | none | envelope 404; 502 HTML; 400 non-JSON | `Defined("NOT_FOUND",404)`; `Defined("INTERNAL",502)`; `Unknown` |
+| TP-13.3 | S-13 | U | F-253 | none | Same table as TP-11.3 | Matching string resources |
+| TP-13.4 | S-13 | U | F-254 | Room in-memory | Insert 3, query order, counts | Oldest first; counts correct; the unique key is enforced |
+| TP-13.5 | S-13 | U | F-255 | MockWebServer, Room, fake clock | Entries: fresh; 61 days old; server responses in sequence 201, 201 + replayed, 422-like 400 `VALIDATION_FAILED`, 503, `CLIENT_UPDATE_REQUIRED`; network failure | Body bytes identical to stored; `Idempotency-Key` = stored; deleted; deleted; `FAILED` with the key; `Result.retry()`, entry kept; `UpdateState.Required` and the rest unsent; old entry `NEEDS_CONFIRMATION`, never sent; retry |
+| TP-13.6 | S-13 | U | F-257 | fake API, DataStore | min 5 / latest 7 with version 4, 6, 7; dismiss, then 3 days later | Required; Available; None; hidden then Available again |
+| TP-13.7 | S-13 | U | F-258 | Compose tests (LTR and RTL; fontScale 2) | `UpdateRequiredScreen` with pending 0, 1, 1500 and a failing download; `SyncIndicator` counts 0, 3, 120, failed 1; `OfflineBanner` | Texts per §8.2 (note hidden at 0, "1,000+"-style at 1500, `update_download_failed` shown); "99+"; hidden at 0; nothing clipped at 200%; layout mirrored in RTL |
+| TP-13.8 | S-13 | U | F-260 | SentryEvent with `request`, `extra`, user email, exception value = canary | `beforeSend` | Allowlisted fields only; no canary |
+| TP-13.9 | S-13 | U | F-256 | Shared vectors | All files | All pass |
+| TP-13.10 | S-13 | U | F-261 | Lint test infrastructure | `Text("Hello")`; `Text(stringResource(R.string.x))`; `Icon(…, contentDescription = "x")` | Error; ok; error |
+| TP-13.11 | S-13 | U | F-262 | Parse the XML | | `budmon.db` excluded from `cloud-backup` and `device-transfer` |
+| TP-13.12 | S-13 | U | generated client | MockWebServer returns §5.2's body | Call `clientConfig` | Parsed values; `downloadUrl` null handled |
+| TP-13.13 | S-13 | E | emulator smoke | API stub with `minimumVersionCode` > the app's | Launch | `UpdateRequiredScreen` visible |
+| TP-14.1 | S-14 | U | F-180 | fake pty emitting a rename prompt, then success output | Run; output "No schema changes"; never exits; version `1.0` | Wrote `"\r"` once; `ambiguities` has the question; file returned; null; timeout error; validation error |
+| TP-14.2 | S-14 | I | F-180 real | temp copy of a fixture project with a snapshot and a schema that renames a column | Run | One ambiguity listed; SQL contains `ADD COLUMN` and `DROP COLUMN` (create chosen) |
+| TP-14.3 | S-14 | I | F-181 | repo fixture | Run | Returns SQL; `git status` clean |
+| TP-14.4 | S-14 | I | F-182 | fixture projects: consistent; a migration missing a column; a stale snapshot; no migrations | Run | ok; `dumpDiff` mentions the column; `snapshotClean:false`; ok |
+| TP-14.5 | S-14 | U | F-184 | SQL with each pattern; with `-- reviewed: safe because empty table` above one; `-- reviewed: x` | Run | Each flagged with its line; the reviewed one not flagged; the too-short reason still flagged |
+| TP-14.6 | S-14 | U | F-185 | `["v0.1.0","v0.1.1-hotfix.1","x","v0.2.0-infra.1"]` | | 3 |
+| TP-14.7 | S-14 | I | F-183 | no previous tag | Run the upgrade harness | Reports "skipped: baseline", passes |
+| TP-14.8 | S-14 | S | `ci.yml` | `actionlint`; a test parsing `ci.yml` | | `migrations` job conditions per branch type as in §10.1 |
+| TP-15.1 | S-15 | I | F-170 | built image; empty bind mount | Start without the flag; with the flag; restart with data; without a mounted `/var/lib/postgresql/data` | Exit 70 with the message; initialised, `budmon_migrator` exists, `budmon` owned by it; starts; exit 70 |
+| TP-15.2 | S-15 | I | F-170 config | running image | As `budmon_app`, run an `INSERT` violating a check constraint with a canary value | Container log has an error line without the canary or the statement |
+| TP-15.3 | S-15 | I | `pg_hba.prod-s0` | stage-0 Compose in CI with throwaway secrets | `budmon_capture` from worker-capture over `verify-full`; `budmon_capture` with `sslmode=disable`; `budmon_app` from worker-capture's address; `budmon_admin` over TCP | ok; rejected; rejected; rejected |
+| TP-15.4 | S-15 | U (bats) | F-171 tag | stubs | `deploy v1.2`, `deploy v1.2.0;rm`, `deploy v1.2.0-infra.1` | Exit 10, 10, proceeds |
+| TP-15.5 | S-15 | U (bats) | F-171 sequence | state current seq 5, previous 4; manifests seq 6, 4, 3, 5; state null | | Accept, accept (rollback), exit 11, exit 11, accept |
+| TP-15.6 | S-15 | U (bats) | F-174 | `cosign` stub failing | deploy | Exit 12; nothing extracted; no `docker` calls |
+| TP-15.7 | S-15 | U (bats) | F-171 self-update | bundle with a different bootstrap | deploy | New bootstrap installed, `.previous` kept, re-exec once (`BUDMON_REEXEC=1`), no loop |
+| TP-15.8 | S-15 | U (bats) | F-172 | `docker` stub recording calls; readiness `curl` stub failing | deploy | Order: decrypt, silence, migrate, `up` main, capture `up`, readiness; then the rollback `up` with the previous bundle; exit 16. With `queueUpgrade:true`: maintenance on before migrate, off at the end |
+| TP-15.9 | S-15 | U (bats) | F-172 secrets | `sops` stub output JSON; a file with `__FILL_ME__` | deploy | Files written per key, mode 0400 and owner per service; `capture` keys only under `/run/budmon/secrets/worker-capture`; the placeholder → exit 18 |
+| TP-15.10 | S-15 | U (bats) | F-173 | stubs | `maintenance on`, `status`, `off`, `reboot`, `foo` | Flag created; `on`; removed; compose stop capture, then main, then `systemctl reboot`; exit 64 |
+| TP-15.11 | S-15 | U+I | F-190, F-191 | fake `SopsCli`; Postgres | rotate `budmon_capture`; unknown role; missing file; (I) set `scramVerifier("pw")` via `ALTER ROLE` and log in | `DB_PASSWORD` set in the capture file and the verifier in `ROLE_SECRETS`; nothing printed to stdout; exit 64; exit 2; login succeeds |
+| TP-15.12 | S-15 | U | F-192 | fake `SopsCli`, temp directory | init `dryrun`; init again | Files listed, generated keys present, placeholders where specified, `.sops.yaml` rules appended; second run exit 2 |
+| TP-15.13 | S-15 | I | Caddyfile | the web image + Caddyfile, stub API | maintenance flag; `/api/v1/x?token=CANARY`; `/some/route`; `/version.json` | Exact 503 bodies for `/api/*` and `/health/ready`; access log has no query or canary and no headers; `index.html` served; `Cache-Control: no-store`; CSP header exact |
+| TP-15.14 | S-15 | I | Alloy | Alloy with the main config and file sinks; a container log line with an extra key `payee` | Run | Exported line lacks `payee`; `budmon_alloy_log_fields_dropped_total` 1 |
+| TP-15.15 | S-15 | E | pgBackRest | rehearsal step 11 | backup, restore, verify | `verifyRestore.ok` |
+| TP-15.16 | S-15 | S | infra lint | CI | shellcheck, bats, `docker compose config` for every compose × deployment env, `cloud-init schema`, `tofu validate`, actionlint | All pass |
+| TP-15.17 | S-15 | E (manual) | first restore drill | production stage 0 | `infra/runbooks/restore-drill.md` | `docs/operations/restore-drills.md` entry with date, restore point, duration, `restore:verify` output |
+| TP-15.18 | S-15 | E (manual) | alerts | production stage 0 | Test-fire each stage-0 rule (maintenance for 6 min; stop worker-general 6 min; …) | Email received and resolved for each |
+| TP-16.1 | S-16 | U | F-198 | none | Text containing a canary raw, base64-encoded and URL-encoded | 3 hits with the source and offset |
+| TP-16.2 | S-16 | I | F-196 | server started | Each control mode, then a token request | Bodies and status per F-196 |
+| TP-16.3 | S-16 | U | F-195 | fake `exec` failing at step 5 | `runRehearsal` (full); mode infra | Steps 1 to 5 recorded, 6+ not run, artifacts collected, `ok:false`; infra skips 2 and 6 and fails if `migrationsApplied ≠ 0` |
+| TP-16.4 | S-16 | E | rehearsal | first release PR | `rehearsal.yml` | All steps `ok` |
+| TP-16.5 | S-16 | E | canary flows | rehearsal stack | Flows: a request whose body fails validation with a canary in a field; malformed JSON containing a canary; an FX backfill failing because fake FX returns 500 with a canary body; a `GET` with a canary in the query string | Scan finds no canary in any source listed in F-195 step 8 (capture-path flows are added by `sources`) |
+| TP-16.6 | S-16 | E | steps 9, 10 | rehearsal with a doctored overlay adding `INFRA_STAGE=0` to `api`; another mounting capture secrets into `api` | Run | Step 9 fails; step 10 fails |
+| TP-16.7 | S-16 | E | F-199 | stage-0 overlay | Run | Ready; worker-capture's connection to `PG_DATA_IP:5432` fails |
+| TP-16.8 | S-16 | S | `release.yml` | actionlint + a structure test | Parse | `deploy` has `environment: production` and `needs: [rehearse]`; `rehearse` uses the pushed digests; `tag` needs `verify`; `cosign sign` follows `push` |
+
+## 11. Open questions
+
+None.
