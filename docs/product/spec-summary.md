@@ -1,6 +1,6 @@
 ---
 doc: spec-summary
-version: 0.8
+version: 0.9
 updated: 2026-10-05
 ---
 
@@ -29,6 +29,7 @@ Based on the [project brief](./project-brief.md), the user's [initial descriptio
 | 0.6     | 2026-10-04 | Round 5 answers folded in. Admin portal: account details only, delete, ban by email, invite, per-user invite allowance and feature switches (R5-Q1: section 1, ADM-US-1, 4, 5, 7, ADM-BR-4, IDN-US-9). Budget rules match purposes by name, ignoring case (R5-Q2: BUD-US-1, BUD-BR-10). Two-level purposes in the MVP, with the default list redrafted (R5-Q3 (i): section 4.3, CLS-BR-4). Separate income and expense lists (R5-Q3 (ii): CLS-BR-2). Members can delete their own entries, viewers see the whole account, and the creator isn't protected (R5-Q3 (iii)-(v): ACC-BR-2, ACC-US-5). Only amount, account and date required; future-dated entries; receipts later (R5-Q4: TXN-US-1, TXN-US-11, XC-4). Automatic Google sign-in linking; several Gmail inboxes per user (R5-Q5: IDN-BR-1, A30). |
 | 0.7     | 2026-10-05 | Round 6 answers folded in. Owner deletion uses the 7-day window; sole-admin shared accounts go to the longest-standing member, with an owner override (pick an admin or freeze the account) and an email to the user (R6-Q1: ADM-US-4, ADM-US-8, ACC-BR-9). Parent-purpose rules include children, with a "this purpose only" option; parent purposes can be used directly (R6-Q2: BUD-BR-10, CLS-BR-4). Notification channels, quiet hours and a daily cap (R6-Q3: XC-27, XC-28). Default purposes accepted for now (R6-Q4: CLS-US-1). Invite allowance 3; feature switches for Gmail, SMS, invitations (and AI later), on by default (R6-Q5: ADM-US-5, ADM-US-7). Payees multi-purpose by default; single-purpose and default-purpose suggestions (R6-Q6: PAY-US-5, PAY-US-7). A split line can change account; payee and date shared; refunds count when they arrive; one-tap tip (R6-Q7: TXN-US-3, TXN-US-4, TXN-BR-5, TXN-BR-8). |
 | 0.8     | 2026-10-05 | Round 7 answers folded in. Auto-confirmation on by default (R7-Q1: REV-US-8). Split totals across accounts, same currency only (R7-Q2: TXN-US-3, TXN-BR-9). Captures for frozen accounts are processed on unfreeze (R7-Q3: ACC-BR-9, CAP-BR-7). Fast review as a core principle (R7-Q5: XC-23). Budget period kinds, 80%/100% alerts, counting by entry author, shared budgets later (R7-Q7: BUD-US-6, 8, 10, BUD-BR-11). Section 9 rewritten as a numbered list of proposals for the remaining gaps. |
+| 0.9     | 2026-10-05 | New cross-cutting `platform` module (section 4.14, prefix `PLT`), first in the build order. It records the user's technology decisions ([platform decisions](./notes/2026-10-05-platform-decisions.md)) and the clean-up of the current repo. Section 7 now links to the [codebase review](./codebase-review.md) and records the user's acceptance of its recommendations. Section 6 gains the platform's external services. Round 8 items untouched. |
 
 ## 1. Users and roles
 
@@ -127,10 +128,11 @@ Sharing is **per account** (decided, R2-Q4). A "household" is simply a group of 
 
 ## 4. Modules
 
-Thirteen modules:
+Fourteen modules:
 
 - **Core ledger** (five): `identity`, `accounts`, `classification`, `payees`, `transactions`.
 - **Operation** (one): `admin`, the product owner's portal (R4-Q2).
+- **Foundations** (one): `platform`, the shared technical base every other module builds on (section 4.14). It's built first.
 - **Planning and follow-up** (four): `notifications`, `budgets`, `reports`, `debts`.
 - **Automated capture** (three): `sources`, `capture`, `review`.
 
@@ -594,10 +596,77 @@ Refunds aren't an income purpose; they're linked to the original expense (TXN-US
 | ADM-BR-4 | (Decided, R5-Q1) A banned email address can't be invited, sign up, or be linked through Google sign-in. |
 | ADM-BR-5 | Even on a frozen account, the owner never sees its financial data; freezing changes only what its members can do (R5-Q1). |
 
+### 4.14 `platform`: Shared foundations (prefix `PLT`)
+
+- **Purpose:** the technical base every other module builds on, set up once so each module doesn't reinvent it. Its "users" are mostly the developers and agents building Budmon, plus the product owner operating it. End users see it only through what it protects (their data and credentials) and how reliably the app works.
+- **In scope:**
+  - **Repository layout** for the backend, web app and Android app (one repo, with a shared API contract).
+  - **The API contract** and how the clients are generated from it.
+  - **Background workers** and the job queue.
+  - **Configuration and secrets.**
+  - **Encryption** of sensitive credentials.
+  - **Data:** database access, migrations and the money type.
+  - **The error model.**
+  - **Observability.**
+  - **Security baseline:** rate limits, CORS and security headers.
+  - **Engineering:** test tooling, CI, and local development setup.
+  - **Clean-up** of the current repo, per the [codebase review](./codebase-review.md).
+- **Out of scope:** any module's own features, tables or screens, including sign-in, which belongs to `identity`. Where Budmon is hosted and how it's deployed is the planner's choice, unless the user decides otherwise.
+- **Depends on:** none. Every other module depends on it.
+- **Technology decisions (decided by the user; source: [platform decisions](./notes/2026-10-05-platform-decisions.md)):** the planner records these in the HLD and justifies and details them there. They're listed here so no module design contradicts them.
+
+| Topic | Decision |
+| ----- | -------- |
+| Database | PostgreSQL. Flexible data (templates, extracted fields, budget rule conditions) goes in `jsonb`. |
+| Backend | Node.js + TypeScript, with Fastify as the HTTP framework (replacing Express). |
+| API | oRPC, contract-first, publishing an OpenAPI document (replacing the tRPC stub). The web app uses oRPC's TypeScript client; the Android (Kotlin) client is generated from OpenAPI. |
+| Background work | Separate worker process(es) from the same codebase, with pg-boss as the job queue behind a small interface (to revisit only if job volume outgrows Postgres). Listening and syncing (Gmail, SMS ingestion, exchange rates, reminders, notifications) run in workers. |
+| Gmail | Push notifications through Gmail `watch` + Google Cloud Pub/Sub, not polling. |
+| Gmail tokens | Encrypted at rest with a managed key; only the capture worker can decrypt them. The user will review this closely. |
+| Money | 64-bit integers in minor units, plus each currency's number of decimal places. |
+| Performance | Indexes designed per query ("indexes will be very important here"); budget progress maintained incrementally; a connection pooler in front of Postgres; table partitioning only if ever needed. |
+| API servers | Stateless, so more can be added. |
+| Observability | OpenTelemetry instrumentation; structured logs with pino; Sentry (free plan to start) for errors from the backend, web app and Android app; Grafana Cloud's free tier for traces, metrics and logs. |
+| Scale | Designed for public scale, launched invite-only (consistent with R2-Q1). |
+
+**Stories**
+
+| ID | As a… | I want… | So that… | Acceptance criteria | MVP? |
+| -- | ----- | ------- | -------- | ------------------- | ---- |
+| PLT-US-1 | developer or agent | one repository holding the backend, web app, Android app and the shared API contract, in a documented layout | every module is built the same way, in a predictable place | The layout and naming conventions are written down (README, and the conventions section of CLAUDE.md, which the user approves); the backend keeps the per-module folder and router → service → repo layering the review recommends keeping. | MVP |
+| PLT-US-2 | developer or agent | to start the whole stack locally with one documented command | anyone, human or agent, can run and test Budmon from a fresh checkout | A fresh checkout plus the documented steps gives a running database, API, worker(s) and web app; Android builds against the local API; `.env.example` lists every variable that's actually read, with safe development values. | MVP |
+| PLT-US-3 | developer or agent | the API defined as a contract first, with an OpenAPI document published from it and clients generated from it | the web and Android apps can't drift from the backend | Each module adds its procedures to the contract before implementing them; the web app uses the generated TypeScript client and Android a client generated from OpenAPI; CI fails if the implementation, the OpenAPI document or the generated clients are out of step. | MVP |
+| PLT-US-4 | developer or agent | background work to run in separate worker processes through a job queue | slow or scheduled work (Gmail and SMS ingestion, exchange rates, reminders, notifications) never slows the API, and jobs aren't lost | Workers run from the same codebase as separate processes; a job can be enqueued in the same database transaction as the change that caused it; failed jobs are retried and, after a limit, kept for inspection; modules use the queue only through its interface. | MVP |
+| PLT-US-5 | developer or agent | configuration validated when each process starts | a misconfigured process fails immediately with a clear message instead of misbehaving later | Missing or invalid settings stop startup and name the setting (never its value); secrets are never committed; production secrets come from the environment or a secret store. | MVP |
+| PLT-US-6 | end user | the credentials Budmon holds for me, such as Gmail access tokens, to be encrypted and usable only by the part of Budmon that needs them | a leak of the database or of the API server doesn't expose my inbox | Tokens are encrypted at rest with a managed key; only the capture worker can decrypt them; the API process can't (PLT-BR-2). [NEEDS INPUT: should anything besides Gmail tokens get the same treatment in the MVP? Proposal: also two-step verification secrets and any third-party AI keys a user provides later.] | MVP |
+| PLT-US-7 | developer or agent | database changes made only through generated, committed migrations, applied the same way everywhere | the schema can evolve once real data exists | `drizzle-kit push` is replaced by migrations; a fresh database is built from migrations alone; the existing development database is disposable (section 7). | MVP |
+| PLT-US-8 | developer or agent | one shared money type and helpers | every module stores, adds and displays amounts the same way, exactly (XC-1) | Amounts are 64-bit integers in minor units together with the currency's decimals; no floating-point arithmetic on money anywhere; conversion uses the rates in XC-3. | MVP |
+| PLT-US-9 | client developer and end user | one error model across the API | apps can show the right message and nothing internal leaks | Every error has a stable key and a status; invalid input returns a validation error that says which field, never a server error; unexpected errors return a generic error with no internals (no SQL, parameters or stack). | MVP |
+| PLT-US-10 | product owner | to see errors from the backend, web app and Android app in one place, without seeing users' financial data | I can fix problems fast without breaking my privacy promise | All three apps report errors to one Sentry project or organisation; reports identify the user only by an internal ID *(assumption A42)*; they contain no amounts, payees, message content or tokens (PLT-BR-1). | MVP |
+| PLT-US-11 | product owner | dashboards for the API and workers: request rates, errors, latency, queue depth and failed jobs, and whether Gmail push is arriving | I notice when capture stops working before users do | Traces, metrics and logs go to Grafana Cloud; metric labels stay low-cardinality (free tier: 10k active series); the same privacy rule applies (PLT-BR-1). [NEEDS INPUT, later round: alerts by email or push to you when something breaks? Proposal: email alerts for API down, workers down, and Gmail push silent for over an hour.] | MVP |
+| PLT-US-12 | developer or agent | automated checks on every change: formatting, linting, type-checking, tests and the contract check | broken code doesn't reach the main branch | CI runs all checks on every pull request; the backend has unit tests and integration tests against a real Postgres (API tests run in-process, without a network port); the web and Android apps have their own test setups; one command runs everything locally. | MVP |
+| PLT-US-13 | end user | basic protection against abuse | my account can't be brute-forced, and the API isn't trivially attacked | Rate limits on sign-in and other sensitive endpoints, a CORS policy limited to Budmon's own apps, security headers, and request-size limits (codebase review X-6). | MVP |
+| PLT-US-14 | developer or agent | the current repo cleaned up per the codebase review, inside the first slice | the first module starts from a sound base | Removed: the tracked `server/dist/`, the debug endpoints, the unauthenticated `GET /users`, the stale `.env.example`, unused dependencies and dead code. The broken tRPC stub and Express are replaced by the chosen stack. Every item in review section 5 is handled by its verdict. Done inside the first slice, not as a separate PR (decided, section 7). | MVP |
+| PLT-US-15 | end user and product owner | my data backed up | a server failure doesn't lose my financial history | [NEEDS INPUT: how often are backups taken, and how long are they kept? Deleted users' data lingers in backups until they expire, which affects the "everything is erased" promise in XC-16. Proposal: daily backups kept 14 days, with the privacy policy saying deleted data leaves backups within 14 days of erasure.] | MVP |
+
+**Business rules**
+
+| ID | Rule |
+| -- | ---- |
+| PLT-BR-1 | (Decided, [platform decisions](./notes/2026-10-05-platform-decisions.md); the user: "yes, totally, very important") Logs, traces, metrics and error reports **never** contain amounts, payees, message content or tokens. This applies to all three apps and every worker. Passwords and secrets are never included either. Users are identified only by an internal ID *(A42)*. |
+| PLT-BR-2 | (Decided, [platform decisions](./notes/2026-10-05-platform-decisions.md)) Gmail tokens are encrypted at rest with a managed key. Only the capture worker can decrypt them. |
+| PLT-BR-3 | (Decided, [platform decisions](./notes/2026-10-05-platform-decisions.md)) Money is stored and computed as 64-bit integers in minor units, together with the currency's decimal places. Floating-point arithmetic on money is never allowed. |
+| PLT-BR-4 | (Decided, [platform decisions](./notes/2026-10-05-platform-decisions.md)) The API is contract-first: a procedure exists in the contract before it's implemented. The OpenAPI document is generated from the contract, and clients are generated, never hand-written. |
+| PLT-BR-5 | Schema changes happen only through committed migrations (decided by accepting the codebase review; replaces `drizzle-kit push`). |
+| PLT-BR-6 | (Decided, [platform decisions](./notes/2026-10-05-platform-decisions.md)) API servers are stateless. Ingestion, syncing and scheduled work run in worker processes, never in the API process. |
+| PLT-BR-7 | (Decided, [platform decisions](./notes/2026-10-05-platform-decisions.md)) Metric labels stay low-cardinality. No user IDs, emails, amounts or other unbounded values as labels. |
+| PLT-BR-8 | Unexpected errors never expose internals to clients, such as SQL, parameters or stack traces (codebase review X-3) *(assumption A43: treated as part of the security baseline)*. |
+
 ## 5. Module map and build order
 
 ```mermaid
 flowchart LR
+  platform --> identity
   identity --> accounts
   identity --> admin
   identity --> classification
@@ -619,23 +688,24 @@ flowchart LR
   notifications --> review
 ```
 
-**MVP cut (decided, R2-Q3): the MVP reaches stage B.** The order within it is the analyst's recommendation.
+**MVP cut (decided, R2-Q3): the MVP reaches stage B.** The mermaid map omits the edges from `platform` to every module except `identity`; every module depends on it. The order within it is the analyst's recommendation.
 
 | Order | Module | Why here | MVP? |
 | ----- | ------ | -------- | ---- |
-| 1 | `identity` | Everything belongs to a user. | MVP |
-| 2 | `admin` | The invited group can't be run without it: invitations, the cap, the Google test-user step (R4-Q2). Small, and only needs `identity`. | MVP (decided, R4-Q2) |
-| 3 | `accounts` | Transactions need accounts; roles are needed for the household case. | MVP |
-| 4 | `classification` | Transactions, payees and budgets reference purposes and tags. | MVP |
-| 5 | `payees` | Transactions reference payees; aliases and single-purpose flags are needed by capture and review. | MVP |
-| 6 | `transactions` | The ledger, including review status and offline entry from the start. | MVP |
-| 7 | `notifications` | Reminders are core; budgets, debts and review raise notifications. | MVP |
-| 8 | `budgets` | A core feature (R2-Q2); needs transactions and notifications. | MVP |
-| 9 | `reports` | Small once the ledger exists. | MVP |
-| 10 | `debts` | Off-system debts only; user-to-user loans later. | MVP (partial) |
-| 11 | `sources` | Gmail and Android SMS (R3-Q2). | MVP |
-| 12 | `capture` | Templates, merging and resolution. | MVP |
-| 13 | `review` | Refinement and auto-confirmation; designed together with `capture`. | MVP |
+| 1 | `platform` | Every module builds on it: contract, workers, migrations, money type, errors, observability, CI. The repo clean-up happens in its first slice (PLT-US-14). | MVP |
+| 2 | `identity` | Everything belongs to a user. | MVP |
+| 3 | `admin` | The invited group can't be run without it: invitations, the cap, the Google test-user step (R4-Q2). Small, and only needs `identity`. | MVP (decided, R4-Q2) |
+| 4 | `accounts` | Transactions need accounts; roles are needed for the household case. | MVP |
+| 5 | `classification` | Transactions, payees and budgets reference purposes and tags. | MVP |
+| 6 | `payees` | Transactions reference payees; aliases and single-purpose flags are needed by capture and review. | MVP |
+| 7 | `transactions` | The ledger, including review status and offline entry from the start. | MVP |
+| 8 | `notifications` | Reminders are core; budgets, debts and review raise notifications. | MVP |
+| 9 | `budgets` | A core feature (R2-Q2); needs transactions and notifications. | MVP |
+| 10 | `reports` | Small once the ledger exists. | MVP |
+| 11 | `debts` | Off-system debts only; user-to-user loans later. | MVP (partial) |
+| 12 | `sources` | Gmail and Android SMS (R3-Q2). | MVP |
+| 13 | `capture` | Templates, merging and resolution. | MVP |
+| 14 | `review` | Refinement and auto-confirmation; designed together with `capture`. | MVP |
 
 **Later (stage C):** going public, if it happens (open sign-up IDN-US-10, Gmail verification and security assessment, Play Store SMS compliance); iOS; Electron; a Budmon-hosted AI model, then a user-hosted endpoint; more frequent exchange rates; per-viewer visibility; user-to-user loans; subscription detection; purpose suggestions; other email providers; raw-data donation (SRC-US-10); budget rollover (BUD-US-9); full offline use. **First after the MVP:** AI-assisted capture (SRC-US-5, CAP-US-2; decided, R3-Q2).
 
@@ -649,12 +719,25 @@ flowchart LR
 | Exchange-rate provider | Daily market rates (decided, R2-Q5). | More frequent updates later. |
 | Push notifications (FCM) | Android reminders and alerts. | APNs later with iOS. |
 | Transactional email | Password reset, invitations. | |
+| Google Cloud Pub/Sub | Gmail push notifications via Gmail `watch` (decided, [platform decisions](./notes/2026-10-05-platform-decisions.md)). | Replaces polling. |
+| Sentry | Error reports from the backend, web app and Android app (decided). | Free plan to start; PLT-BR-1 applies. |
+| Grafana Cloud | Traces, metrics and logs via OpenTelemetry (decided). | Free tier (10k active series); PLT-BR-1 and PLT-BR-7 apply. |
+| Managed key service | Encrypting Gmail tokens (PLT-BR-2). | The provider is the planner's choice. |
 | Google Sign-In | Sign in with Google (decided, R4-Q1). | Separate from the Gmail connection (decided, R5-Q5): the Google account used to sign in is independent of the Gmail inboxes connected as sources, and a user can connect several inboxes (SRC-US-1). |
 | Bank data aggregators | Not planned; the approach is message-based. | [NEEDS INPUT, later round: confirm.] |
 
 ## 7. Current state of the codebase
 
-Not evaluated yet. The user will ask for this separately.
+Evaluated in the [codebase review](./codebase-review.md) (v0.1, against spec v0.7). In short: the repo holds a backend skeleton only (Express, Drizzle, zod, a half-started tRPC setup), and it doesn't start. There's partial `identity` and `accounts` code with serious security and correctness problems. There's no web app, Android app, test or migration. Per-module facts and keep/rework/replace verdicts are in the review.
+
+**The user's decisions on the review's recommendations** (2026-10-05, "happy to go with the review's recommendations"; about tooling, "this still needs work", now covered by `platform`):
+
+1. **The existing database is disposable.** No data needs keeping, so the schema can be redefined freely, from migrations (PLT-US-7).
+2. **Keep the patterns, replace the flows.** Keep the per-module layout, router → service → repo layering, the `BudmonError` class, zod at the boundaries, and strict TypeScript. Replace the auth and accounts flows; `identity` and `accounts` are designed fresh.
+3. **Date of birth is dropped.** It isn't collected, which fits the privacy stance.
+4. **The clean-up is done inside the first slice,** not as a separate PR, so it's reviewed like everything else. Because `platform` is now built first, that's `platform`'s first slice (PLT-US-14).
+
+The review's open question 5 (REST vs tRPC) is superseded by the user's decision for oRPC, contract-first, with OpenAPI (section 4.14).
 
 ## 8. Assumptions
 
@@ -701,6 +784,8 @@ Not evaluated yet. The user will ask for this separately.
 | A39 | Switching a capture feature off for a user pauses their sources of that kind, without deleting them. |
 | A40 | Only the product owner can freeze or unfreeze a shared account. |
 | A41 | The author of a captured entry, for budget filters, is the user whose source captured it. |
+| A42 | Error reports, logs and traces identify users only by an internal ID, never by email or name. |
+| A43 | Hiding internals from error responses is part of the platform's security baseline, even though no round stated it explicitly. |
 
 ## 9. Open questions
 
