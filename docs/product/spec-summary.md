@@ -1,7 +1,7 @@
 ---
 doc: spec-summary
-version: 0.6
-updated: 2026-10-04
+version: 0.7
+updated: 2026-10-05
 ---
 
 # Budmon: Spec Summary
@@ -27,6 +27,7 @@ Based on the [project brief](./project-brief.md), the user's [initial descriptio
 | 0.4     | 2026-10-04 | Round 3 answers folded in. SMS in the MVP; AI right after it (R3-Q2: SRC-US-2, SRC-US-5, CAP-US-2). Templates made by highlighting and labelling (R3-Q2: CAP-US-1). Budgets: percentage bases (R3-Q3, BUD-US-3), own conditions only plus chosen accounts, alerts only, rollover later (R3-Q4: BUD-US-1, 4, 8, 9, BUD-BR-7, 8). Shared-account vocabulary (R3-Q5: ACC-BR-7, CLS-US-4, 5, CLS-BR-3, PAY-US-6). Transfer fees and conversion rates (R3-Q6: XC-3, TXN-US-5, TXN-BR-3). Offline entry (R3-Q7: XC-22, TXN-US-10). |
 | 0.5     | 2026-10-04 | Round 4 answers folded in. Sign-in by email + password and by Google, optional two-step verification, sessions of about a month (R4-Q1: IDN-US-1, 2, 8, XC-18). Any user can invite; 7-day expiry; user cap; new `admin` module for the product owner's portal (R4-Q2: IDN-US-9, section 4.13, built second). Deletion with a 7-day grace period; export in the MVP (R4-Q3: XC-16, XC-17, IDN-US-6, 7). Credit cards are their own type (R4-Q4: ACC-US-1, ACC-BR-8). Balance corrections are admin-only (R4-Q5: ACC-US-9). Flat purposes (the analyst's reading, to be confirmed); tips as split lines; draft default purposes (R4-Q6: section 4.3, TXN-US-4, A6). Vocabularies unlinked; budgets cover all accounts by default (R4-Q7: CLS-BR-3, BUD-US-1, BUD-BR-9). |
 | 0.6     | 2026-10-04 | Round 5 answers folded in. Admin portal: account details only, delete, ban by email, invite, per-user invite allowance and feature switches (R5-Q1: section 1, ADM-US-1, 4, 5, 7, ADM-BR-4, IDN-US-9). Budget rules match purposes by name, ignoring case (R5-Q2: BUD-US-1, BUD-BR-10). Two-level purposes in the MVP, with the default list redrafted (R5-Q3 (i): section 4.3, CLS-BR-4). Separate income and expense lists (R5-Q3 (ii): CLS-BR-2). Members can delete their own entries, viewers see the whole account, and the creator isn't protected (R5-Q3 (iii)-(v): ACC-BR-2, ACC-US-5). Only amount, account and date required; future-dated entries; receipts later (R5-Q4: TXN-US-1, TXN-US-11, XC-4). Automatic Google sign-in linking; several Gmail inboxes per user (R5-Q5: IDN-BR-1, A30). |
+| 0.7     | 2026-10-05 | Round 6 answers folded in. Owner deletion uses the 7-day window; sole-admin shared accounts go to the longest-standing member, with an owner override (pick an admin or freeze the account) and an email to the user (R6-Q1: ADM-US-4, ADM-US-8, ACC-BR-9). Parent-purpose rules include children, with a "this purpose only" option; parent purposes can be used directly (R6-Q2: BUD-BR-10, CLS-BR-4). Notification channels, quiet hours and a daily cap (R6-Q3: XC-27, XC-28). Default purposes accepted for now (R6-Q4: CLS-US-1). Invite allowance 3; feature switches for Gmail, SMS, invitations (and AI later), on by default (R6-Q5: ADM-US-5, ADM-US-7). Payees multi-purpose by default; single-purpose and default-purpose suggestions (R6-Q6: PAY-US-5, PAY-US-7). A split line can change account; payee and date shared; refunds count when they arrive; one-tap tip (R6-Q7: TXN-US-3, TXN-US-4, TXN-BR-5, TXN-BR-8). |
 
 ## 1. Users and roles
 
@@ -114,8 +115,8 @@ Sharing is **per account** (decided, R2-Q4). A "household" is simply a group of 
 
 - **XC-25** (Decided) Reminders to record data are based on when the user last recorded something and on their preferences; cash withdrawals are a key trigger.
 - **XC-26** Every kind of notification can be turned off individually.
-- **XC-27** [NEEDS INPUT, later round: channels. Proposal: Android push and in-app first.]
-- **XC-28** [NEEDS INPUT, later round: quiet hours and a daily cap. Proposal: quiet hours set by the user; at most one data-entry reminder per day.]
+- **XC-27** (Decided, R6-Q3) Channels in the MVP are Android push and in-app. Email is used only for account matters (invitations, password reset, deletion notices).
+- **XC-28** (Decided, R6-Q3) Users set their own quiet hours. At most one data-entry reminder is sent per day. The reminder behaviour may be revisited after the MVP (R6-Q3).
 
 ### 3.6 Performance and availability expectations
 
@@ -193,6 +194,7 @@ Thirteen modules:
 | ACC-BR-4 | People on a shared account see only that account, never each other's other accounts. |
 | ACC-BR-5 | (Decided, R2-Q4, from the example) A member may transfer from a shared account to one of their own personal accounts. The other people on the shared account see the shared side, with the destination shown only as "<person>'s account" *(assumption A14)*. |
 | ACC-BR-6 | Balances are never edited directly; corrections create adjustment transactions. |
+| ACC-BR-9 | (Decided, R6-Q1) A **frozen** account is read-only for everyone on it: no new entries and no edits. Only the product owner can freeze or unfreeze an account, and only through ADM-US-8 *(assumption A40)*. [NEEDS INPUT: what happens to captures for a frozen account? See question 3.] |
 | ACC-BR-8 | (Decided, R4-Q4) A credit card's balance is shown as the amount owed. Card purchases are expenses on the card account. Paying the card off from another account is a transfer. Statement cycles and due-date reminders come later. |
 | ACC-BR-7 | (Decided, R3-Q5) A shared account has its own vocabulary of purposes, tags, payees and payee aliases, managed by its admins. When the account becomes shared, the vocabulary starts as a copy of the creating admin's set. Admins can copy in items that other members have marked as shared. Entries on the account use only the account's vocabulary. A personal account uses its owner's personal set *(assumption A21)*. |
 
@@ -207,7 +209,7 @@ Thirteen modules:
 
 | ID | As a… | I want… | So that… | Acceptance criteria | MVP? |
 | -- | ----- | ------- | -------- | ------------------- | ---- |
-| CLS-US-1 | new user | default purposes and tags | I can start without setup | Created at sign-up from the default list below (draft, R4-Q6), including the "subscription" and "tip" tags. | MVP |
+| CLS-US-1 | new user | default purposes and tags | I can start without setup | Created at sign-up from the default list below (accepted "for now", R6-Q4), including the "subscription" and "tip" tags. | MVP |
 | CLS-US-2 | user | to create, rename and archive purposes and tags | they fit my life | Renaming applies everywhere, including budget conditions; archived items are hidden from pickers but stay on history and in budgets. | MVP |
 | CLS-US-3 | user | to merge two purposes or two tags | duplicates go away | Uses, including budget conditions, move to the survivor. | Later |
 | CLS-US-4 | user | to mark items of my personal vocabulary (purposes, tags, payees) as shared/visible | admins of accounts I'm on can reuse them (decided, R3-Q5) | Hidden by default *(assumption A22)*; visible only to people who share at least one account with me *(assumption A23)*. | MVP *(A11)* |
@@ -219,10 +221,10 @@ Thirteen modules:
 | -- | ---- |
 | CLS-BR-1 | Names are unique per vocabulary, ignoring case. |
 | CLS-BR-2 | (Decided, R5-Q3: "I suppose") Income purposes and expense purposes are separate lists. Tags apply to both. |
-| CLS-BR-4 | (Decided, R5-Q3) A purpose is either a top-level purpose or a child of one; children can't have children in the MVP. A transaction can use either a parent or a child purpose *(assumption A34)*. A child's name is unique within its parent, so "Food > Other" and "Shopping > Other" can coexist *(assumption A35)*. |
+| CLS-BR-4 | (Decided, R5-Q3) A purpose is either a top-level purpose or a child of one; children can't have children in the MVP. A transaction can use either a parent or a child purpose (decided, R6-Q2). A child's name is unique within its parent, so "Food > Other" and "Shopping > Other" can coexist *(assumption A35)*. |
 | CLS-BR-3 | (Decided, R3-Q5 and R4-Q7) A vocabulary belongs either to a user (personal) or to a shared account. A copied item is independent of its original once copied; there's no linking between vocabularies in the MVP. Linking may come later. |
 
-**Draft default purposes** (written by the analyst at the user's request, R4-Q6, for the user to edit; two levels, per R5-Q3; shown as *Parent: children*):
+**Default purposes** (drafted by the analyst, R4-Q6; accepted "for now", R6-Q4; two levels, per R5-Q3; shown as *Parent: children*):
 
 - *Expense purposes:*
   - Food: Groceries, Dining out, Coffee & snacks, Delivery
@@ -270,7 +272,8 @@ Refunds aren't an income purpose; they're linked to the original expense (TXN-US
 | PAY-US-3 | user | to merge payees | duplicates from automation are cleaned up | Transactions and aliases move to the survivor; its single/multi-purpose setting is kept. | MVP |
 | PAY-US-4 | user | a payee's defaults to pre-fill new transactions | entry and review are faster | Pre-filled, and still editable. | MVP |
 | PAY-US-6 | admin of a shared account | the account's own payees and aliases | captures on the account resolve consistently (decided, R3-Q5) | Follows CLS-US-5: seeded from the creating admin's payees, extendable by copying members' shared payees. | MVP *(A11)* |
-| PAY-US-5 | user | to mark a payee as single-purpose or multi-purpose, and change it later | auto-confirmation follows how predictable the payee is (decided, R2-Q6: "cuz sometimes stuff change") | A toggle on the payee; a single-purpose payee must have a default purpose; changing it affects only future captures. [NEEDS INPUT, later round: does Budmon also suggest "single-purpose" after N reviews of a payee with the same purpose? Is the default for new payees multi-purpose?] | MVP |
+| PAY-US-5 | user | to mark a payee as single-purpose or multi-purpose, and change it later | auto-confirmation follows how predictable the payee is (decided, R2-Q6: "cuz sometimes stuff change") | A toggle on the payee; new payees are multi-purpose (decided, R6-Q6); a single-purpose payee must have a default purpose; changing it affects only future captures. | MVP |
+| PAY-US-7 | user | Budmon to notice when I keep choosing the same purpose for a payee | setup improves without effort (decided, R6-Q6) | After the same purpose has been chosen for a payee [NEEDS INPUT, later round: e.g. 3] times in a row, Budmon suggests marking the payee single-purpose. If I decline, it suggests making that purpose the payee's default instead; the default pre-fills, and I can still change it in review. Declined suggestions aren't repeated until the pattern changes *(assumption A37)*. | MVP |
 
 **Business rules**
 
@@ -279,7 +282,7 @@ Refunds aren't an income purpose; they're linked to the original expense (TXN-US
 | PAY-BR-1 | (Decided) A payee has many aliases; an alias resolves to exactly one payee per vocabulary (see ACC-BR-7 for shared accounts). |
 | PAY-BR-2 | (Decided) An unknown name from a message creates a payee with that name and its first alias. |
 | PAY-BR-3 | Alias matching ignores case and surrounding whitespace. [NEEDS INPUT, later round: patterns for trailing reference numbers, for example "UBER *TRIP 8F3K"?] |
-| PAY-BR-4 | (Decided, R2-Q6) A newly created payee is never single-purpose until the user makes it so; its captures are never auto-confirmed. |
+| PAY-BR-4 | (Decided, R2-Q6 and R6-Q6) A newly created payee is multi-purpose until the user makes it single-purpose; its captures are never auto-confirmed. A multi-purpose payee can still have a default purpose. |
 
 ### 4.5 `transactions`: Transactions, splits, transfers and refunds (prefix `TXN`)
 
@@ -302,8 +305,8 @@ Refunds aren't an income purpose; they're linked to the original expense (TXN-US
 | -- | ----- | ------- | -------- | ------------------- | ---- |
 | TXN-US-1 | user | to record an expense or income | my ledger is complete | Type, amount (in the account's currency), account, date (default today; time optional), payee, purpose, tags, note. Required: amount, account, date only (decided, R5-Q4). Manually entered transactions are *Confirmed*. | MVP |
 | TXN-US-2 | user with rights on the account | to edit or delete a transaction | I can fix mistakes | Rights per ACC-BR-2; balances and budgets recalculate; deleting a refunded or refunding transaction removes only the link. | MVP |
-| TXN-US-3 | user | to split a transaction into lines | a mixed order counts against different purposes (decided) | Lines with amount, purpose, tags and note must add up to the total before saving; payee, account and date are shared *(assumption A8)*. | MVP |
-| TXN-US-4 | user | to mark part of a payment as a tip | I learn what I spend on tips (decided) | (Decided, R4-Q6) A tip is its own split line tagged "tip". It keeps the purpose of what it was for (for example Dining out), because the tag "only applies to part of the money paid". [NEEDS INPUT, later round: a one-tap "add tip" shortcut that creates the split line?] | MVP |
+| TXN-US-3 | user | to split a transaction into lines | a mixed order counts against different purposes (decided) | Lines with amount, purpose, tags and note must add up to the total before saving. Each line starts with the transaction's account, payee and date (decided, R6-Q7). The account can be changed per line, for example a card payment with a cash tip. Payee and date stay shared *(assumption A8, revised)*. [NEEDS INPUT: what the total means when lines use different accounts, especially for captured transactions. See question 2.] | MVP |
+| TXN-US-4 | user | to mark part of a payment as a tip | I learn what I spend on tips (decided) | (Decided, R4-Q6) A tip is its own split line tagged "tip". It keeps the purpose of what it was for (for example Dining out), because the tag "only applies to part of the money paid". (Decided, R6-Q7) A one-tap "add tip" button creates the tip split line, with the tip tag applied and the purpose taken from the main line. | MVP |
 | TXN-US-5 | user | to record a transfer between two accounts I can use | moving money isn't spending (decided) | From account, to account, date and note. Same currency: one amount. Different currencies: sent amount and received amount, with the applied rate shown alongside the market rate for that day. An optional fee is recorded as a separate expense line on the source account under the "Financial > Bank & transfer fees" purpose. The gap between the applied rate and the market rate is also shown as an implied cost (decided, R2-Q5 and R3-Q6). [NEEDS INPUT, later round: does the implied cost count as spending in reports and budgets, or is it information only? Proposal: information only, so the fee isn't counted twice.] Allowed from a shared account to my personal account (ACC-BR-5). | MVP |
 | TXN-US-6 | user | to record a cash withdrawal | my cash account is right | A transfer from a bank account to a cash account, with an optional fee; triggers NTF-US-3. | MVP |
 | TXN-US-7 | user | to record a refund linked to the original purchase (decided) | spending reflects what I kept | Pick the original expense or split line; amount defaults to the remaining refundable amount; both sides show the link. | MVP |
@@ -320,7 +323,8 @@ Refunds aren't an income purpose; they're linked to the original expense (TXN-US
 | TXN-BR-2 | (Decided) Split lines add up exactly to the total. |
 | TXN-BR-3 | A transfer is never income or expense. (Decided, R3-Q6) A transfer fee is a separate expense line; the implied exchange-rate cost is shown alongside it. |
 | TXN-BR-4 | (Decided) A refund links to one earlier expense or split line; refunds can't exceed the original amount in total. |
-| TXN-BR-5 | A refund reduces spending under the original purpose in the period the refund falls in *(assumption A9)*. |
+| TXN-BR-5 | (Decided, R6-Q7: "the refund waits for the refund to arrive") A refund reduces spending under the original purpose in the period the refund arrives, not the period of the original purchase. |
+| TXN-BR-8 | (Decided, R6-Q7) A split line may use a different account from the transaction's default; each line changes the balance of its own account. |
 | TXN-BR-6 | (Decided, R2-Q6) Every transaction has a review status. *Needs review* transactions count in balances, budgets and reports like any other, and are flagged wherever they appear. |
 | TXN-BR-7 | (Decided, R2-Q5) In a cross-currency transfer, the sent and received amounts are what the user (or the message) says. The applied rate is derived from them, and it is never overwritten by the market rate. |
 
@@ -371,7 +375,7 @@ Refunds aren't an income purpose; they're linked to the original expense (TXN-US
 
 | ID | As a… | I want… | So that… | Acceptance criteria | MVP? |
 | -- | ----- | ------- | -------- | ------------------- | ---- |
-| BUD-US-1 | user | to create a budget for transactions matching conditions I define | I can budget food, subscriptions, or anything else (decided) | Conditions on purposes and tags, combined with AND, OR and NOT, for example "purpose Food AND NOT tag groceries" (decided). The budget also lists which accounts it draws from, including shared accounts I'm on (decided, R3-Q4). By default a budget covers **all accounts I can see** (decided, R4-Q7). This includes accounts I create or join later *(assumption A31)*. (Decided, R5-Q2) A condition such as "purpose Food" matches by name, ignoring case, so it catches "Food" in my personal vocabulary and in every shared account's vocabulary the budget covers. [NEEDS INPUT: does a rule on "Food" also match its children, such as "Food > Sweets"? See question 2.] [NEEDS INPUT, later round: can conditions also use payees or amount ranges?] The matching transactions are previewed while I edit. | MVP |
+| BUD-US-1 | user | to create a budget for transactions matching conditions I define | I can budget food, subscriptions, or anything else (decided) | Conditions on purposes and tags, combined with AND, OR and NOT, for example "purpose Food AND NOT tag groceries" (decided). The budget also lists which accounts it draws from, including shared accounts I'm on (decided, R3-Q4). By default a budget covers **all accounts I can see** (decided, R4-Q7). This includes accounts I create or join later *(assumption A31)*. (Decided, R5-Q2) A condition such as "purpose Food" matches by name, ignoring case, so it catches "Food" in my personal vocabulary and in every shared account's vocabulary the budget covers. (Decided, R6-Q2) A rule on a parent purpose includes its children unless I choose "this purpose only". [NEEDS INPUT, later round: can conditions also use payees or amount ranges?] The matching transactions are previewed while I edit. | MVP |
 | BUD-US-2 | user | a budget with a fixed amount | I set a simple limit | Amount in base currency *(assumption A18)*. | MVP |
 | BUD-US-3 | user | a budget set as a percentage | it follows my income or a parent budget (decided) | (Decided, R3-Q3) The base is one of: (i) the parent budget's amount; (ii) the actual income in the same period matching conditions I set (for example purpose Salary), using an expected amount I enter until the income actually arrives; (iii) an amount I enter. [NEEDS INPUT, later round: for (ii), if more or less income arrives than expected, does the budget follow the actual figure once anything arrives, or only once the total reaches the expected amount? Proposal: the actual figure once anything has arrived, with the expected amount shown alongside.] | MVP |
 | BUD-US-4 | user | to nest budgets | "food is 30% of the 80% of my salary I plan to spend" (decided) | A child budget's amount can be a percentage of its parent's amount; the effective share of the root is shown (for example "≈24% of salary"). (Decided, R3-Q4) Each budget's spent amount comes only from its own conditions and accounts; children's spending isn't added to the parent automatically. Budmon warns when a child's conditions or accounts aren't covered by its parent's *(assumption A25)*. | MVP |
@@ -394,7 +398,7 @@ Refunds aren't an income purpose; they're linked to the original expense (TXN-US
 | BUD-BR-7 | (Decided, R3-Q4) A budget counts only transactions on its chosen accounts that match its own conditions. |
 | BUD-BR-8 | (Decided, R3-Q3) A percentage-of-income budget uses the expected amount until matching income arrives in the period. |
 | BUD-BR-9 | (Decided, R4-Q7) A new budget covers all accounts the user can see unless the user narrows it. |
-| BUD-BR-10 | (Decided, R5-Q2) Purpose and tag conditions match by name, ignoring case, across every vocabulary the budget's accounts use. A child purpose is matched by its full name, for example "Food > Sweets" *(assumption A33)*. Renaming an item changes which budgets it matches. |
+| BUD-BR-10 | (Decided, R5-Q2) Purpose and tag conditions match by name, ignoring case, across every vocabulary the budget's accounts use. A child purpose is matched by its full name, for example "Food > Sweets" *(assumption A33)*. (Decided, R6-Q2) A rule on a parent purpose matches the parent and all its children, unless the rule is set to "this purpose only". Renaming an item changes which budgets it matches. |
 | BUD-BR-6 | Budgets can be nested to any depth *(assumption A19; [NEEDS INPUT, later round: a depth limit?])*. A budget can't be its own ancestor. |
 
 ### 4.8 `reports`: Insights (prefix `RPT`)
@@ -544,7 +548,7 @@ Refunds aren't an income purpose; they're linked to the original expense (TXN-US
 | REV-US-5 | user | to confirm many at once | I catch up quickly | Multi-select, or "confirm all without flags". | MVP |
 | REV-US-6 | user | to check the original message | I can verify | Shows the sender, received time and extracted fields; opens the original in Gmail or on the phone by reference (A12). | MVP |
 | REV-US-7 | user | repeated corrections to a template's output to prompt me to fix the template | errors stop recurring | Prompt after [NEEDS INPUT, later round: e.g. 3] corrections of the same field. | MVP |
-| REV-US-8 | user | captures from known single-purpose payees to be confirmed automatically | I review only what needs judgement (decided, R2-Q6) | Captures for single-purpose payees (PAY-US-5) get status *Auto-confirmed* with the payee's default purpose; captures for new payees or multi-purpose payees always need review; auto-confirmed items stay filterable and editable. [NEEDS INPUT, later round: on by default, or turned on by the user?] | MVP |
+| REV-US-8 | user | captures from known single-purpose payees to be confirmed automatically | I review only what needs judgement (decided, R2-Q6) | Captures for single-purpose payees (PAY-US-5) get status *Auto-confirmed* with the payee's default purpose; captures for new payees or multi-purpose payees always need review; auto-confirmed items stay filterable and editable. [NEEDS INPUT: on by default, or turned on by each user? See question 1.] | MVP |
 
 **Business rules**
 
@@ -570,9 +574,10 @@ Refunds aren't an income purpose; they're linked to the original expense (TXN-US
 | ADM-US-1 | product owner | to see all users | I know who is in the group | (Decided, R5-Q1) Name, email, status (active, pending deletion), last active, and the number of connected sources. Also sign-up date, who invited them, and their invite allowance *(assumption A36)*. No financial data. | MVP (decided, R4-Q2) |
 | ADM-US-2 | product owner | to see and manage all invitations | I control growth | Pending, accepted, expired and revoked invitations, with inviter; I can send and revoke invitations. | MVP |
 | ADM-US-3 | product owner | to set the user cap | Gmail access stays within Google's testing-mode limit (decided, R4-Q2) | Invitations can't be accepted once the cap is reached; the inviter and I are told why. Pending invitations count toward the cap *(assumption A27)*. | MVP |
-| ADM-US-4 | product owner | to delete or ban a user | I can manage the group "however I like" (R4-Q2) | (Decided, R5-Q1) *Delete* removes the user. *Ban* deletes the user and blocks their email address from being invited or signing up again; in the MVP a ban is by email only. I can lift a ban. [NEEDS INPUT: does deletion by the owner use the 7-day grace period (XC-16), or happen immediately? What happens to shared accounts where they were the only admin? Is the user told? See question 1.] | MVP |
-| ADM-US-5 | product owner | to set each user's invite allowance | I control who can grow the group (decided, R5-Q1) | A number of invitations, or unlimited (still bounded by the user cap). [NEEDS INPUT: what's the default allowance for a new user? See question 5.] | MVP |
-| ADM-US-7 | product owner | to switch features on or off per user | I can roll features out gradually (decided, R5-Q1) | For example SMS capture now, and AI-assisted capture later. [NEEDS INPUT: which features are switchable in the MVP, and are they on or off by default? See question 5.] | MVP |
+| ADM-US-4 | product owner | to delete or ban a user | I can manage the group "however I like" (R4-Q2) | (Decided, R5-Q1) *Delete* removes the user. *Ban* deletes the user and blocks their email address from being invited or signing up again; in the MVP a ban is by email only. I can lift a ban. (Decided, R6-Q1) Deletion by me uses the same 7-day grace period as self-deletion (XC-16), and only I can undo it. A ban takes effect immediately: sign-in is blocked at once, and the data is erased *(assumption A38)*. The user is emailed (decided, R6-Q1). Shared accounts where they were the only admin follow ADM-US-8. | MVP |
+| ADM-US-5 | product owner | to set each user's invite allowance | I control who can grow the group (decided, R5-Q1) | A number of invitations, or unlimited (still bounded by the user cap). A new user's allowance is 3 (decided, R6-Q5). | MVP |
+| ADM-US-7 | product owner | to switch features on or off per user | I can roll features out gradually (decided, R5-Q1) | (Decided, R6-Q5) Switches in the MVP: Gmail capture, SMS capture, sending invitations; AI-assisted capture is added when it ships. All are on by default. Switching a capture feature off pauses that user's sources of that kind *(assumption A39)*. | MVP |
+| ADM-US-8 | product owner | to decide what happens to shared accounts when their only admin is deleted or banned | households aren't left stranded (decided, R6-Q1) | Default: the longest-standing member becomes admin; if nobody else is on the account, it's deleted with the user. I can override by picking another person as admin, or by **freezing** the account (ACC-BR-9) until I decide. | MVP |
 | ADM-US-6 | product owner | a reminder to add each new tester's Google address to the Google project | Gmail connection works for them (operational step, R4-Q2) | Shown when an invitation is accepted, with the address to add; I can mark it done. | MVP |
 
 **Business rules**
@@ -583,6 +588,7 @@ Refunds aren't an income purpose; they're linked to the original expense (TXN-US
 | ADM-BR-2 | (Decided, R4-Q2) The number of users never exceeds the cap. |
 | ADM-BR-3 | Every admin-portal action is recorded in an audit log the product owner can see *(assumption A29)*. |
 | ADM-BR-4 | (Decided, R5-Q1) A banned email address can't be invited, sign up, or be linked through Google sign-in. |
+| ADM-BR-5 | Even on a frozen account, the owner never sees its financial data; freezing changes only what its members can do (R5-Q1). |
 
 ## 5. Module map and build order
 
@@ -657,8 +663,8 @@ Not evaluated yet. The user will ask for this separately.
 | A5 | *(Replaced by a decision in R2-Q1: the first version is for a small invited group, built so going public later stays possible.)* |
 | A6 | *(Confirmed in R4-Q6: "tip" is a tag on its own split line. Now recorded as a decision in TXN-US-4.)* |
 | A7 | *(Confirmed in R5-Q3: separate income and expense lists. Now CLS-BR-2.)* |
-| A8 | Split lines share the transaction's payee, account and date. |
-| A9 | A refund reduces spending in the period the refund happens. |
+| A8 | *(Revised in R6-Q7.)* Split lines share the transaction's payee and date; the account defaults to the transaction's but can be changed per line (decided). |
+| A9 | *(Confirmed in R6-Q7. Now TXN-BR-5.)* |
 | A10 | Loans, repayments and transfers aren't income or expense in reports or budgets. |
 | A11 | Shared accounts and roles are in the MVP (inferred from the household example, R2-Q4). |
 | A12 | Budmon keeps a content-free message reference so originals can be opened or re-fetched at the source. |
@@ -683,9 +689,13 @@ Not evaluated yet. The user will ask for this separately.
 | A31 | A budget covering "all accounts" includes accounts created or joined later. |
 | A32 | Automatic linking of Google sign-in to an existing password account happens only when Google reports the email as verified. |
 | A33 | Budget rules match a child purpose by its full name ("Food > Sweets"). |
-| A34 | A transaction can be assigned a parent purpose ("Food") or a child ("Food > Sweets"). |
+| A34 | *(Confirmed in R6-Q2. Now CLS-BR-4.)* |
 | A35 | Child purpose names are unique within their parent, not globally. |
 | A36 | The admin portal also shows sign-up date, inviter and invite allowance. These are account details, not financial data. |
+| A37 | A suggestion the user declines (single-purpose or default purpose) isn't repeated until the pattern changes. |
+| A38 | A ban takes effect immediately, with no grace period. |
+| A39 | Switching a capture feature off for a user pauses their sources of that kind, without deleting them. |
+| A40 | Only the product owner can freeze or unfreeze a shared account. |
 
 ## 9. Open questions
 

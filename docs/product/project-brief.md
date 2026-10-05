@@ -1,7 +1,7 @@
 ---
 doc: project-brief
-version: 0.6
-updated: 2026-10-04
+version: 0.7
+updated: 2026-10-05
 ---
 
 # Budmon: Project Brief
@@ -18,6 +18,7 @@ Sources: the user's initial description ([`notes/2026-10-04-initial-idea.md`](./
 | 0.4     | 2026-10-04 | Round 3 answers folded in. SMS capture is in the MVP, and AI-assisted capture comes right after it (R3-Q2). Templates are made by highlighting and labelling parts of a real message (R3-Q2). Budget percentage bases (R3-Q3). Budgets count only their own conditions and chosen accounts, alert only, and get rollover later (R3-Q4). Shared accounts have their own vocabulary (R3-Q5). Transfer fees plus implied cost, and rate-by-date conversion (R3-Q6). Offline entry of new transactions on Android (R3-Q7). |
 | 0.5     | 2026-10-04 | Round 4 answers folded in. Sign-in by email + password and by Google, optional two-step verification, sessions lasting about a month (R4-Q1). Any user can invite, invitations expire after 7 days, and the number of users is capped. A product-owner admin portal is added to the MVP (R4-Q2). Deleting a Budmon account has a 7-day grace period; export is in the MVP (R4-Q3). Credit cards are their own account type (R4-Q4). Balance corrections are for admins only (R4-Q5). Purposes are flat in the MVP (the analyst's reading, to be confirmed) and tips are split lines (R4-Q6). Personal and shared vocabularies stay unlinked; budgets cover all accounts by default (R4-Q7). |
 | 0.6     | 2026-10-04 | Round 5 answers folded in. The admin portal shows account details only, with no financial data; the owner can delete, ban (by email) and invite users, and set per-user invite allowances and feature switches (R5-Q1). Budget rules match purposes by name (R5-Q2). Purposes have two levels in the MVP, with unlimited nesting later (R5-Q3). Only amount, account and date are required; future-dated entries are allowed; receipts later (R5-Q4). Google sign-in links automatically to an existing account with the same email (R5-Q5). |
+| 0.7     | 2026-10-05 | Round 6 answers folded in. Owner deletion uses the 7-day window; a sole admin's shared accounts pass to the longest-standing member, or the owner picks a new admin or freezes the account (R6-Q1). Budget rules on a parent purpose include its children (R6-Q2). Notifications are Android push and in-app, with quiet hours and at most one data-entry reminder a day (R6-Q3). Default purposes accepted for now (R6-Q4). Portal defaults: 3 invites, feature switches on by default (R6-Q5). Payee suggestions (R6-Q6). A split line can use a different account; refunds count when they arrive; one-tap tip (R6-Q7). |
 
 ## 1. The problem
 
@@ -96,7 +97,7 @@ Proposed measures, all pending your confirmation. [NEEDS INPUT: confirm, change 
 - Debts recorded against people who aren't Budmon users.
 - Budgets: conditions combining purposes and tags (including exclusions), fixed amounts or percentages, nesting, overlap, and custom periods (R2-Q2).
 - Reports.
-- Reminders.
+- Reminders: Android push and in-app, with quiet hours set by the user and at most one data-entry reminder a day (R6-Q3).
 - Gmail capture: scan scope, manual sender setup, templates built per user, merging, payee resolution, a review queue, a reviewed/unreviewed filter, and auto-confirmation for known single-purpose payees (R2-Q6).
 - SMS capture on Android, with the same scope rules and templates as Gmail (decided, R3-Q2).
 - Templates are made by highlighting parts of a real message and labelling each selection with the field it holds (decided, R3-Q2). There is no AI in the first version.
