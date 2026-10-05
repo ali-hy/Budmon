@@ -1,6 +1,6 @@
 ---
 doc: spec-summary
-version: 0.7
+version: 0.8
 updated: 2026-10-05
 ---
 
@@ -28,6 +28,7 @@ Based on the [project brief](./project-brief.md), the user's [initial descriptio
 | 0.5     | 2026-10-04 | Round 4 answers folded in. Sign-in by email + password and by Google, optional two-step verification, sessions of about a month (R4-Q1: IDN-US-1, 2, 8, XC-18). Any user can invite; 7-day expiry; user cap; new `admin` module for the product owner's portal (R4-Q2: IDN-US-9, section 4.13, built second). Deletion with a 7-day grace period; export in the MVP (R4-Q3: XC-16, XC-17, IDN-US-6, 7). Credit cards are their own type (R4-Q4: ACC-US-1, ACC-BR-8). Balance corrections are admin-only (R4-Q5: ACC-US-9). Flat purposes (the analyst's reading, to be confirmed); tips as split lines; draft default purposes (R4-Q6: section 4.3, TXN-US-4, A6). Vocabularies unlinked; budgets cover all accounts by default (R4-Q7: CLS-BR-3, BUD-US-1, BUD-BR-9). |
 | 0.6     | 2026-10-04 | Round 5 answers folded in. Admin portal: account details only, delete, ban by email, invite, per-user invite allowance and feature switches (R5-Q1: section 1, ADM-US-1, 4, 5, 7, ADM-BR-4, IDN-US-9). Budget rules match purposes by name, ignoring case (R5-Q2: BUD-US-1, BUD-BR-10). Two-level purposes in the MVP, with the default list redrafted (R5-Q3 (i): section 4.3, CLS-BR-4). Separate income and expense lists (R5-Q3 (ii): CLS-BR-2). Members can delete their own entries, viewers see the whole account, and the creator isn't protected (R5-Q3 (iii)-(v): ACC-BR-2, ACC-US-5). Only amount, account and date required; future-dated entries; receipts later (R5-Q4: TXN-US-1, TXN-US-11, XC-4). Automatic Google sign-in linking; several Gmail inboxes per user (R5-Q5: IDN-BR-1, A30). |
 | 0.7     | 2026-10-05 | Round 6 answers folded in. Owner deletion uses the 7-day window; sole-admin shared accounts go to the longest-standing member, with an owner override (pick an admin or freeze the account) and an email to the user (R6-Q1: ADM-US-4, ADM-US-8, ACC-BR-9). Parent-purpose rules include children, with a "this purpose only" option; parent purposes can be used directly (R6-Q2: BUD-BR-10, CLS-BR-4). Notification channels, quiet hours and a daily cap (R6-Q3: XC-27, XC-28). Default purposes accepted for now (R6-Q4: CLS-US-1). Invite allowance 3; feature switches for Gmail, SMS, invitations (and AI later), on by default (R6-Q5: ADM-US-5, ADM-US-7). Payees multi-purpose by default; single-purpose and default-purpose suggestions (R6-Q6: PAY-US-5, PAY-US-7). A split line can change account; payee and date shared; refunds count when they arrive; one-tap tip (R6-Q7: TXN-US-3, TXN-US-4, TXN-BR-5, TXN-BR-8). |
+| 0.8     | 2026-10-05 | Round 7 answers folded in. Auto-confirmation on by default (R7-Q1: REV-US-8). Split totals across accounts, same currency only (R7-Q2: TXN-US-3, TXN-BR-9). Captures for frozen accounts are processed on unfreeze (R7-Q3: ACC-BR-9, CAP-BR-7). Fast review as a core principle (R7-Q5: XC-23). Budget period kinds, 80%/100% alerts, counting by entry author, shared budgets later (R7-Q7: BUD-US-6, 8, 10, BUD-BR-11). Section 9 rewritten as a numbered list of proposals for the remaining gaps. |
 
 ## 1. Users and roles
 
@@ -108,7 +109,7 @@ Sharing is **per account** (decided, R2-Q4). A "household" is simply a group of 
 - **XC-20** (Decided) Everything, including automation setup, can be done from both the web app and the Android app. [NEEDS INPUT, later round: any feature that is web-first or Android-first? SMS is Android-only by nature.]
 - **XC-21** (Decided, R2-Q3) Android first; iOS later.
 - **XC-22** (Decided, R3-Q7) The Android app lets the user record **new** transactions (including transfers) offline; they sync when the connection returns. Everything else (editing, review, budgets) needs a connection in the first version. Full offline use, including review, may come later. [NEEDS INPUT, later round: are offline entries shown in balances on the device before they sync? Proposal: yes, marked as "not yet synced".]
-- **XC-23** Recording a manual transaction is fast: at most [NEEDS INPUT, later round: e.g. 4] taps after opening the app. Confirming a captured transaction that needs no change takes one action.
+- **XC-23** (Decided core principle, R7-Q5: "reviews need to be fast otherwise what's the point?") The median review of a captured transaction takes under 5 seconds. Recording a manual transaction is fast: at most [NEEDS INPUT, later round: e.g. 4] taps after opening the app. Confirming a captured transaction that needs no change takes one action.
 - **XC-24** [NEEDS INPUT, later round: languages and right-to-left layouts; accessibility target (proposal: WCAG 2.2 AA on web, Android accessibility guidelines); tone (proposal: calm and plain, never guilt-inducing).]
 
 ### 3.5 Notifications
@@ -194,7 +195,7 @@ Thirteen modules:
 | ACC-BR-4 | People on a shared account see only that account, never each other's other accounts. |
 | ACC-BR-5 | (Decided, R2-Q4, from the example) A member may transfer from a shared account to one of their own personal accounts. The other people on the shared account see the shared side, with the destination shown only as "<person>'s account" *(assumption A14)*. |
 | ACC-BR-6 | Balances are never edited directly; corrections create adjustment transactions. |
-| ACC-BR-9 | (Decided, R6-Q1) A **frozen** account is read-only for everyone on it: no new entries and no edits. Only the product owner can freeze or unfreeze an account, and only through ADM-US-8 *(assumption A40)*. [NEEDS INPUT: what happens to captures for a frozen account? See question 3.] |
+| ACC-BR-9 | (Decided, R6-Q1) A **frozen** account is read-only for everyone on it: no new entries and no edits. Only the product owner can freeze or unfreeze an account, and only through ADM-US-8 *(assumption A40)*. (Decided, R7-Q3) Captures for a frozen account aren't recorded while it's frozen; they're processed when it's unfrozen (CAP-BR-7). |
 | ACC-BR-8 | (Decided, R4-Q4) A credit card's balance is shown as the amount owed. Card purchases are expenses on the card account. Paying the card off from another account is a transfer. Statement cycles and due-date reminders come later. |
 | ACC-BR-7 | (Decided, R3-Q5) A shared account has its own vocabulary of purposes, tags, payees and payee aliases, managed by its admins. When the account becomes shared, the vocabulary starts as a copy of the creating admin's set. Admins can copy in items that other members have marked as shared. Entries on the account use only the account's vocabulary. A personal account uses its owner's personal set *(assumption A21)*. |
 
@@ -305,7 +306,7 @@ Refunds aren't an income purpose; they're linked to the original expense (TXN-US
 | -- | ----- | ------- | -------- | ------------------- | ---- |
 | TXN-US-1 | user | to record an expense or income | my ledger is complete | Type, amount (in the account's currency), account, date (default today; time optional), payee, purpose, tags, note. Required: amount, account, date only (decided, R5-Q4). Manually entered transactions are *Confirmed*. | MVP |
 | TXN-US-2 | user with rights on the account | to edit or delete a transaction | I can fix mistakes | Rights per ACC-BR-2; balances and budgets recalculate; deleting a refunded or refunding transaction removes only the link. | MVP |
-| TXN-US-3 | user | to split a transaction into lines | a mixed order counts against different purposes (decided) | Lines with amount, purpose, tags and note must add up to the total before saving. Each line starts with the transaction's account, payee and date (decided, R6-Q7). The account can be changed per line, for example a card payment with a cash tip. Payee and date stay shared *(assumption A8, revised)*. [NEEDS INPUT: what the total means when lines use different accounts, especially for captured transactions. See question 2.] | MVP |
+| TXN-US-3 | user | to split a transaction into lines | a mixed order counts against different purposes (decided) | Lines with amount, purpose, tags and note must add up to the total before saving. Each line starts with the transaction's account, payee and date (decided, R6-Q7). The account can be changed per line, for example a card payment with a cash tip. Payee and date stay shared *(assumption A8, revised)*. (Decided, R7-Q2) The total is the sum of all lines, for example card 100 + cash tip 10 = 110. On a captured transaction, the lines on the captured account must still add up to the bank's amount; lines on other accounts come on top. | MVP |
 | TXN-US-4 | user | to mark part of a payment as a tip | I learn what I spend on tips (decided) | (Decided, R4-Q6) A tip is its own split line tagged "tip". It keeps the purpose of what it was for (for example Dining out), because the tag "only applies to part of the money paid". (Decided, R6-Q7) A one-tap "add tip" button creates the tip split line, with the tip tag applied and the purpose taken from the main line. | MVP |
 | TXN-US-5 | user | to record a transfer between two accounts I can use | moving money isn't spending (decided) | From account, to account, date and note. Same currency: one amount. Different currencies: sent amount and received amount, with the applied rate shown alongside the market rate for that day. An optional fee is recorded as a separate expense line on the source account under the "Financial > Bank & transfer fees" purpose. The gap between the applied rate and the market rate is also shown as an implied cost (decided, R2-Q5 and R3-Q6). [NEEDS INPUT, later round: does the implied cost count as spending in reports and budgets, or is it information only? Proposal: information only, so the fee isn't counted twice.] Allowed from a shared account to my personal account (ACC-BR-5). | MVP |
 | TXN-US-6 | user | to record a cash withdrawal | my cash account is right | A transfer from a bank account to a cash account, with an optional fee; triggers NTF-US-3. | MVP |
@@ -325,6 +326,7 @@ Refunds aren't an income purpose; they're linked to the original expense (TXN-US
 | TXN-BR-4 | (Decided) A refund links to one earlier expense or split line; refunds can't exceed the original amount in total. |
 | TXN-BR-5 | (Decided, R6-Q7: "the refund waits for the refund to arrive") A refund reduces spending under the original purpose in the period the refund arrives, not the period of the original purchase. |
 | TXN-BR-8 | (Decided, R6-Q7) A split line may use a different account from the transaction's default; each line changes the balance of its own account. |
+| TXN-BR-9 | (Decided, R7-Q2) A transaction's total is the sum of its lines across all accounts. For a captured transaction, the lines on the captured account always add up to the amount in the bank message. In the MVP, every line must be in the transaction's currency, so lines can only move to accounts in that currency. |
 | TXN-BR-6 | (Decided, R2-Q6) Every transaction has a review status. *Needs review* transactions count in balances, budgets and reports like any other, and are flagged wherever they appear. |
 | TXN-BR-7 | (Decided, R2-Q5) In a cross-currency transfer, the sent and received amounts are what the user (or the message) says. The applied rate is derived from them, and it is never overwritten by the market rate. |
 
@@ -380,11 +382,11 @@ Refunds aren't an income purpose; they're linked to the original expense (TXN-US
 | BUD-US-3 | user | a budget set as a percentage | it follows my income or a parent budget (decided) | (Decided, R3-Q3) The base is one of: (i) the parent budget's amount; (ii) the actual income in the same period matching conditions I set (for example purpose Salary), using an expected amount I enter until the income actually arrives; (iii) an amount I enter. [NEEDS INPUT, later round: for (ii), if more or less income arrives than expected, does the budget follow the actual figure once anything arrives, or only once the total reaches the expected amount? Proposal: the actual figure once anything has arrived, with the expected amount shown alongside.] | MVP |
 | BUD-US-4 | user | to nest budgets | "food is 30% of the 80% of my salary I plan to spend" (decided) | A child budget's amount can be a percentage of its parent's amount; the effective share of the root is shown (for example "≈24% of salary"). (Decided, R3-Q4) Each budget's spent amount comes only from its own conditions and accounts; children's spending isn't added to the parent automatically. Budmon warns when a child's conditions or accounts aren't covered by its parent's *(assumption A25)*. | MVP |
 | BUD-US-5 | user | one transaction to count toward every budget it matches | "food" and "subscription" budgets both see a food subscription (decided) | Each budget's spent amount includes all matching transactions; no exclusivity between budgets. | MVP |
-| BUD-US-6 | user | to choose each budget's period | budgets fit my life (decided: custom) | [NEEDS INPUT, later round: which kinds of custom period? Proposal: monthly starting on a chosen day, weekly, every N days/weeks/months from a start date, and a one-off date range.] | MVP |
+| BUD-US-6 | user | to choose each budget's period | budgets fit my life (decided: custom) | (Decided, R7-Q7) Monthly from a chosen start day, weekly, every N days/weeks/months from a start date, or a one-off date range. | MVP |
 | BUD-US-7 | user | to see each budget's progress | I know where I stand | Budgeted, spent, remaining, and time left in the period; the part of "spent" that still needs review is shown separately (TXN-BR-6); the nested structure is shown as a tree. | MVP |
-| BUD-US-8 | user | alerts as I approach or exceed a budget | I can adjust in time | Thresholds per budget (proposal: 80% and 100%; [NEEDS INPUT, later round: confirm the defaults]), via `notifications`. (Decided, R3-Q4) Exceeding only triggers alerts; nothing is ever blocked. | MVP |
+| BUD-US-8 | user | alerts as I approach or exceed a budget | I can adjust in time | Thresholds per budget, 80% and 100% by default (decided, R7-Q7), via `notifications`. (Decided, R3-Q4) Exceeding only triggers alerts; nothing is ever blocked. | MVP |
 | BUD-US-9 | user | unspent and overspent amounts to carry into the next period, optionally per budget | my plan reflects past periods (decided, R3-Q4) | Future work; to be specified. | Later |
-| BUD-US-10 | user | budgets that include shared-account transactions | household budgets work | A shared account can be chosen as one of the budget's accounts (BUD-US-1). Conditions on that account use the account's vocabulary (ACC-BR-7) and match by name (BUD-BR-10). [NEEDS INPUT, later round: does my budget count everything on the shared account, or only entries I created? Can a budget itself be shared with the account's members?] | MVP |
+| BUD-US-10 | user | budgets that include shared-account transactions | household budgets work | A shared account can be chosen as one of the budget's accounts (BUD-US-1). Conditions on that account use the account's vocabulary (ACC-BR-7) and match by name (BUD-BR-10). (Decided, R7-Q7) By default a budget counts everyone's entries. It can be limited to entries created by specific people. Sharing a budget with the account's members comes later. | MVP |
 
 **Business rules**
 
@@ -397,6 +399,7 @@ Refunds aren't an income purpose; they're linked to the original expense (TXN-US
 | BUD-BR-5 | A nested child's amount is derived from its parent's amount when set as a percentage, and changes when the parent's does. |
 | BUD-BR-7 | (Decided, R3-Q4) A budget counts only transactions on its chosen accounts that match its own conditions. |
 | BUD-BR-8 | (Decided, R3-Q3) A percentage-of-income budget uses the expected amount until matching income arrives in the period. |
+| BUD-BR-11 | (Decided, R7-Q7) A budget can be limited to entries created by specific users; by default it counts entries by everyone. For captured entries, the author is the person whose source captured them *(assumption A41)*. |
 | BUD-BR-9 | (Decided, R4-Q7) A new budget covers all accounts the user can see unless the user narrows it. |
 | BUD-BR-10 | (Decided, R5-Q2) Purpose and tag conditions match by name, ignoring case, across every vocabulary the budget's accounts use. A child purpose is matched by its full name, for example "Food > Sweets" *(assumption A33)*. (Decided, R6-Q2) A rule on a parent purpose matches the parent and all its children, unless the rule is set to "this purpose only". Renaming an item changes which budgets it matches. |
 | BUD-BR-6 | Budgets can be nested to any depth *(assumption A19; [NEEDS INPUT, later round: a depth limit?])*. A budget can't be its own ancestor. |
@@ -528,6 +531,7 @@ Refunds aren't an income purpose; they're linked to the original expense (TXN-US
 | CAP-BR-3 | (Decided, R2-Q5) Templates are private to the user and built per user; there's no hard-coded bank list. [NEEDS INPUT, later round: should users ever be able to share templates (format only, no personal data)?] |
 | CAP-BR-4 | AI is used only with opt-in (XC-10), only on in-scope messages, and only through the provider in effect (XC-12). |
 | CAP-BR-5 | One message contributes to at most one transaction. |
+| CAP-BR-7 | (Decided, R7-Q3) While an account is frozen, captures for it aren't recorded. When it's unfrozen, the frozen period's captures are processed. They can come from items held while frozen (extracted data only, never raw content) or from re-reading messages from the freeze date onward through message references (A12). The planner picks the mechanism; either way, XC-13 (no raw content kept) holds. For SMS, re-reading only works for messages still on the phone. |
 | CAP-BR-6 | On a shared account, messages about the same payment arriving through different people's sources are merged into one transaction *(assumption A20; for example a joint bank account notifying both holders)*. |
 
 ### 4.12 `review`: Review and refinement (prefix `REV`)
@@ -548,7 +552,7 @@ Refunds aren't an income purpose; they're linked to the original expense (TXN-US
 | REV-US-5 | user | to confirm many at once | I catch up quickly | Multi-select, or "confirm all without flags". | MVP |
 | REV-US-6 | user | to check the original message | I can verify | Shows the sender, received time and extracted fields; opens the original in Gmail or on the phone by reference (A12). | MVP |
 | REV-US-7 | user | repeated corrections to a template's output to prompt me to fix the template | errors stop recurring | Prompt after [NEEDS INPUT, later round: e.g. 3] corrections of the same field. | MVP |
-| REV-US-8 | user | captures from known single-purpose payees to be confirmed automatically | I review only what needs judgement (decided, R2-Q6) | Captures for single-purpose payees (PAY-US-5) get status *Auto-confirmed* with the payee's default purpose; captures for new payees or multi-purpose payees always need review; auto-confirmed items stay filterable and editable. [NEEDS INPUT: on by default, or turned on by each user? See question 1.] | MVP |
+| REV-US-8 | user | captures from known single-purpose payees to be confirmed automatically | I review only what needs judgement (decided, R2-Q6) | Captures for single-purpose payees (PAY-US-5) get status *Auto-confirmed* with the payee's default purpose; captures for new payees or multi-purpose payees always need review; auto-confirmed items stay filterable and editable. On by default (decided, R7-Q1); each user can turn it off. | MVP |
 
 **Business rules**
 
@@ -696,7 +700,35 @@ Not evaluated yet. The user will ask for this separately.
 | A38 | A ban takes effect immediately, with no grace period. |
 | A39 | Switching a capture feature off for a user pauses their sources of that kind, without deleting them. |
 | A40 | Only the product owner can freeze or unfreeze a shared account. |
+| A41 | The author of a captured entry, for budget filters, is the user whose source captured it. |
 
 ## 9. Open questions
 
-This round's questions are in the round report. Every `[NEEDS INPUT]` marker above is a gap; those marked "later round" are lower priority and will be asked once the higher-impact questions are settled.
+The remaining `[NEEDS INPUT]` markers are listed below as **proposals**. The user can accept them all at once or change any of them by number. Accepted proposals become decisions; until then, each stays an open gap. The capture-module questions (sources, capture, review) are asked separately in the round report.
+
+| # | Where | Proposal |
+| - | ----- | -------- |
+| P1 | XC-6 | Reports use a month that starts on a day the user chooses; the default is the 1st. |
+| P2 | XC-7 | No locking of past periods in the MVP. |
+| P3 | XC-8 | Recurring or scheduled transactions come later, together with subscription detection. |
+| P4 | XC-10 | One global AI switch plus a switch per AI feature, all off until the user opts in. |
+| P5 | XC-20 | Everything is available on both web and Android, except SMS capture, which is Android-only. |
+| P6 | XC-22 | Offline entries count in the balances shown on the device, marked "not yet synced". |
+| P7 | XC-23 | A manual expense takes at most 4 taps after opening the Android app. |
+| P8 | XC-24 | English first, with layouts ready for other languages and right-to-left later. WCAG 2.2 AA on web and Android accessibility guidelines. A calm, plain tone that never makes people feel guilty about spending. |
+| P9 | XC-31 | Best-effort availability while Budmon is invite-only. |
+| P10 | CLS-US-5 | On a shared account, members can create new *tags* inline; only admins create purposes. |
+| P11 | PAY-US-7, REV-US-7, CAP-US-6, REV-US-4 | Thresholds: 3 repeats before a single-purpose suggestion; 3 corrections of the same field before a template-fix prompt; a 3-day window for spotting duplicates between manual and captured entries; rejected captures can be restored for 30 days. |
+| P12 | PAY-BR-3 | Alias patterns that ignore trailing reference numbers come later. |
+| P13 | TXN-US-5 | The implied exchange-rate cost is shown for information only, and isn't counted as spending. |
+| P14 | TXN-US-11 | Upcoming (future-dated) entries show as "planned" in budget progress, but don't count as spent until their date. |
+| P15 | NTF-US-2 | An optional daily reminder at a chosen time, off by default. |
+| P16 | NTF-US-3 | Also remind when a cash account with a balance has had no expenses for 3 days; on by default. |
+| P17 | BUD-US-1 | Budget conditions can also use payees in the MVP; amount ranges come later. |
+| P18 | BUD-US-3 | An income-based budget follows the actual income once any has arrived, with the expected amount shown alongside. |
+| P19 | BUD-BR-6 | Budgets can be nested to any depth (unlike purposes). |
+| P20 | `reports`, RPT-US-2, RPT-BR-3 | Day-one reports are RPT-US-1 to RPT-US-3; the last 12 periods are shown; my reports include other people's entries on shared accounts, with a filter. |
+| P21 | `debts` | Debts with no money moving through an account (DEBT-US-2) are in the MVP. Interest calculations are out of scope. The details of loans between users are settled when those stories are scheduled. |
+| P22 | Section 1, `admin`, section 6 | A household grouping comes later. An error or health view for the owner comes later. Bank data aggregators aren't planned. |
+| P23 | CAP-US-9 | One default cash account per currency receives cash withdrawals. |
+| P24 | A38 | A ban takes effect immediately, with no grace period. |

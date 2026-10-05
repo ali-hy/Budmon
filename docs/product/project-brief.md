@@ -1,6 +1,6 @@
 ---
 doc: project-brief
-version: 0.7
+version: 0.8
 updated: 2026-10-05
 ---
 
@@ -19,6 +19,7 @@ Sources: the user's initial description ([`notes/2026-10-04-initial-idea.md`](./
 | 0.5     | 2026-10-04 | Round 4 answers folded in. Sign-in by email + password and by Google, optional two-step verification, sessions lasting about a month (R4-Q1). Any user can invite, invitations expire after 7 days, and the number of users is capped. A product-owner admin portal is added to the MVP (R4-Q2). Deleting a Budmon account has a 7-day grace period; export is in the MVP (R4-Q3). Credit cards are their own account type (R4-Q4). Balance corrections are for admins only (R4-Q5). Purposes are flat in the MVP (the analyst's reading, to be confirmed) and tips are split lines (R4-Q6). Personal and shared vocabularies stay unlinked; budgets cover all accounts by default (R4-Q7). |
 | 0.6     | 2026-10-04 | Round 5 answers folded in. The admin portal shows account details only, with no financial data; the owner can delete, ban (by email) and invite users, and set per-user invite allowances and feature switches (R5-Q1). Budget rules match purposes by name (R5-Q2). Purposes have two levels in the MVP, with unlimited nesting later (R5-Q3). Only amount, account and date are required; future-dated entries are allowed; receipts later (R5-Q4). Google sign-in links automatically to an existing account with the same email (R5-Q5). |
 | 0.7     | 2026-10-05 | Round 6 answers folded in. Owner deletion uses the 7-day window; a sole admin's shared accounts pass to the longest-standing member, or the owner picks a new admin or freezes the account (R6-Q1). Budget rules on a parent purpose include its children (R6-Q2). Notifications are Android push and in-app, with quiet hours and at most one data-entry reminder a day (R6-Q3). Default purposes accepted for now (R6-Q4). Portal defaults: 3 invites, feature switches on by default (R6-Q5). Payee suggestions (R6-Q6). A split line can use a different account; refunds count when they arrive; one-tap tip (R6-Q7). |
+| 0.8     | 2026-10-05 | Round 7 answers folded in. Success targets set, and fast review made a core principle (R7-Q5). No "never" list for now (R7-Q4). No constraints yet (R7-Q4). Alternatives written up from the apps you've tried (R7-Q6). |
 
 ## 1. The problem
 
@@ -35,7 +36,7 @@ Some things that matter to people are also badly served by typical budgeting too
 - money shared within a household, such as a common "house money" cash pot (R2-Q4);
 - budgets that reflect how a person actually thinks: overlapping, nested, and set as amounts or percentages (R2-Q2).
 
-**How people cope today:** manual entry in a budgeting app or spreadsheet, catching up in occasional bulk sessions, or giving up. [NEEDS INPUT: Which tools have you, or the people you're building this for, actually used and abandoned, and why? This fills section 7.]
+**How people cope today:** manual entry in a budgeting app or spreadsheet, catching up in occasional bulk sessions, or giving up. The tools you have tried and dropped are in section 7 (R7-Q6).
 
 ## 2. Target users
 
@@ -67,17 +68,18 @@ Goals the user has stated:
 1. **Make data entry cheap.** Captured data is useful straight away, without any action from the user, and review refines it (R2-Q6).
 2. **Respect privacy and boundaries.** Every automated feature has a manual alternative. AI is opt-in. Raw messages aren't stored after processing, and that is a headline commitment of the privacy policy (R2-Q7).
 3. **Cover the essential budgeting features**, including budgets as complex as the user wants (R2-Q2).
+4. **Review must be fast.** This is a core product principle: "reviews need to be fast otherwise what's the point?" (R7-Q5).
 
-Proposed measures, all pending your confirmation. [NEEDS INPUT: confirm, change or replace these, and give target numbers.]
+Success measures (decided, R7-Q5):
 
-| Measure | Proposed target |
+| Measure | Target |
 | ------- | --------------- |
-| Share of card/online transactions captured without manual entry, for connected sources | [NEEDS INPUT: target %] |
-| Median time to review one captured transaction | [NEEDS INPUT: e.g. under 5 seconds] |
-| Captured transactions confirmed without any edit (extraction accuracy) | [NEEDS INPUT: target %] |
-| Share of captured transactions auto-confirmed (single-purpose known payees) after 3 months of use | [NEEDS INPUT: target %] |
-| Duplicate transactions created from multiple messages about one payment | [NEEDS INPUT: e.g. under 1%] |
-| Personal: "I've used it for my own money for N consecutive months and my balances match my bank" | [NEEDS INPUT: N] |
+| Share of card/online transactions captured without manual entry, for connected sources | At least 90% |
+| Median time to review one captured transaction | Under 5 seconds (a core principle) |
+| Captured transactions confirmed without any edit (extraction accuracy) | At least 80% |
+| Share of captured transactions auto-confirmed (single-purpose known payees) after 3 months of use | At least 40% (proposed; kept unchanged by the user) |
+| Duplicate transactions created from multiple messages about one payment | Under 1% (proposed; kept unchanged by the user) |
+| Personal: "I've used it for my own money and my balances match my bank" | 3 months in a row ("oh yes, that would be awesome") |
 
 ## 5. Scope
 
@@ -121,14 +123,12 @@ Proposed measures, all pending your confirmation. [NEEDS INPUT: confirm, change 
 
 ### 5.3 Never (explicit non-goals)
 
-[NEEDS INPUT: confirm or change these proposed non-goals.]
+None for now (decided, R7-Q4): "I understand that this is good for scope definition and to avoid scope creep, but for now I won't add one. I wanna see how good and useful this could be".
 
-- Moving money: Budmon records and monitors, it never initiates payments or transfers at a bank.
-- Investment and portfolio tracking. Proposed non-goal, to confirm.
-- Tax preparation and business accounting.
-- Reading messages outside the user's scan scope.
-- (Decided, R2-Q7) Keeping raw message or email content after processing, unless the user has explicitly opted in to share it to help improve the app.
-- (Decided, R2-Q5) A hard-coded list of supported banks.
+Scope is still bounded by sections 5.1 and 5.2. Two things are **commitments**, not non-goals, and stay in force:
+
+- Budmon doesn't read messages outside the user's scan scope (XC-11).
+- Raw message or email content isn't kept after processing, unless the user has opted in to donate it (decided, R2-Q7).
 
 ## 6. Constraints
 
@@ -144,16 +144,23 @@ Proposed measures, all pending your confirmation. [NEEDS INPUT: confirm, change 
 - **Third-party access rules:**
   - Gmail read access is a Google "restricted scope". While Budmon is invite-only, it stays in Google's testing mode, with no verification or annual security assessment for now (decided, R2-Q1). Testing mode allows only a limited number of named test users, and their access has to be renewed periodically. **Operational step (acknowledged, R4-Q2):** each tester's Google address may have to be added to Budmon's Google project by hand. The user cap stays below the test-user limit (decided, R4-Q2). A public launch would require verification and an annual third-party security assessment, which is later work.
   - Google Play restricts apps that request SMS permissions. While the app is invite-only, it can be given to the group directly rather than through the Play Store. Store compliance is later work.
-- **Budget, timeline, hosting, regulations:** [NEEDS INPUT: Is there a deadline, a hosting budget, or an AI usage budget? Any data-residency or financial regulation to respect?]
+- **Budget, timeline, hosting, regulations:** none yet (decided, R7-Q4: "not yet"). There's no deadline, no hosting or AI spending limit, and no specific regulation identified. Revisit before any public launch.
 
 ## 7. Alternatives
 
-[NEEDS INPUT: Which apps do you know or have you tried (for example YNAB, Monarch, Wallet by BudgetBakers, Money Manager, Spendee, local bank apps, spreadsheets)? Pointers are enough; the analyst will write this section up.]
+Apps the user has tried or seen (R7-Q6):
 
-What Budmon intends to do differently, from your description:
+| App | What it offered | Why it fell short |
+| --- | --------------- | ----------------- |
+| HomeBank | Manual budgeting. | Desktop only, "frustrating and inconvenient", no automation. |
+| A "Money Wallet"-type mobile app (name uncertain) | Manual budgeting on mobile. | Tried and dropped; no specific reason given. |
+| Stay Wise | Automation, and insights based on it. | "it was only automation": no manual entry for cash and the like, which matters. Apparently discontinued. |
 
-- It captures transactions from notifications people already receive, for any bank, instead of relying on bank-API aggregators or manual entry.
-- Captured data is useful immediately, and review refines it instead of gating it.
+What Budmon does differently:
+
+- **Automation and manual entry together**, on mobile and web. Card and online payments are captured, and cash and anything else can be entered quickly by hand, including offline on Android. This is the gap between HomeBank (manual only, desktop) and Stay Wise (automation only).
+- It captures transactions from notifications people already receive, for any bank, instead of relying on bank-API aggregators.
+- Captured data is useful immediately, and review refines it. Review is fast (under 5 seconds).
 - Raw messages aren't kept. The user controls exactly what's read and whether AI is involved.
 - Budgets can overlap, nest and be set as percentages.
 - Household sharing works through account roles.
