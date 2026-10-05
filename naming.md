@@ -10,6 +10,7 @@ Cloudflare or Spaceship; .app is about $14.20; .uk is about $5.50).
 
 | Name | Notes |
 |---|---|
+| **Where Did I Tap (WDIT)** | Top candidate. wherediditap available on Cloudflare (user checked, Oct 2026). No product with that name; "WDIT" is only used by small IT firms. Write it as WhereDidITap in branding, because in lowercase "wherediditap" can be misread as "where did it ap". |
 | **HowSwipe** | howswipe.com available (user checked, Oct 2026), about $10.50/yr. No product with the exact name; "Swipe Budget" (iOS budgeting app) and several other Swipe apps exist. Grammar reads oddly and "swipe" implies cards (or dating apps). |
 | **Where Does It Go** | Current favourite, on wheredoesitgo.app (about $14.20/yr). No money app uses it; city recycling tools (Seattle, Arlington, Toronto's wheredoesitgo.ca) share the phrase. Short display name: "Where'd It Go" or "WDIG". Also grab wheredoesitgo.com if it's free. Domain availability not yet confirmed. |
 | Pennyfold | Liked the most so far. Close to "Penfold" (a UK pensions app). Domain not checked. |
