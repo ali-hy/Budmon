@@ -13,32 +13,7 @@ The project is being renamed from **Budmon** to **Where Did I Tap**.
   Solutions in Saskatoon, Wdit Inc, wdit.com.cn), so it's safe for code and a
   compact logo.
 
-### Branding rules
-
-- Always write it as **WhereDidITap** (each word capitalised) in the logo,
-  shared links, social handles and the App Store. In lowercase,
-  "wherediditap" can be misread as "where did it ap". Domains ignore case, so
-  `WhereDidITap.com` still works as a link.
-- In prose, "Where Did I Tap" is fine.
-- WDIT is the compact form for the icon, small spaces and code.
-
-### Rename plan (not done yet)
-
-| Where | From | To |
-|---|---|---|
-| `server/package.json` `name` | `budmon` | `wdit` |
-| `compose.yaml` `POSTGRES_DB` | `budmon` | `wdit` |
-| `code-bites.md` docker command | `budmon-postgres`, `POSTGRES_DB=budmon` | `wdit-postgres`, `POSTGRES_DB=wdit` |
-| `server/src/errors/index.ts`, `server/src/auth/authErrors.ts` | `BudmonError` | `WditError` |
-| `README.md` | — | Use "WhereDidITap" as the project name |
-
-Leave the GitHub repo name (`ali-hy/Budmon`) alone for now; the owner can
-rename it in GitHub settings, and GitHub redirects the old URL.
-
-Note: the server connects using `DATABASE_URL` in `server/.env`. After the
-rename, change the database name at the end of that URL from `budmon` to
-`wdit` and recreate the Postgres container. Otherwise, keep pointing it at
-the old `budmon` database until you're ready.
+Branding rules and the pending code rename are in `CLAUDE.md`.
 
 ## Background
 
