@@ -36,4 +36,4 @@ Templates are in [`_templates/`](./_templates) and [`../product/_templates/`](..
 
 | Module | HLD | LLD |
 | ------ | --- | --- |
-| `platform` | [hld.md](./platform/hld.md) (draft, v0.4) | Not started |
+| `platform` | [hld.md](./platform/hld.md) (in-review, v0.5) | Not started |
