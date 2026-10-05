@@ -4,6 +4,6 @@ services:
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: anypasswordhere
-      POSTGRES_DB: budmon
+      POSTGRES_DB: wdit
     ports:
       - "9001:5432"

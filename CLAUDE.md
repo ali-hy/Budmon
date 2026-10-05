@@ -3,8 +3,7 @@
 ## Project name
 
 This budgeting app is **Where Did I Tap** (short form **WDIT**). It was
-previously called **Budmon**, and the code still uses that name until the
-rename below is done.
+previously called **Budmon**; the code was renamed to WDIT in Oct 2026.
 
 - Domain: **wherediditap**, bought on Cloudflare in Oct 2026 (assumed .com).
 - In branding (logo, links, social handles, App Store), always write
@@ -15,21 +14,13 @@ rename below is done.
 - Don't suggest new names. The domain is bought. Past candidates and why they
   were rejected are in `naming.md`.
 
-## Pending rename: Budmon → WDIT
+## Code naming
 
-Not done yet. When asked to do it:
-
-| Where | From | To |
-|---|---|---|
-| `server/package.json` `name` | `budmon` | `wdit` |
-| `compose.yaml` `POSTGRES_DB` | `budmon` | `wdit` |
-| `code-bites.md` docker command | `budmon-postgres`, `POSTGRES_DB=budmon` | `wdit-postgres`, `POSTGRES_DB=wdit` |
-| `server/src/errors/index.ts`, `server/src/auth/authErrors.ts` | `BudmonError` | `WditError` |
-| `README.md` | — | Use "WhereDidITap" as the project name |
-
-- The GitHub repo is already renamed to `ali-hy/WhereDidITap` (old
-  `ali-hy/Budmon` URLs redirect). Local clones can update their remote with
+- Package, Docker container and database: `wdit` (`wdit-postgres`,
+  `POSTGRES_DB: wdit`).
+- Base error class: `WditError` in `server/src/errors/index.ts`.
+- The GitHub repo is `ali-hy/WhereDidITap` (old `ali-hy/Budmon` URLs redirect).
+  Local clones can update their remote with
   `git remote set-url origin https://github.com/ali-hy/WhereDidITap`.
-- The server connects using `DATABASE_URL` in `server/.env`. After the rename,
-  tell the user to change the database name in that URL to `wdit` and recreate
-  the Postgres container.
+- The server connects using `DATABASE_URL` in `server/.env`; its database name
+  should be `wdit` to match `compose.yaml`.

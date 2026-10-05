@@ -1,6 +1,6 @@
 import express from "express";
 
-export class BudmonError<
+export class WditError<
   T extends Record<string, any> = Record<string, string>,
 > extends Error {
   key: string;
@@ -26,7 +26,7 @@ export class BudmonError<
   }
 }
 
-export class ValidationError extends BudmonError {}
+export class ValidationError extends WditError {}
 
 export const errorHandler: express.ErrorRequestHandler = (
   err,
@@ -40,7 +40,7 @@ export const errorHandler: express.ErrorRequestHandler = (
   }
 
   // Unrecognized error then 500
-  if (!(err instanceof BudmonError)) {
+  if (!(err instanceof WditError)) {
     res.status(500);
 
     if (typeof err === "string") res.send(err);
@@ -51,6 +51,6 @@ export const errorHandler: express.ErrorRequestHandler = (
     return;
   }
 
-  // Recognized BudmonError then
+  // Recognized WditError then
   res.status(err.status).json(err.toSerializable());
 };
