@@ -3,13 +3,14 @@
 "Budmon" is being replaced: budmon.com is taken, and the name collides with a
 Digimon and an existing iOS uptime-monitoring app (budwk/budmon).
 
-Budget: domain renewal of about $10/year or less (.com is about $10.20–10.50
-at Cloudflare or Spaceship; .uk is about $5.50).
+Budget: domain renewal of $15/year or less (.com is about $10.20–10.50 at
+Cloudflare or Spaceship; .app is about $14.20; .uk is about $5.50).
 
 ## Possible names (not loved yet)
 
 | Name | Notes |
 |---|---|
+| **Where Does It Go** | Current favourite, on wheredoesitgo.app (about $14.20/yr). No money app uses it; city recycling tools (Seattle, Arlington, Toronto's wheredoesitgo.ca) share the phrase. Short display name: "Where'd It Go" or "WDIG". Also grab wheredoesitgo.com if it's free. Domain availability not yet confirmed. |
 | Pennyfold | Liked the most so far. Close to "Penfold" (a UK pensions app). Domain not checked. |
 | Budinator | No product found; budinator.com seemed unused. "Bud" reads as cannabis. Not liked. |
 
