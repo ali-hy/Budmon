@@ -1,8 +1,8 @@
 ---
 module: platform
 doc: hld
-status: in-review # draft | in-review | approved
-version: 0.3
+status: draft # draft | in-review | approved
+version: 0.4
 author: planner
 approved_by:
 approved_on:
@@ -21,6 +21,7 @@ Sources: [spec summary](../../product/spec-summary.md) v0.10 §4.14 (`PLT`), §3
 | 0.1     | 2026-10-05 | Initial draft |
 | 0.2     | 2026-10-05 | Plan review round 1. **P-1:** D-14 now states the exact money wire mechanism (a shared codec: `z.number().int()` bounded to ±(2^53 − 1) with a JSON-schema override to `integer`/`int64`, explicit number↔bigint conversion in server routers and web data hooks, no `.transform()` in the contract); added to the first contract spike (§9). **P-2:** D-24 gains a "sensitive-data boundaries" list: sanitised job errors (pg-boss output) with a canary on `pgboss.job.output`; messages of non-`BudmonError` errors dropped on server and both clients; oRPC validation `cause` stripped; Postgres `log_error_verbosity = terse` and `log_min_error_statement = panic`; no sensitive values in paths or query strings (sensitive filters in POST bodies, encrypted cursors, D-32); outbound client spans without query strings and allowlisted third-party error fields; Fastify request logging disabled with a custom serialiser; an infrastructure logging checklist and a staging canary gate. **P-3:** D-19 decides where the OAuth code exchange happens (worker-capture, from a sealed authorization code; F-3 redrawn), rewords memory handling, places re-wrap jobs, adds confused-deputy egress rules and the residual trust boundary with IAM restrictions. **P-4:** D-15 defines FX date semantics (the rate of UTC day D, fetched after it closes), immutable stored days, provisional conversions, an `fx.rates-added` notification for recomputation, and per-item rounding; §3.3 contradiction removed. **P-5:** D-13 replaces client-supplied entity IDs with per-user idempotency keys and an `idempotency_records` table; replays are answered from the record. **P-6:** D-21 adds `data.outcome` (`not_applied` / `unknown`) to `INTERNAL`; J-1 and §4.9 wording depend on it; every create takes an idempotency key on web too. **P-7:** D-9/D-12/§7.1 give pg-boss its own role owning the `pgboss` schema (runtime DDL confined there, a documented exception to PLT-BR-5); queues created in the migrate step; one retention for finished jobs plus dead-letter queues; F-4 uses the `stately` policy. **P-8:** new D-35 object storage for exports and the erasure log (private buckets, signed URLs, lifecycle deletion, erasure coverage). **P-9:** D-25 treats token expiry as connection state and alerts on a bounded `capture_connections_stale` gauge. User questions Q-11 (Gmail publishing status) and Q-12 (production pooler) added; Q-4 costs re-estimated with levers. Suggestions applied: S-1 to S-10, S-12, S-13, S-14; S-11 resolved by using 400 instead of 426 (see D-33). **User requirement (migrations only between deployments):** D-12 redesigned: development and test databases are built directly from the Drizzle schema (guarded `db:reset`/`db:sync`, no migration files); one migration per release, generated on a `release/<version>` pull request by the software-engineer, hand-edited for data-preserving changes listed in each LLD's release migration notes, reviewed and gated by release-only CI checks (migrations reproduce the schema, upgrade test, destructive-statement check); staging and production apply only committed migrations; pg-boss schema, roles, reference data and queues handled by an environment-independent schema step. PLT-BR-5 restated (US-7, D-12); D-5, D-9, D-26, D-27, D-28, D-29, D-34, §3, §7.1, §9 and Q-9 updated; Q-13 added. |
 | 0.3     | 2026-10-05 | Plan review round 2. **B-1 (a):** release pull requests target main, must be up to date with main, and the pipeline tags the merge commit only after re-running check (i) on it; deploys use that commit (D-12, D-27, D-29). **B-1 (b):** `hotfix/<version>` path from the last release tag, with its own migration, the release checks, and a merge-back exempt from the no-migrations rule; linear journal rule; marked pending Q-14. **B-1 (c):** prompts never answered interactively: development and feature-branch test databases are only built by pushing onto empty databases (`db:sync` removed), and `generate` runs under a pseudo-terminal driver answering "create" and listing ambiguities, with `generate --custom` as fallback (D-12, D-26, §9). **B-1 (d):** the test-architect owns the upgrade test and its raw-SQL fixtures written against the previous release's schema; the planner keeps each LLD's Release migration notes current through amendments. **B-1 (e):** pg-boss upgrades ship alone, with workers scaled to zero and the API in maintenance during the schema step. **B-2:** creates return a fixed `{ id, createdAt }`; the idempotency record stores only that and the status; replays go through output validation; Android resends the stored request bytes (D-13, §3, F-1). **B-3:** successful sync defined per source kind; Gmail safety-net sync at least every 6 hours counts; SMS staleness on the dashboard only (D-25, J-8, Q-3). Suggestions S-1 to S-8 applied: spec v0.10 references and FK wording; OIDC trust scoped to release/hotfix tags in a protected environment; dead-letter lifetime and discarded return values; wider risky-statement check and the no-`CONCURRENTLY` note; staging keeps separate worker identities (costs updated); OAuth state bound to a server-side row (F-3); request bytes resent from the outbox; `db:reset`-only rule in the proposed CLAUDE.md conventions. Q-14 (hotfixes) added. |
+| 0.4     | 2026-10-05 | User answers to v0.3's questions ([platform decisions](../../product/notes/2026-10-05-platform-decisions.md)) and plan review round 3 suggestions. **Web (D-7):** SolidJS 1.9 SPA instead of React (vanilla TypeScript rejected with reasons); every web dependency re-chosen for Solid (TanStack Router/Query/Table/Virtual/Form for Solid, oRPC's TanStack Query integration, Kobalte with Ark UI as alternative, `@formatjs/intl`, `@sentry/solid`); large tables made an explicit requirement with targets and a Playwright performance test (§1.1, D-7, D-26); Android lists use Paging 3 (D-8). **Hosting (D-29) redesigned for the invite-only stage on Hetzner:** one CX33 production VM and one CX23 staging VM running Docker Compose (Caddy, api, two workers, Postgres with pgBackRest, Grafana Alloy); forced-command SSH deploys of GHCR images from protected GitHub environments; maintenance switch in Caddy without a code deploy and defined `/health/ready` behaviour (round 3 S-4); staging rebuild rule for hotfixes while staging is ahead (S-2); OpenTofu kept small with encrypted state; cost re-estimated at about €18 to €40 a month. **Dependent decisions:** D-18 no pooler at launch, pools sized against `max_connections`, PgBouncer removed from production and local compose (CI pooler suite kept); D-19 rebuilt without per-process cloud identities: Google Cloud KMS asymmetric key (API seals with the public key, only worker-capture can unwrap), local key for `api-secrets`, residual risk of a root compromise stated (Q-15); D-20 SOPS/age per-service secret files replace Secret Manager; D-24 Caddy/Postgres/Docker logging checklist, Alloy as the allowlisting collector, canary gate searches Grafana and Sentry; D-25 host, backup and certificate alerts added; D-30 pgBackRest with client-side encryption to Backblaze B2 (off-provider), 14-day time-based retention, quarterly restore drills on a temporary VM; D-35 S3-compatible buckets with scoped keys and presigned URLs; §5.1, §5.4, F-3, §7.5, §7.6 (scaling path) updated. **New D-36:** same-origin API under `/api/v1` (no CORS), minor version in `openapi.json` and a header rather than the path (differs from the user's `/api/v<x>_<y>/`, Q-16). **FX (D-15):** provider research table; Open Exchange Rates primary, `fawazahmed0/exchange-api` fallback (Q-18). **Accepted answers recorded:** backups, capture-key scope, alerts, Gmail "In production" with spike, no pooler, release step (command deferred), hotfixes from the last release; Q-8 and Q-10 become assumptions A-12 and A-13. **Round 3 suggestions:** S-1 merge-back check redefined (D-12); S-2, S-3, S-4 (D-29); S-5 list invalidation after creates (§4.5); S-6 staging deploys from release and hotfix tags (D-27, D-29). Open questions renumbered Q-15 to Q-20; P8 for the app UI kept as Q-17. |
 
 ## 1. Context and requirements
 
@@ -37,6 +38,7 @@ Stories PLT-US-1 to PLT-US-15 and business rules PLT-BR-1 to PLT-BR-8 (spec §4.
 | XC-19 to XC-22 | A monorepo with backend, web app and native Android app; idempotent creates so Android's offline queue (XC-22, TXN-US-10) can retry safely. |
 | XC-25 to XC-28 | Scheduled and queued work in workers (reminders, push and email delivery are `notifications`' and `identity`'s). |
 | XC-29 to XC-31 | Gmail push ingestion path; best-effort availability (P9) with alerting. |
+| User requirement (2026-10-05, D-7) | The web app shows big tables with performance as a priority: virtualised rendering, server-side keyset pagination, stated targets. |
 | IDN-BR-3, §6 (Gmail testing mode) | Nothing that hard-wires invite-only: the platform is designed for public scale (PD "Scale target") but deploys small. |
 
 ### 1.2 Goals
@@ -55,7 +57,7 @@ Stories PLT-US-1 to PLT-US-15 and business rules PLT-BR-1 to PLT-BR-8 (spec §4.
 - Postgres row-level security in the MVP (D-23).
 - Exporting client-side (browser or Android) traces to Grafana in the MVP (D-24).
 - A persisted offline read cache on Android (only new-entry offline support is in the MVP, XC-22).
-- Multi-region deployment, high availability beyond the hosting provider's defaults, and an SLA (P9: best effort).
+- The public-scale deployment (§7.6 describes the path only), multi-region deployment, high availability, and an SLA (P9: best effort). Hosting, environments and costs are designed for the invite-only stage (user decision).
 - An operations UI inside Budmon. The product owner's error and health views are Sentry and Grafana (spec P22: an in-app view comes later).
 - A feature-flag service. Per-user feature switches are `admin`'s (ADM-US-7).
 
@@ -99,8 +101,9 @@ The platform owns little data: currency reference data and market rates (D-15), 
 | `rate_limit_counters` | New (`UNLOGGED`) | Shared fixed-window counters for sensitive endpoints, so limits hold across stateless API instances (D-22). | (`bucket_key`, `window_start`) primary key; `hits`; `expires_at`. `bucket_key` is the limiter name plus an **HMAC** of the subject (IP or email), never the raw value. | None. |
 | `pgboss` schema | New | pg-boss's tables. | Owned by the `budmon_queue` role; installed and upgraded by the platform's queue schema step for the pinned pg-boss version, in every environment (D-12); pg-boss's own maintenance may create and drop objects inside this schema only (D-12). | Job payloads reference other tables' IDs only, never by foreign key. |
 | `drizzle.__drizzle_migrations` | New | The applied-migrations journal. | Managed by Drizzle's migrator; exists in staging, production and release-path test databases (development databases are pushed, D-12). | None. |
-| Bucket `exports` | New (object storage) | Generated data exports (XC-17). | Objects under `users/<userId>/exports/<exportId>.<ext>`; private; deleted after 7 days. | Metadata rows are `identity`'s. |
-| Bucket `erasure-log` | New (object storage) | Append-only erasure records (internal user ID + time) to replay after a backup restore (D-30). | One object per erasure; retention lock 30 days, then lifecycle deletion. | None. |
+| Bucket `exports` | New (S3-compatible object storage, D-35) | Generated data exports (XC-17). | Objects under `users/<userId>/exports/<exportId>.<ext>`; private; deleted after 7 days by a purge job. | Metadata rows are `identity`'s. |
+| Bucket `erasure-log` | New (S3-compatible object storage, D-35) | Append-only erasure records (internal user ID + time) to replay after a backup restore (D-30). | One object per erasure; written with a key that can't delete; Object Lock 30 days where available, then lifecycle deletion. | None. |
+| Bucket `backups` | New (S3-compatible object storage, D-30) | pgBackRest repository (production only). | Client-side encrypted backups and WAL; 14-day time-based retention. | None. |
 | `users`, `accounts`, `accountOwners`, `refreshTokens` | **Removed** | Replaced by `identity` and `accounts` designs (spec §7). | | |
 
 Conventions every module's tables follow (detailed in the LLD):
@@ -156,17 +159,17 @@ erDiagram
 - **`idempotency_records`:** deleted 90 days after creation by a platform maintenance job, and with the user on erasure.
 - **`rate_limit_counters`:** `UNLOGGED` (a database crash only resets limits); expired rows deleted every 10 minutes.
 - **Jobs:** every finished job (completed or failed) is deleted 7 days after it finishes (pg-boss keeps one retention for finished jobs). A job that exhausts its retries is also copied to its role's **dead-letter queue**, which no worker consumes, so its jobs stay queued until the dead-letter queue's own retention (30 days) expires them: that's where failed jobs are inspected (PLT-US-4). Payloads hold IDs only and failure output is sanitised (D-10, D-24), so retention isn't a privacy concern.
-- **Exports bucket:** objects deleted by lifecycle rule 7 days after creation, and immediately on user erasure (prefix `users/<userId>/`).
+- **Exports bucket:** objects deleted by the platform purge job 7 days after creation (lifecycle rule as backstop), and immediately on user erasure (prefix `users/<userId>/`).
 - **Erasure-log bucket:** each record is kept 30 days (longer than backup retention, D-30), then deleted.
 - **Deletion convention for all modules (D-17):** hard delete is the default; lifecycle states are explicit status columns; soft delete only where a story requires restoring (for example REV-US-4), always with a purge job.
-- **Backups (D-30):** daily, 14-day retention, plus 7 days of point-in-time recovery (proposed; Q-1). Erasures are replayed after any restore.
+- **Backups (D-30):** daily, 14-day retention, point-in-time recovery across the whole 14 days (the user accepted daily, 14 days, 7-day PITR). Erasures are replayed after any restore.
 - **Telemetry retention** (D-24): logs, traces and error reports keep internal IDs (never names, emails or financial data) for at most 30 days.
 
 ## 4. User experience
 
 The platform has almost no screens of its own. What applies is: how unexpected errors, rate limits, offline state and app updates look to the end user, which every module's screens reuse; and how the product owner sees errors and health, which is in external tools (Sentry, Grafana), not in Budmon.
 
-Budmon has no design language yet: `docs/design/ux-guidelines.md` doesn't exist and XC-24 (proposal P8: English first, WCAG 2.2 AA, Android accessibility guidelines, a calm and plain tone) is still open. The conventions below follow P8 provisionally (Q-7).
+Budmon has no design language yet: `docs/design/ux-guidelines.md` doesn't exist and XC-24 (proposal P8: English first, WCAG 2.2 AA, Android accessibility guidelines, a calm and plain tone) is still open. The conventions below follow P8 provisionally; P8 for the app's UI is still open (Q-17).
 
 ### 4.1 User journeys
 
@@ -189,13 +192,13 @@ Budmon has no design language yet: `docs/design/ux-guidelines.md` doesn't exist 
 - (Whether offline entries count in on-device balances is P6, owned by `transactions`.)
 
 **J-5 App update (Android, D-33).** When a newer build is available, a dismissible card on the home screen says "A new version of Budmon is available." with **Update** and **Later** ("Later" hides it for 3 days). When the installed build is below the minimum the API supports, the API answers every request with `CLIENT_UPDATE_REQUIRED`, offline sync pauses, and the app shows **Update required** (S-1): "Entries you saved offline are kept and will sync after you update." Recording new offline entries stays possible from that screen.
-- *Goes wrong:* the download link fails: "Couldn't open the download. Ask the person who invited you for the latest version." (distribution, Q-8).
+- *Goes wrong:* the download link fails: "Couldn't open the download. Ask the person who invited you for the latest version." (distribution, A-12).
 
 **J-6 Web app update.** After a new web release, the open web app notices (it checks the deployed version on window focus and every 30 minutes) and shows a non-blocking toast: "Budmon has been updated. Reload to get the latest version." with **Reload**. It never reloads by itself, so unsaved input isn't lost. If the API reports `CLIENT_UPDATE_REQUIRED` to the web app, the toast becomes a persistent banner with the same button.
 
-**J-7 Budmon is down or in maintenance.** The API is unreachable or answers 503: "Budmon is temporarily unavailable. Try again in a few minutes." Android keeps recording offline entries. No status page in the MVP.
+**J-7 Budmon is down or in maintenance.** The API is unreachable, or the maintenance switch is on (D-29: used for queue-upgrade releases and host work), and requests get 503 `SERVICE_UNAVAILABLE`: "Budmon is temporarily unavailable. Try again in a few minutes." Android keeps recording offline entries. No status page in the MVP.
 
-**J-8 The product owner is alerted (US-10, US-11).** Something breaks (the API stops answering, a worker stops, Gmail notifications back up, a connected Gmail inbox hasn't synced for a day, jobs fail unexpectedly). The owner gets an email from Grafana Cloud within about 5 to 15 minutes: subject "[Budmon] Capture worker down", with what's wrong, since when, and links to the dashboard and Sentry. The dashboard shows request rate, errors, latency, queue depth, dead-lettered jobs, Gmail push activity and capture connections by status (counts only). None of these show amounts, payees, message content, tokens, names or emails. When the problem clears, a "Resolved" email follows. First-time experience: right after the first deploy, panels show "No data" until traffic arrives; the synthetic health check produces data within 5 minutes, which proves the pipeline works.
+**J-8 The product owner is alerted (US-10, US-11).** Something breaks (the API stops answering, a worker stops, Gmail notifications back up, a connected Gmail inbox hasn't synced for a day, jobs fail unexpectedly, the VM's disk fills, a backup is overdue). The owner gets an email from Grafana Cloud within about 5 to 15 minutes: subject "[Budmon] Capture worker down", with what's wrong, since when, and links to the dashboard and Sentry. The dashboard shows request rate, errors, latency, queue depth, dead-lettered jobs, Gmail push activity and capture connections by status (counts only). None of these show amounts, payees, message content, tokens, names or emails. When the problem clears, a "Resolved" email follows. First-time experience: right after the first deploy, panels show "No data" until traffic arrives; the synthetic health check produces data within 5 minutes, which proves the pipeline works.
 - *Goes wrong:* the monitoring itself fails (Grafana Cloud down, free-tier limit hit): alerts can't fire. Mitigation: a monthly glance at usage against free-tier limits; a second independent uptime check is deferred (D-25).
 
 ### 4.2 Screens
@@ -299,7 +302,7 @@ flowchart LR
 
 - **Error mapping** is by stable error key, never by parsing messages (D-21). Each client has one table mapping keys to wording; unknown keys fall back to the generic message.
 - **Validation errors** are shown inline on submit, and as the user leaves a field when the client already knows the rule from the contract's schema. Server-side validation errors map back to fields by path.
-- **Mutations** show progress on the button that triggered them and update the screen after the server confirms. Optimistic updates are a per-module choice; a failure rolls back the change and shows a toast. Offline entries on Android appear immediately with "Not yet synced".
+- **Mutations** show progress on the button that triggered them and update the screen after the server confirms. A create returns only `{ id, createdAt }` (D-13), so clients invalidate and refetch the affected list queries (web: TanStack Query invalidation; Android: the list's paging source refreshes) rather than reading the new entity separately. Optimistic updates are a per-module choice; a failure rolls back the change and shows a toast. Offline entries on Android appear immediately with "Not yet synced".
 - **Retries:** clients automatically retry only reads and idempotency-keyed creates (D-13), with backoff; other mutations are retried only when the user taps **Try again**. Updates set values (so a repeat is harmless) and a repeated delete that returns `NOT_FOUND` is treated as success.
 - **Every response carries `X-Request-Id`**; clients show its first 8 characters as "Reference" on generic errors only.
 - **Confirmation and undo** are per module; the platform adds none.
@@ -355,49 +358,55 @@ Plain, calm, never blaming the user (P8). Key strings (English; clients hold the
 
 ### 5.1 Process and component overview
 
+Invite-only deployment (D-29): one production VM and one staging VM at Hetzner, each running the same Docker Compose project. Diagram shows one environment.
+
 ```mermaid
 flowchart LR
   subgraph Clients
-    Web[Web app<br/>React SPA]
+    Web[Web app<br/>Solid SPA]
     And[Android app<br/>Kotlin + Compose]
   end
-  subgraph Budmon backend
-    API[API process<br/>Fastify + oRPC<br/>stateless, N instances]
-    WG[worker-general<br/>FX, notifications,<br/>deletion, exports, maintenance]
+  subgraph VM[Hetzner VM, one per environment, Docker Compose]
+    Caddy[Caddy<br/>TLS, static SPA, /api reverse proxy,<br/>maintenance switch]
+    API[api<br/>Fastify + oRPC, stateless]
+    WG[worker-general<br/>FX, notifications, deletion,<br/>exports, maintenance, gauges]
     WC[worker-capture<br/>Gmail listener, OAuth exchange,<br/>capture jobs]
-    PGB[(PgBouncer<br/>transaction mode)]
-    PG[(PostgreSQL<br/>data + pgboss schema)]
-    OBJ[(Object storage<br/>exports, erasure log)]
+    PG[(postgres<br/>data + pgboss schema,<br/>pgBackRest WAL archiving)]
+    Alloy[Grafana Alloy<br/>logs, host and Postgres metrics,<br/>OTLP relay with attribute allowlist]
   end
-  Web -- HTTPS JSON /api/v1 --> API
-  And -- HTTPS JSON /api/v1 --> API
-  API --> PGB
-  WG --> PGB
-  WC --> PGB
-  PGB --> PG
-  API -- encrypt only --> KMS[Cloud KMS]
-  WC -- encrypt + decrypt --> KMS
-  API -- signed URLs --> OBJ
-  WG -- write exports --> OBJ
-  Gmail[Gmail API] -- watch notifications --> PS[Cloud Pub/Sub topic]
+  Web -- "HTTPS https://domain/ and /api/v1" --> Caddy
+  And -- "HTTPS /api/v1" --> Caddy
+  Caddy --> API
+  API --> PG
+  WG --> PG
+  WC --> PG
+  API -. "seal with public key (no credentials)" .-> WC
+  WC -- "asymmetricDecrypt (capture service-account key)" --> KMS[Google Cloud KMS]
+  Gmail[Gmail API] -- watch notifications --> PS[Google Cloud Pub/Sub topic]
   WC -- streaming pull --> PS
   WC -- OAuth token exchange, history, messages --> Gmail
+  API -- presigned URLs --> OBJ[(Backblaze B2, EU<br/>exports, erasure log, backups)]
+  WG -- write exports, erasure records --> OBJ
+  PG -- encrypted backups + WAL --> OBJ
   WG --> FX[FX rate provider]
   WG --> FCM[FCM push]
   WG --> Mail[Transactional email]
-  API & WG & WC -. OTLP .-> Graf[Grafana Cloud]
+  API & WG & WC -- OTLP --> Alloy
+  Alloy --> Graf[Grafana Cloud]
   API & WG & WC & Web & And -. errors .-> Sentry[Sentry]
 ```
 
+The dashed API→worker-capture arrow is logical: the API seals with the `capture-credentials` public key and stores the envelope; it never calls worker-capture.
+
 ### 5.2 Client ↔ API: one HTTP JSON surface defined by the oRPC contract (D-4, D-6)
 
-- **Transport:** HTTPS, JSON, REST-style paths under `/api/v1`, generated from the oRPC contract by oRPC's OpenAPI handler mounted in Fastify. The **web app** calls it with oRPC's `OpenAPILink` driven by the same contract; the **Android app** calls it through a Kotlin client generated from the committed `openapi.json`. Both clients hit the same routes.
+- **Transport:** HTTPS, JSON, REST-style paths under `https://<domain>/api/v1`, on the same origin as the web app (D-36), generated from the oRPC contract by oRPC's OpenAPI handler mounted in Fastify. The **web app** calls it with oRPC's `OpenAPILink` driven by the same contract; the **Android app** calls it through a Kotlin client generated from the committed `openapi.json`. Both clients hit the same routes.
 - **No sensitive values in URLs (D-24):** paths and query strings may contain only IDs, enum values, dates, limits and encrypted cursors. Procedures whose inputs include amounts, payee names, note or message text, emails or tokens are `POST` with a JSON body, even when they only read (for example a transaction search with a payee or amount filter). A contract test enforces this (D-6).
 - **Idempotency (D-13):** every create-type procedure requires an `Idempotency-Key` header (a UUID generated by the client per user action); both apps send it.
-- **Auth transport** (bearer token vs cookie) is `identity`'s decision. The platform supports both: an auth hook in the oRPC context, `@fastify/cookie`, and CORS that allows credentials for the exact web origin.
+- **Auth transport** (bearer token vs cookie) is `identity`'s decision. The platform supports both: an auth hook in the oRPC context and `@fastify/cookie`; the API is same-origin with the web app, so no CORS is configured (D-36).
 - **Errors:** oRPC's error envelope, with Budmon keys as codes (D-21).
 - **Real-time:** none in the MVP. The web app refetches on focus and after mutations; Android receives push through FCM (`notifications`). No story needs sub-second updates; SSE or WebSockets would add long-lived connections to a stateless API. oRPC supports event streams if a later story needs them.
-- **Non-contract routes:** `GET /health/live` and `GET /health/ready` (database reachable), plain Fastify routes, unauthenticated, excluded from OpenAPI, returning no internals. `GET /api/v1/meta/client-config` (in the contract) returns the minimum supported and latest client versions (D-33). In local development only, a route serves files from the filesystem object store in place of signed URLs (D-35).
+- **Non-contract routes:** `GET /health/live` (process up; reachable only inside the Docker network) and `GET /health/ready` (database reachable and at the expected migration level; exposed through Caddy, which answers it itself during maintenance, D-29), plain Fastify routes, unauthenticated, excluded from OpenAPI, returning no internals. `GET /api/v1/meta/client-config` (in the contract) returns the minimum supported and latest client versions (D-33). In local development only, a route serves files from the filesystem object store in place of presigned URLs (D-35).
 - **Client identification:** both apps send `X-Budmon-Client: android/<versionCode>` or `web/<build id>`; used only for D-33 and as the `client_kind` metric label.
 
 ### 5.3 Jobs and workers (D-9, D-10)
@@ -413,17 +422,17 @@ flowchart LR
 
 | Integration | Used for | Owner | Failure modes and behaviour |
 | ----------- | -------- | ----- | --------------------------- |
-| Google Cloud KMS | Wrapping data keys for sealed secrets (D-19). | platform | **Down or slow:** sealing fails, so the API rejects the action with `SERVICE_UNAVAILABLE` (the user retries); unsealing fails, so capture jobs retry with backoff (about 1 hour) and then dead-letter; nothing is lost because a mailbox's history ID isn't advanced until a sync succeeds. **Key disabled or permission removed:** same, plus an alert. Timeout 5 s per call. KMS decrypt calls are recorded in Cloud Audit Logs (principal and key only). |
-| Google Cloud Pub/Sub (pull subscription) | Gmail `watch` notifications (PD). | platform hosts the listener; `sources`/`capture` own the handling | **Listener down:** notifications accumulate (retained 7 days) and are processed on restart; alert when the oldest unacknowledged message is older than 15 minutes. **Notification lost or watch expired:** a periodic safety-net sync per connection (frequency is `sources`' decision) catches up, and the stale-connection gauge alerts if a connection hasn't synced for 24 hours (D-25). Notifications contain only an email address and a history ID; the address is never logged. |
+| Google Cloud KMS (asymmetric key `capture-credentials`) | Unwrapping data keys of capture secrets in worker-capture (D-19). Sealing needs no KMS call (public key). | platform | **Down or slow:** unsealing fails, so capture jobs retry with backoff (about 1 hour) and then dead-letter; nothing is lost because a mailbox's history ID isn't advanced until a sync succeeds. Sealing in the API is unaffected. **Key version disabled or credentials revoked** (incident response): same, plus an alert. Timeout 5 s per call. Decrypt calls are recorded in Cloud Audit Logs (principal and key only) and a Cloud Monitoring alert fires on an abnormal decrypt rate. |
+| Google Cloud Pub/Sub (pull subscription) | Gmail `watch` notifications (PD). | platform hosts the listener; `sources`/`capture` own the handling | **Listener down:** notifications accumulate (retained 7 days) and are processed on restart; alert when the oldest unacknowledged message is older than 15 minutes. **Notification lost or watch expired:** the safety-net sync (at least every 6 hours) catches up, and the stale-connection gauge alerts after 24 hours (D-25). Notifications contain only an email address and a history ID; the address is never logged. Streaming pull is an outbound gRPC connection, so it works from the Hetzner VM. |
 | Gmail API and Google OAuth token endpoint | Exchanging authorization codes, reading in-scope messages. | `sources`, `capture` | Designed in those modules. Platform constraints: runs only in worker-capture; destinations are fixed Google hosts from configuration (D-19). Expired or revoked tokens are a connection state, not a job failure (D-25). |
-| FX rate provider | Daily market rates (XC-3). | platform (D-15) | **Down:** the daily job retries with backoff for up to 6 hours; conversions keep working provisionally from the latest stored day (D-15); alert if no new day for 36 hours. **Bad data** (unknown currency, zero, negative, unparseable): that currency's row is rejected and counted in a metric; the rest are stored. Provider choice: Q-5. |
-| Object storage (Google Cloud Storage) | Exports and the erasure log (D-35). | platform | **Down:** export jobs retry, then dead-letter; the user sees the export as failed and can request it again (`identity`). Erasure-log write failure stops the erasure before any data is deleted (D-30), and the job retries. |
+| FX rate provider (Open Exchange Rates; fallback `fawazahmed0/exchange-api`) | Daily market rates (XC-3). | platform (D-15) | **Primary down:** the daily job retries with backoff for up to 6 hours, then fetches the day from the fallback and records `provider` accordingly; conversions keep working provisionally from the latest stored day; alert if no new day for 36 hours. **Bad data** (unknown currency, zero, negative, unparseable): that currency's row is rejected and counted in a metric. |
+| S3-compatible object storage (Backblaze B2, EU region) | Exports and the erasure log (D-35); database backups (D-30). | platform | **Down:** export jobs retry, then dead-letter; the user can request the export again (`identity`). Erasure-log write failure stops the erasure before any data is deleted (D-30). pgBackRest queues WAL locally while the repository is unreachable; an alert fires if archiving fails for 15 minutes (local WAL growth would otherwise fill the disk). |
 | Firebase Cloud Messaging | Android push. | `notifications` | Designed there; runs in worker-general. |
 | Transactional email | Invitations, password reset, deletion notices (XC-27). | `identity` / `notifications` | Designed there; runs in worker-general through a provider adapter; Mailpit locally, a fake in tests. |
 | Sentry | Error reports from all three apps (PD). | platform | **Down or quota reached:** reports are dropped after the SDK's buffer; the app is unaffected. Errors are still in logs. |
-| Grafana Cloud (OTLP) | Traces, metrics, logs, alerting, synthetic check (PD). | platform | **Down:** exporters drop data after a bounded in-memory queue, never blocking requests. Logs still go to stdout and the host's log viewer. |
-| Secret store (Google Secret Manager) | Production secrets injected as environment variables (D-20). | platform | Read at start; a missing secret fails startup. |
-| App distribution (Firebase App Distribution, Q-8) | Android builds for the invited group. | platform | Download failure handled in J-5. |
+| Grafana Cloud (via Grafana Alloy on each VM) | Traces, metrics, logs, alerting, synthetic check (PD). | platform | **Down:** Alloy buffers to disk up to a size limit and then drops; apps never block. Logs are also kept locally by Docker's log rotation (3 × 10 MB per container). |
+| GitHub Container Registry | Release images pulled by the deploy script (D-29). | platform | **Down:** the deploy fails before touching the running stack; the previous release keeps running. |
+| App distribution (Firebase App Distribution, A-12) | Android builds for the invited group. | platform | Download failure handled in J-5. |
 
 ## 6. Key flows
 
@@ -437,7 +446,7 @@ sequenceDiagram
   participant S as Module service
   participant R as Repo(s)
   participant Q as JobQueue
-  participant DB as Postgres (via PgBouncer)
+  participant DB as Postgres
   C->>F: POST /api/v1/... (JSON, X-Budmon-Client, Idempotency-Key on creates)
   F->>F: request ID = trace ID, rate limit, body limit (parse errors get a fixed message)
   F->>O: route to procedure
@@ -483,33 +492,34 @@ sequenceDiagram
   end
 ```
 
-**F-3 Connecting Gmail: the API never sees tokens or the client secret (D-19).**
+**F-3 Connecting Gmail: the API never sees tokens or the client secret and can't decrypt anything it sealed (D-19).**
 
 ```mermaid
 sequenceDiagram
   participant U as User's browser/app
-  participant API as API (encrypt-only identity)
+  participant API as API (holds only the capture public key)
   participant DB as Postgres
-  participant KMS as Cloud KMS
-  participant WC as worker-capture (decrypt identity)
+  participant WC as worker-capture (holds capture service-account key)
+  participant KMS as Google Cloud KMS
   participant G as Google OAuth + Gmail
   U->>API: start connection
-  API->>DB: insert pending OAuth row {state, user ID, PKCE verifier (sealed), expires in 10 min}
+  API->>API: generate state + PKCE verifier; seal verifier (random DEK, AES-256-GCM, DEK wrapped with RSA-OAEP public key)
+  API->>DB: insert pending OAuth row {state, user ID, sealed verifier, expires in 10 min}
   Note over API,DB: works for Android (custom tab, bearer auth): the callback carries no session,<br/>so the state row, not a session, identifies the user
   API-->>U: redirect to Google consent (code challenge, state)
   U->>G: consent
-  G-->>U: redirect to API callback with code + state
+  G-->>U: redirect to https://domain/api/v1/... callback with code + state
   U->>API: callback(code, state)
   API->>DB: look up unexpired pending row by state (single use)
-  API->>API: seal {code} with key capture-credentials (the verifier is already sealed)
-  API->>KMS: Encrypt(data key)
-  API->>DB: store sealed pending exchange + enqueue sources.gmail-exchange {pendingId} (one tx)
+  API->>API: seal {code} with the capture public key
+  API->>DB: store sealed code + enqueue sources.gmail-exchange {pendingId} (one tx)
   API-->>U: "Connecting…" (polls status)
   DB-->>WC: job
-  WC->>KMS: Decrypt(data key)
+  WC->>KMS: asymmetricDecrypt(wrapped DEKs)
+  KMS-->>WC: DEKs
   WC->>G: token exchange (code, verifier, client secret held only by worker-capture)
   G-->>WC: refresh + access token
-  WC->>WC: seal refresh token (AAD = table + row + purpose); access token kept in memory only
+  WC->>WC: seal refresh token (AAD = table + row + purpose) with the public key; access token kept in memory only
   WC->>DB: store sealed token, mark connected, delete pending exchange (one tx)
   U->>API: poll status: "Connected"
   Note over WC,G: Code expired or exchange fails: pending exchange deleted, status "Couldn't connect, try again"
@@ -580,7 +590,7 @@ sequenceDiagram
 - **Default deny, tested:** an automated test enumerates every procedure in the contract and calls it without credentials; anything not on the public allowlist must return `UNAUTHENTICATED` (401). This is the structural fix for the unauthenticated `GET /users` (CR X-1).
 - **Not found vs forbidden:** reading another user's resource returns `NOT_FOUND` (404), not `FORBIDDEN`, so IDs can't be probed (XC-15, ACC-BR-4). `FORBIDDEN` (403) is for resources the caller can see but can't change (for example a viewer editing an entry, ACC-BR-2). Idempotency keys are scoped per user, so they can't be used to probe other users' data either (D-13).
 - **Workers** act as the system, with the user or account ID in the job payload; handlers re-read current state (for example that the source is still connected, the account not frozen) instead of trusting the payload.
-- **Database roles (least privilege):**
+- **Database roles (least privilege)** (`budmon_admin` is the owner's interactive role for maintenance, used over SSH only):
   - `budmon_migrator` owns the application schema and is the only role that runs DDL there (the deploy migrate step in staging and production; the push onto empty development and feature-branch test databases).
   - `budmon_queue` owns the `pgboss` schema; pg-boss's internal connections (fetching, maintenance) in the workers use it. Its runtime DDL (pg-boss maintenance creating and dropping objects) is confined to that schema.
   - `budmon_app` (API and workers) gets DML on the application schema, and on `pgboss` tables through default privileges granted by `budmon_queue` (so it can enqueue inside its own transactions).
@@ -618,24 +628,27 @@ sequenceDiagram
 
 ### 7.5 Privacy and security
 
-- **PLT-BR-1 enforcement** (D-24): allowlist-only logging; values that print as `[redacted]`; telemetry configured to capture no bodies, query strings, headers or local variables; messages of unexpected errors dropped everywhere; sanitised job failure output; no sensitive values in URLs; infrastructure logging configured by checklist; a privacy canary test suite in CI and a canary gate on staging before each production release.
-- **PLT-BR-2:** envelope encryption with Cloud KMS; the API can encrypt but never decrypt capture secrets and never sees Gmail tokens or the Google client secret; only worker-capture decrypts (D-19).
-- **Secrets** from the environment (Secret Manager when deployed); `.env` only locally; never committed (D-20).
-- **Transport:** TLS for every external connection and for database connections outside the private network; HSTS on the API and web host.
-- **At rest:** provider disk encryption, plus application-level envelope encryption for credentials; exports in a private bucket reachable only through short-lived signed URLs (D-35).
+- **PLT-BR-1 enforcement** (D-24): allowlist-only logging; values that print as `[redacted]`; telemetry configured to capture no bodies, query strings, headers or local variables; messages of unexpected errors dropped everywhere; sanitised job output; no sensitive values in URLs; infrastructure logging (Caddy, Postgres, Docker, Alloy) configured by checklist; an attribute allowlist in Alloy; a privacy canary suite in CI and a canary gate on staging before each production release.
+- **PLT-BR-2:** envelope encryption; the API seals with a public key and holds no credential that can decrypt; only worker-capture can unwrap through Google Cloud KMS (D-19). Residual risk stated in D-19: root on the production VM defeats process separation.
+- **Secrets:** SOPS-encrypted files in the repository (age), decrypted only on the target VM at deploy into per-service files readable only by that service's container user (D-20); CI and agents never hold decryption keys for staging or production.
+- **Transport:** TLS (Caddy, Let's Encrypt) for all client traffic, HSTS; Postgres isn't exposed outside the Docker network; all outbound integrations over TLS.
+- **Host hardening (D-29):** SSH key-only with a forced-command deploy key; Hetzner Cloud Firewall allowing only 22, 80, 443; unattended security upgrades; containers as non-root users with read-only root filesystems, `no-new-privileges`, all capabilities dropped, memory limits; the Docker socket is mounted into no container.
+- **At rest:** Hetzner doesn't advertise encryption at rest for cloud server disks, so the design doesn't rely on it: credentials are envelope-encrypted (D-19), backups are encrypted client-side by pgBackRest before upload (D-30), exports live in a private bucket reachable only through 15-minute presigned URLs (D-35). Residual risk: other financial data on the VM's disk is unencrypted at the block level; full-disk encryption is revisited before any public launch.
 - **Job payloads** hold IDs only (D-10).
 - **Hashing utilities** for `identity`: Argon2id for low-entropy secrets, HMAC-SHA-256 for high-entropy tokens, constant-time comparison, a random token generator (D-22).
-- **Abuse protection:** rate limits, CORS, headers, body limits, timeouts (D-22).
+- **Abuse protection:** rate limits, same-origin API (no CORS surface), headers, body limits, timeouts (D-22, D-36).
 - **Errors** never leak internals (PLT-BR-8, D-21).
 - **Data minimisation:** date of birth is dropped (spec §7 item 3); rate-limit keys and mailbox lookups use HMACs; telemetry retention capped at 30 days.
 - **Android:** the local database (offline entries) is excluded from Android Auto Backup and device-to-device transfer, and never attached to Sentry reports.
 
 ### 7.6 Scale, performance and observability
 
-- **Expected load (A-4):** invite-only, up to about 100 users, roughly 100 to 300 transactions per user per month; a few requests per second at peak. Public scale means more instances and a bigger database, not a redesign: stateless API (PLT-BR-6), queue behind an interface (PD), pooler (D-18), indexes per query.
+- **Expected load (A-4):** invite-only, up to about 100 users, roughly 100 to 300 transactions per user per month; a few requests per second at peak. One 4 vCPU / 8 GB VM carries this with large headroom.
+- **Large tables (web):** a requirement (D-7): ledgers and reports render with virtualised rows and keyset pagination; targets in D-7.
+- **Path to public scale** (not designed now): stateless API (PLT-BR-6) and the queue behind an interface (PD) mean scaling is a deployment change: move Postgres to a dedicated server or managed service with a replica, put a transaction-mode pooler in front (code is already pooler-safe, D-18), run several API containers or hosts behind a Hetzner Load Balancer, give each worker role its own host, and put a CDN in front of the static SPA (path-based routing keeps `/api` on the origin). KMS, object storage, observability and the contract are unchanged.
 - **Indexes per query:** every module's LLD lists each query with the index that serves it; `pg_stat_statements` is enabled and reviewed after each module ships.
 - **Latency targets:** §4.6; tracked with request-duration histograms per route template.
-- **Observability** (D-24, D-25): OpenTelemetry traces and metrics plus pino logs from API and workers to Grafana Cloud; Sentry for errors from all three apps; W3C trace context from clients so a client error, its request ID, the server trace and the Sentry issue line up; email alerting.
+- **Observability** (D-24, D-25): OpenTelemetry traces and metrics plus pino logs from API and workers through Alloy to Grafana Cloud; host and Postgres metrics from Alloy; Sentry for errors from all three apps; W3C trace context from clients; email alerting.
 
 ## 8. Decisions
 
@@ -668,12 +681,12 @@ Decisions D-1 to D-4, the queue and worker part of D-9, D-11's push, the core of
   | Path | What | Package |
   | ---- | ---- | ------- |
   | `apps/server/` | API and workers (one codebase, several entry points). `src/platform/` holds the foundations (config, db, errors, observability, queue, crypto, http, storage, FX service, idempotency, rate limits); `src/<module>/` per spec module with `<module>Router.ts` (oRPC implementation; converts wire values to domain values), `<module>Service.ts`, `<module>Repo.ts`, `<module>Errors.ts`, `<module>Jobs.ts`, and `<module>Validators.ts` for server-only validation (third-party payloads); `src/db/schema/<table>.ts` (`<name>Table`, registered in `src/db/schema/index.ts`); `src/main/{api,worker,migrate}.ts`; `drizzle/` migrations; `test/` | `@budmon/server` |
-  | `apps/web/` | React SPA (D-7) | `@budmon/web` |
+  | `apps/web/` | SolidJS SPA (D-7) | `@budmon/web` |
   | `apps/android/` | Gradle project (D-8); not a pnpm package | (Gradle) |
   | `packages/contract/` | oRPC contract, zod schemas per module (`src/<module>/`), shared wire schemas (`src/common/`: money codec, dates, IDs, cursors, errors), contract-authoring rules, and the committed `openapi.json` | `@budmon/contract` |
   | `packages/shared/` | Pure helpers for server and web: `Money` and its arithmetic, formatting and wire conversion, time helpers, ID generation; `test-vectors/` (JSON) also read by Android tests | `@budmon/shared` |
   | `packages/config/` | Shared `tsconfig` bases, ESLint flat config, Prettier config | `@budmon/config` |
-  | `infra/` | `compose.yaml` for local dev, Dockerfiles, OpenTofu (D-29) | |
+  | `infra/` | `compose.yaml` for local development; `deploy/` (environment Compose file, Caddyfile, Alloy config, cloud-init, deploy script, `budmonctl`); Dockerfiles; `tofu/` (OpenTofu); `secrets/` (SOPS files) (D-20, D-29) | |
   | `docs/` | As today | |
 
   Root scripts: `pnpm dev`, `pnpm check`, `pnpm check:all`, `pnpm test`, `pnpm db:reset`, `pnpm db:seed` (development), `pnpm db:release-migration` (release and hotfix branches), `pnpm db:migrate` (deploy), `pnpm contract:openapi`. The review's layering (router → service → repo; only repos touch the database) is kept and enforced with an ESLint import-boundary rule.
@@ -691,14 +704,31 @@ Decisions D-1 to D-4, the queue and worker part of D-9, D-11's push, the core of
   - **Evolution policy:** additive only (new procedures, new optional fields, new enum values that clients tolerate as "unknown"). A breaking change is a new procedure plus deprecation of the old one, removed only after the minimum supported Android version no longer uses it.
 - **Rationale:** each piece fails at the earliest stage that can detect it; generating the Kotlin client at build time removes "forgot to regenerate" drift; breaking-change detection matters because Android installs lag behind deploys.
 
-### D-7: Web app: React + Vite single-page app with TanStack Router and Query
-- **Options considered:** (a) React + Vite SPA with TanStack Router and Query; (b) Next.js; (c) SvelteKit; (d) React Router 7 in framework mode.
-- **Decision:** (a), served as static files from a CDN (D-29). UI on **React Aria Components** styled with **Tailwind CSS**; forms with React Hook Form and zod schemas from the contract; messages and formatting through **FormatJS (react-intl)** catalogs from day one; Sentry browser SDK (configured per D-24). Data hooks convert wire values to domain values (money to `Money`, dates to `Temporal`) in one place per procedure, using `@budmon/shared` (D-14). Router search parameters (the URL) hold only URL-safe values (D-24); sensitive filters live in component state.
-- **Rationale:** the web app is entirely behind sign-in, so server rendering and SEO add nothing; Next.js or SvelteKit would add a second server runtime duplicating the API's concerns and blurring PLT-BR-6. A static SPA is cheap to host and is what the planned Electron app wraps. oRPC has first-class TanStack Query support. React Aria gives WCAG-grade keyboard and screen-reader behaviour (P8). Cost: no server-rendered first paint, and security relies on a strict CSP from the static host.
+### D-7: Web app: SolidJS single-page app (user decision for Solid; planner decision for the stack), with virtualised large tables
+- **Options considered:** (a) React + Vite SPA (v0.3); (b) **SolidJS + Vite SPA** (the user's choice: "sometimes the app will show big tables and performance will be crucial"); (c) vanilla TypeScript with no framework (raised by the user, rejected); (d) Svelte; (e) a server-rendered framework (Next.js, SolidStart).
+- **Decision:** (b), a client-only SPA built with Vite and `vite-plugin-solid`, served as static files by Caddy from the same origin as the API (D-29, D-36). Stack (versions pinned in the LLD; the status of each was checked on 2026-10-05 where noted):
+
+  | Concern | Choice | Notes |
+  | ------- | ------ | ----- |
+  | Framework | SolidJS **1.9.x** (stable) | Solid 2.0 reached release candidate in August 2026; migrate once 2.0 is stable **and** the libraries below support it (tracked as a risk, §9). |
+  | Routing | TanStack Router for Solid (`@tanstack/solid-router`, stable v1) | Typed routes; search parameters validated with zod schemas, which is where D-24's "URL-safe values only" rule is enforced. Alternative: `@solidjs/router`. |
+  | Server state | TanStack Query for Solid (`@tanstack/solid-query`) through oRPC's TanStack Query integration (`@orpc/tanstack-query`, which supports Solid; older `@orpc/solid-query` also exists) | `OpenAPILink` client typed from the contract (D-4). |
+  | Tables | TanStack Table (`@tanstack/solid-table`) + TanStack Virtual (`@tanstack/solid-virtual`) | Headless; row virtualisation. |
+  | Accessible primitives | **Kobalte** (`@kobalte/core`, Solid-native, WAI-ARIA patterns; pre-1.0, 0.13.x) | React Aria has no Solid port. Alternative: Ark UI (Zag.js state machines, multi-framework), whose current Solid status I couldn't verify. The LLD picks after a spike on dialog, combobox, date field and menu (§9). |
+  | Styling | Tailwind CSS | Unchanged. |
+  | Forms | TanStack Form for Solid (`@tanstack/solid-form`, stable v1) | Validates with Standard Schema, so the contract's zod 4 schemas plug in directly. Alternative: Modular Forms. |
+  | i18n and formatting | `@formatjs/intl` (the framework-agnostic core of react-intl) behind a small Solid context; numbers and dates through `@budmon/shared` | ICU message syntax (plurals) as in v0.3; no React dependency. |
+  | Error reporting | `@sentry/solid` (official), with its router integration | Configured per D-24 (no Session Replay, no console breadcrumbs, URLs without query strings). |
+  | Tests | Vitest + `@solidjs/testing-library` + MSW; Playwright and axe unchanged | D-26. |
+
+  **Large tables are a requirement.** Every unbounded list (transactions, captures, report drill-downs) is a virtualised table: only visible rows plus an overscan are in the DOM; data arrives through keyset pagination (D-32) as an infinite query that fetches the next page as the user nears the end; at most 5,000 rows (50 pages of 100) are kept in memory, older pages are dropped and refetched when scrolled back to; sorting and filtering of unbounded lists happen on the server; client-side sorting is allowed only for lists bounded at 1,000 rows. Targets, verified by a Playwright performance test on a fixture of 100,000 transactions: first rows visible within 300 ms of the first page's response; scrolling through 5,000 loaded rows without frames longer than 50 ms on the CI runner; DOM row count stays under 200. Virtualised tables keep accessibility: `role="grid"` or `table` semantics with `aria-rowcount` (total if known) and `aria-rowindex` on rendered rows, and keyboard navigation that scrolls the focused row into view.
+
+  Data hooks convert wire values to domain values (money to `Money`, dates to `Temporal`) in one place per procedure (D-14). After a create, hooks invalidate and refetch the affected list queries (D-13 returns only `{ id, createdAt }`). Router search parameters hold only URL-safe values (D-24); sensitive filters live in component state.
+- **Rationale:** Solid's fine-grained reactivity updates only the DOM nodes whose data changed, with no virtual-DOM diff, which suits large, frequently updated tables; its JSX and component model keep the ecosystem benefits the stack needs (router, query, table, forms, Sentry). Vanilla TypeScript was rejected because Budmon would have to hand-build a component model, reactive state, routing, form handling and accessible widgets, which is a framework's worth of code to maintain, and it wouldn't make tables faster: table performance comes from virtualisation and server-side paging, which Solid supports directly. React (a) was the safer ecosystem choice but loses on rendering cost for big tables. A server-rendered framework adds a second server runtime for an app that's entirely behind sign-in. Costs: a smaller ecosystem (Kobalte is pre-1.0; fewer accessible-component options) and an upcoming Solid 2.0 migration.
 
 ### D-8: Android stack: Kotlin, Jetpack Compose, Room, WorkManager, generated Retrofit client
 - **Options considered:** UI: Compose vs XML Views. Storage: Room vs SQLDelight vs DataStore. Networking: generated Retrofit client vs generated Ktor client (Multiplatform-ready) vs hand-written. Architecture: single-activity MVVM vs MVI frameworks.
-- **Decision:** Kotlin, **Jetpack Compose** with Material 3, single activity, MVVM (`ViewModel` + `StateFlow`), **Hilt**, **Room** for the offline-entry outbox (TXN-US-10), **WorkManager** for sync, **OkHttp + Retrofit + kotlinx.serialization** through the generated client (D-6), Sentry Android SDK (D-24), minSdk 26. The Room database is excluded from Auto Backup and device transfer (data extraction rules). OkHttp's logging interceptor exists only in debug builds and never logs bodies. Debug builds point at the local API (`http://10.0.2.2:<port>`); release builds at the deployed API.
+- **Decision:** Kotlin, **Jetpack Compose** with Material 3, single activity, MVVM (`ViewModel` + `StateFlow`), **Hilt**, **Room** for the offline-entry outbox (TXN-US-10), **WorkManager** for sync, **Paging 3** over the cursor API for long lists (D-32), **OkHttp + Retrofit + kotlinx.serialization** through the generated client (D-6), Sentry Android SDK (D-24), minSdk 26. The Room database is excluded from Auto Backup and device transfer (data extraction rules). OkHttp's logging interceptor exists only in debug builds and never logs bodies. Debug builds point at the local API (`http://10.0.2.2:<port>`); release builds at the deployed API.
 - **Rationale:** Compose, Room and WorkManager are the current Android defaults with the best testing support; WorkManager survives process death and reboots, which offline sync needs; Retrofit is OpenAPI Generator's most mature Kotlin target. Kotlin Multiplatform is deferred until iOS is scheduled (XC-21).
 
 ### D-9: pg-boss with separate worker processes in two roles (user decision for pg-boss and separate workers; planner decision for roles, database role and queue setup)
@@ -726,21 +756,21 @@ Decisions D-1 to D-4, the queue and worker part of D-9, D-11's push, the core of
   - **The rule (PLT-BR-5, spec v0.10):** staging and production schemas change only by applying committed, reviewed release migrations through the deploy pipeline, and every release migration preserves existing data; development and test databases are disposable and built directly from the current schema.
   - **Prompts are never answered interactively.** Development and test databases are only ever built by **pushing onto an empty database** (no existing tables, so no ambiguity and no prompt). Migration generation (`db:release-migration` and the pending-changes report) runs `drizzle-kit generate` under a **pseudo-terminal driver** that answers "create" to every ambiguity and lists each ambiguity it answered; renames are then hand-edited into the migration as the Release migration notes require. If the driver stops working with a `drizzle-kit` upgrade, the fallback is a hand-written migration (`generate --custom`), which release check (i) still verifies.
   - **Development (local, feature and module branches, main between releases):** no migration files. `pnpm db:reset` drops the local database and rebuilds it with the development schema step (push onto the empty database), then seeds it. There is no incremental `db:sync` (it would prompt). `db:reset` refuses to run unless the target is a local or test database (`APP_ENV` is `development` or `test` and the host is local or a test container); deploy images contain no push command; deployed environments' DDL-capable credentials never reach developer tools.
-  - **Release branches.** A release is cut as branch `release/<version>` from main and opened as a pull request **into main**. In it:
+  - **Release step** (accepted by the user; the `/release` command that runs it is drafted when there's something to release). A release is cut as branch `release/<version>` from main and opened as a pull request **into main**. In it:
     1. the **software-engineer** runs `pnpm db:release-migration`, which generates **one** migration, `NNNN_<version>.sql`, with the net schema change since the last released snapshot, and hand-edits it for data-preserving changes a schema diff can't express: renames, backfills, `NOT NULL` on existing columns (add nullable → backfill → set `NOT NULL`), type changes with conversion; destructive "contract" steps (dropping what the previous release's code still uses) are deferred to a later release so the migration is compatible with old code during rollout (expand then contract). What each module needs is listed in its LLD's **Release migration notes**, which the **planner** writes and keeps current, including when an implementation-time amendment changes a table;
     2. the **test-architect** writes the **upgrade test** and its fixtures: fixture data in raw SQL written against the **previous release's** schema (factories follow the current schema, so they can't be used), under `apps/server/test/upgrade/<version>/`, with assertions that the data survived as the Release migration notes specify;
     3. the **code-reviewer** reviews the migration; the **user** merges.
     - Branch protection requires the release pull request to be **up to date with main** before merging, so any schema change merged to main meanwhile forces an update and re-runs the release checks (and the migration must be regenerated if check (i) fails). The pipeline creates the release tag on the merge commit only after **re-running check (i) on that exact commit**; the deploy uses that commit.
     - Before the first release there are no migrations; the first release migration is the baseline.
     - Drizzle's migrator runs all pending migrations in one transaction, so `CREATE INDEX CONCURRENTLY` isn't available; plain index builds are acceptable at this scale, and a release needing a concurrent build would do it in a separate, documented step.
-  - **Hotfix branches (option (a) of Q-14, pending the user's answer).** An urgent fix to a deployed release branches as `hotfix/<version>` from the last release (or hotfix) tag, because main may hold unreleased schema changes. It follows the release rules: it may carry its own migration (generated against the last released snapshot), and it gets the same checks, staging deploy and canary gate. After deploy, the hotfix branch is merged back into main by a pull request that is **exempt from the "no migration files" rule** (it brings the migration, its Drizzle snapshot and the schema change together). The migration journal stays linear because a release can't be cut while a hotfix merge-back is pending, and the next release migration is generated against the hotfix's snapshot.
+  - **Hotfix branches (user decision: built from the last release).** An urgent fix to a deployed release branches as `hotfix/<version>` from the last release (or hotfix) tag, because main may hold unreleased schema changes. It follows the release rules: it may carry its own migration (generated against the last released snapshot), and it gets the same checks, staging deploy and canary gate. After deploy, the hotfix branch is merged back into main by a pull request that is **exempt from the "no migration files" rule** (it brings the migration, its Drizzle snapshot and the schema change together). The migration journal stays linear because a release can't be cut while a hotfix merge-back is pending, and the next release migration is generated against the hotfix's snapshot. If staging holds an unpromoted release candidate when a hotfix is needed, D-29's staging rebuild rule applies.
   - **The schema step**, the same in every environment, run by `pnpm db:migrate` (deploy, a one-off job before rollout, never on start-up) and by `db:reset` and test setup (development and CI): (1) idempotent roles and grants; (2) **deployed and release-path test databases:** Drizzle's migrator applying committed migrations as `budmon_migrator`; **development and feature-branch test databases:** push of the current schema onto the empty database; (3) the queue schema: pg-boss's own install or upgrade SQL for the pinned pg-boss version, applied as `budmon_queue` (pg-boss starts with automatic migration off); (4) idempotent reference data (the `currencies` list from a committed data file); (5) the queue sync (D-9). pg-boss's schema is never part of Drizzle's migrations; it's versioned by the pinned pg-boss version.
-  - **pg-boss upgrades** ship in a release that changes nothing else (a "queue upgrade release"). During its deploy, the pipeline scales both worker roles to zero and puts the API into maintenance mode (`503 SERVICE_UNAVAILABLE`, J-7; Android keeps recording offline) before the schema step, then rolls out the new API and workers and lifts maintenance. This takes minutes and means no process on the old pg-boss version ever touches the upgraded schema, without depending on pg-boss's cross-version compatibility.
+  - **pg-boss upgrades** ship in a release that changes nothing else (a "queue upgrade release"). During its deploy, the deploy script turns the maintenance switch on (D-29: Caddy answers `/api/*` with `503 SERVICE_UNAVAILABLE`, J-7; Android keeps recording offline) and stops both worker roles before the schema step, then rolls out the new API and workers and lifts maintenance. This takes minutes and means no process on the old pg-boss version ever touches the upgraded schema, without depending on pg-boss's cross-version compatibility.
   - **CI enforcement** (D-27):
     - *Feature and module pull requests:* any change under `apps/server/drizzle/` fails the build. Test databases are built by pushing the current schema onto an empty database (D-26). A non-blocking "pending schema changes" report (what the generator, through the driver, would produce now, with its list of ambiguities) is attached to the pull request so the coming release's data-preserving work is visible early.
     - *Release and hotfix pull requests:* (i) a database built from **committed migrations only** must match the current schema exactly (generating again produces nothing); (ii) the full test suite runs on a template built from migrations only; (iii) the test-architect's upgrade test: build the previous release's database from its migrations, load its raw-SQL fixtures, apply the new migration, assert; (iv) a **risky-statement check** fails on `DROP TABLE`, `DROP COLUMN`, `RENAME`, `ALTER … TYPE`, `SET NOT NULL`, `ADD COLUMN … NOT NULL` without a default, and constraints added without `NOT VALID`, unless the statement carries a `-- reviewed:` comment explaining why it's safe, which the user sees when merging.
-    - *Hotfix merge-back pull requests:* exempt from the "no migration files" rule; check (i) runs on the result.
-    - *Deploy pipeline:* re-runs check (i) on the tagged commit, then runs only `pnpm db:migrate`; it fails if the database records a migration that isn't in the repository.
+    - *Hotfix merge-back pull requests:* exempt from the "no migration files" rule. Main may already hold further unreleased schema changes, so equality with the schema isn't expected; the check is that the committed migrations (now including the hotfix's) apply cleanly to an empty database and that the hotfix's changes no longer appear in the pending-schema-changes diff.
+    - *Deploy:* the pipeline re-runs check (i) on the tagged commit; the deploy script (D-29) runs only `pnpm db:migrate`; it fails if the database records a migration that isn't in the repository.
 - **Rationale:** Drizzle is in use, SQL-shaped, type-safe, and its snapshots make "net change since the last generated migration" what `generate` produces, so one migration per release falls out naturally. Syncing development databases from the schema removes migration churn while modules are built, as the user asked, while staging and production change only through reviewed, committed, tested migrations. Pushing only onto empty databases and driving `generate` mechanically removes every interactive prompt from agent and CI paths. Requiring up-to-date release branches and re-checking the tagged commit closes the gap where a schema change merged during an open release would be deployed without its migration. Isolating pg-boss upgrades trades a few minutes of maintenance for not having to trust cross-version compatibility. Cost: data-preserving work is deferred to release time; the Release migration notes, the pending-changes report, the upgrade test, the risky-statement check and staging are the mitigations (§9).
 
 ### D-13: Server-generated UUIDv7 IDs; per-user idempotency keys for creates, storing only a minimal result
@@ -773,7 +803,17 @@ Decisions D-1 to D-4, the queue and worker part of D-9, D-11's push, the core of
   - **When new days are inserted** (the daily fetch or a backfill), the platform enqueues an `fx.rates-added` job for each module that registered a handler, with the date range whose conversions just changed (`affectedFrom` = the new date, `affectedTo` = the day before the next stored date, or open-ended). Modules that store converted values (`budgets`' incremental progress) recompute exactly that range; modules that convert on read (`reports`) need no handler. Because conversion is deterministic given stored rates, incremental values and reconciliation converge.
   - **Lossless parsing:** provider responses are parsed so rates stay decimal strings (no float step), stored as `numeric(24,12)`; only active ISO codes in `currencies` are stored (no metals, SDR or crypto); zero, negative or unparseable rates are rejected.
   - **Rounding:** per converted item, then summed (§7.2).
-  - Provider: open (Q-5); candidates are Open Exchange Rates and ExchangeRate-API (about 160 to 170 currencies, USD base, historical endpoints whose availability on free tiers must be confirmed); ECB-based free sources don't cover enough currencies (for example EGP).
+  - **Provider** (researched 2026-10-05; terms to be confirmed when signing up, Q-18):
+
+    | Provider | Coverage (EGP?) | Historical daily rates | Price | Notes |
+    | -------- | --------------- | ---------------------- | ----- | ----- |
+    | **Open Exchange Rates** (primary) | About 170 currencies, EGP included | Free plan: daily historical; Developer: back to 1999 | Free: 1,000 requests/month, USD base; Developer $12/month, 10,000 requests | Mature, USD base fits the pivot design (D-15); free-plan licence for this use to confirm. |
+    | **`fawazahmed0/exchange-api`** (fallback) | 200+ codes, EGP included | Any date, served as static files by date | Free, CC0, no key, no rate limit | Community-run, no SLA, aggregated sources; used only when the primary fails. |
+    | ExchangeRate-API | About 160, EGP included | Historical data on paid plans (as remembered; unverified) | Free 1,500 requests/month; paid from about $10/month | Free tier reported as non-commercial. |
+    | Frankfurter / ECB-based | About 30, **no EGP** | Yes | Free | Rejected: coverage. |
+    | currencyapi.com and similar | EGP included | Paid plans | Free tier non-commercial | No advantage over the primary. |
+
+    Daily usage is 1 request per environment, plus backfills: well inside every free quota. The adapter for each provider sits behind the same interface; the fallback is tried only after the primary has failed for 6 hours, and every stored day records its `provider`.
 - **Rationale:** at least four modules need conversion; none should own the others' dependency. Fixing the date semantics and finality makes conversions reproducible, and the explicit "rates added" signal is what keeps incrementally maintained budget progress consistent with reconciliation. Using UTC days for rates is an accepted approximation (a rate is a market's daily figure, not a user's local day).
 
 ### D-16: Time representation and the Temporal API
@@ -786,32 +826,46 @@ Decisions D-1 to D-4, the queue and worker part of D-9, D-11's push, the core of
 - **Decision:** the third option (§3.3). Every foreign key's `onDelete` is chosen and justified in the LLD that creates it.
 - **Rationale:** XC-16 promises erasure; a global soft delete would keep data forever and leak into every query. Status columns express real states that stories need anyway.
 
-### D-18: A transaction-mode pooler in front of Postgres (user decision for a pooler; planner decision for details; production form is Q-12)
-- **Options considered:** each process's own `pg` pool only; PgBouncer (self-run) in transaction mode; a managed pooler (Cloud SQL's managed pooling is only in the pricier Enterprise Plus edition).
-- **Decision:** all code is written for **PgBouncer in transaction mode**: no session-level `SET`, advisory locks only transaction-scoped, no `LISTEN`, no named prepared statements across transactions; small per-process `pg` pools (default 5). Local development and CI run PgBouncer, and a dedicated integration suite runs through it (D-26). The migrate step uses a direct connection. In production, the form is open (Q-12): (a) PgBouncer on its own small VM; (b) no production pooler at launch, with Cloud Run maximum instances × pool size kept below Cloud SQL's connection limit, adding the pooler when scaling; (c) PgBouncer on the same small VM as worker-general. The planner recommends (c).
-- **Rationale:** stateless instances that scale out multiply connections; writing for transaction pooling from the start means the pooler can be introduced or moved without code changes. Running it locally and in CI catches incompatibilities early.
+### D-18: No connection pooler at launch; pooler-safe code and sized pools (user decision: "none at launch")
+- **Options considered:** PgBouncer on its own VM; PgBouncer co-located with a worker; no pooler at launch with pools sized against `max_connections` (the user's choice).
+- **Decision:** no pooler in staging or production at the invite-only stage. Pools are sized so the total stays well under Postgres's `max_connections` (100): API 10, worker-general 5 plus pg-boss 3, worker-capture 5 plus pg-boss 3, migrate step 2, Alloy's Postgres exporter 1, `budmon_admin` sessions 3: 32 in total, leaving room for a second API container and a restore drill. Code stays **pooler-safe** (transaction-mode discipline: no session-level `SET`, advisory locks only transaction-scoped, no `LISTEN`, no named prepared statements across transactions), checked by the CI pooler compatibility suite (D-26), so a transaction-mode PgBouncer can be added when scaling without code changes. Local development connects directly (no PgBouncer in compose).
+- **Rationale:** with one VM and a handful of processes, a pooler adds a component without reducing anything; keeping the discipline and the CI suite costs little and preserves the scaling path (§7.6).
 
-### D-19: Envelope encryption with Google Cloud KMS; the API can't decrypt capture secrets and never sees Gmail tokens (user decision for a managed key and capture-only decryption; planner decision for the mechanism)
+### D-19: Envelope encryption; the API seals with a public key; only worker-capture can unwrap, through Google Cloud KMS (user decisions: managed key, capture-only decryption, Q-2 scope accepted; planner decision for the mechanism on Hetzner)
+- **Context:** on Google Cloud, per-service workload identities enforced the split (v0.3). On a Hetzner VM there are no per-process cloud identities, so the split has to come from what each container can read and from what its key material can do.
 - **Options considered:**
-  - Key service: Google Cloud KMS, AWS KMS, HashiCorp Vault Transit, a static key in an environment variable (not "managed", rejected).
-  - Scheme: direct KMS encryption vs envelope encryption with a per-secret data key.
-  - Where the OAuth code exchange happens: (1) the API exchanges the code and seals the tokens (the API holds the Google client secret and sees plaintext tokens briefly); (2) the API seals the authorization code and PKCE verifier with the capture key and enqueues, and worker-capture exchanges them (the API never sees tokens or the client secret; "connected" appears seconds later); (3) worker-capture hosts the OAuth callback itself (a second public HTTP surface, contradicting PLT-BR-6).
-- **Decision:**
-  - **Google Cloud KMS** (the Google Cloud project already exists for Gmail and Pub/Sub), **envelope encryption:** each secret encrypted with its own random AES-256-GCM data key, with associated data binding it to table, row and purpose; the data key wrapped by a KMS key; the stored envelope is versioned and records the KMS key version.
-  - **Two KMS keys:** `capture-credentials` (Gmail refresh tokens, pending OAuth exchanges, SMS content awaiting processing, and user-provided AI keys later): the API's service identity has **encrypt only**; only worker-capture's identity can decrypt (PLT-BR-2). `api-secrets` (proposed for two-step verification secrets, which `identity` verifies in the API): the API can encrypt and decrypt; this protects against a database leak but not a compromised API, stated plainly (Q-2).
-  - **OAuth exchange: option (2)** (F-3). The Google OAuth client secret is configured only in worker-capture.
-  - **Plaintext handling:** plaintext secrets exist only in local variables for the duration of the operation; they're never logged, persisted unsealed, or put in job payloads. Data keys are held in `Buffer`s that are zero-filled after use. JavaScript strings can't be wiped, so a short in-memory lifetime of plaintext tokens in worker-capture is an accepted residual risk.
-  - **Access tokens** are cached only in worker-capture's memory until they expire; they're never persisted (if a later design needs to persist them, they're sealed like refresh tokens).
-  - **Rotation:** KMS rotates key versions every 90 days; old versions stay enabled for decryption. Re-wrapping envelopes to the newest version needs decrypt, so for `capture-credentials` it's a worker-capture job; for `api-secrets` it's a one-off command run under the API's identity.
-  - **Egress rules (confused deputy):** worker-capture sends tokens and message content only to destinations fixed in configuration (Google's OAuth and Gmail hosts), never to a destination taken from database data. The later user-hosted AI endpoint (XC-12) needs its own design (for example a separate process without decrypt rights receiving only extracted, in-scope text); it's out of scope here and flagged for `capture`.
-  - **Residual trust boundary:** anyone who can deploy worker-capture's code or act as its service account can decrypt. Restrictions, defined in infrastructure code: only the production deploy identity (used by CI through GitHub's OIDC federation, trusted only for release and hotfix tags, and only inside a protected GitHub environment whose deployments require the user's approval) may deploy worker-capture or act as its service account; the only human with that ability is the project owner (the product owner); no service-account keys exist; KMS decrypt calls are audit-logged.
-  - **Local development and tests** use a local key provider behind the same interface; config validation refuses it when `NODE_ENV=production`.
-- **Rationale:** IAM-enforced encrypt/decrypt separation makes PLT-BR-2 something the API physically can't violate; moving the code exchange to worker-capture removes the last place the API would hold plaintext tokens or the client secret. Envelope encryption keeps KMS calls to one per seal or open. Workload identities (D-29) mean no long-lived key file to steal. Cost: connecting Gmail shows "Connecting…" for a few seconds, and Google Cloud dependency (already present).
+  - (A) **Remote Google Cloud KMS with an asymmetric key** (RSA-OAEP 3072, SHA-256): any process seals locally with the public key (no credentials, no network call); only worker-capture holds a service-account key file with `cloudkms.cryptoKeyVersions.useToDecrypt` on that key, mounted only into its container.
+  - (B) **Local asymmetric envelope** (X25519 sealed boxes / HPKE): the API has the public key; the private key is a file mounted only into worker-capture. No external dependency.
+  - (C) Remote symmetric KMS with separate encrypt-only and decrypt credentials (v0.3's IAM split, with key files): the API would hold a credential, which (A) avoids.
+  - (D) A local symmetric key-encryption key only in worker-capture, with the API sending plaintext to worker-capture to seal (rejected: plaintext crosses into a job or a call).
+- **Comparison of (A) and (B):**
 
-### D-20: Configuration and secrets validated at start-up
-- **Options considered:** keep the current warn-and-continue; fail fast with zod; a configuration library.
-- **Decision:** one zod schema per process kind (API, worker-capture, worker-general, migrate) built from shared parts, parsed once at start-up; on failure, the process prints the **names** of missing or invalid variables and the rule each broke (never values) and exits non-zero before opening any port or connection. Secret-typed values print as `[redacted]`. `.env` only in development (`node --env-file`); deployed environments get variables from Secret Manager. `.env.example` lists every variable that's read, with safe development values; a test checks schema and example list the same variables. Process-specific secrets exist only in that process's configuration (for example the Google OAuth client secret only in worker-capture's).
-- **Rationale:** PLT-US-5 and CR X-5; the consistency test prevents a stale `.env.example` from returning.
+  | Threat | (A) remote KMS, asymmetric | (B) local asymmetric |
+  | ------ | -------------------------- | -------------------- |
+  | Database or backup leak | Safe: no key material in the database or backups. | Safe, as long as the private key never enters backups (it doesn't: it's in SOPS and on the VM only). |
+  | API container compromise | Safe: the API has only the public key. | Safe: same. |
+  | worker-capture container compromise | Attacker can decrypt while present and with the stolen key file until it's revoked; every decrypt is audit-logged and rate-alerted; revoking the key file or disabling the key version stops it at once. | Attacker can decrypt every sealed secret offline, including copies in old backups, until all secrets are re-sealed under a new key and tokens are revoked; no record of use. |
+  | Root on the VM | Same as above (root can read any container's files and memory). | Same as above. |
+  | Operational dependency | KMS reachable for every unseal (Google's availability); about €1 to €3 a month (estimate). | None. |
+- **Decision:** **(A)** for `capture-credentials` (Gmail refresh tokens, sealed PKCE verifiers and authorization codes, SMS content awaiting processing, and user-provided AI keys later; scope accepted by the user, Q-2). The service-account key file lives in worker-capture's SOPS file only (D-20) and is mounted as a Compose secret into worker-capture alone; the API and worker-general have only the public key (in plain configuration). The Google Cloud project that Gmail and Pub/Sub need anyway (D-11) hosts the key, one key ring per environment. `api-secrets` (two-step verification secrets, which the API must verify at sign-in): a **local symmetric key** (AES-256-GCM key-encryption key) in the API's secret file only, because a KMS round-trip on every sign-in buys nothing when the API itself must decrypt; it protects against a database or backup leak, not against a compromised API.
+  - **Envelope format** (both keys): per-secret random 256-bit data key, AES-256-GCM, associated data binding table, row and purpose; the wrapped data key, nonce, ciphertext and key version stored as one versioned `bytea` envelope.
+  - **OAuth exchange** in worker-capture (F-3); the Google OAuth client secret is in worker-capture's secret file only.
+  - **Plaintext handling:** plaintext exists only in local variables for the duration of an operation; never logged, persisted unsealed, or put in job payloads. Data keys are `Buffer`s zero-filled after use; JavaScript strings can't be wiped (accepted). worker-capture may cache a decrypted refresh token in memory for up to 1 hour per connection to limit KMS calls; access tokens are memory-only until expiry.
+  - **Rotation:** a new KMS key version; a worker-capture job re-wraps envelopes (decrypt with the old version, wrap with the new public key), then the old version is disabled. `api-secrets` re-wrap is a one-off command run with the API's secret file.
+  - **Egress (confused deputy):** worker-capture sends tokens and message content only to destinations fixed in configuration (Google's OAuth and Gmail hosts), never to a destination taken from database data. User-hosted AI endpoints (XC-12) need their own design (flagged for `capture`).
+  - **Detection and response:** Cloud Audit Logs data-access logging is enabled for the key; a Cloud Monitoring alert emails the owner when decrypt requests exceed a threshold (set in the LLD from observed volume). The incident runbook: disable the key version and the service-account key, rotate the OAuth client secret, re-seal under a new version, and ask users to reconnect.
+  - **Who can decrypt (residual trust boundary):** anything that can read worker-capture's secret file or memory: root on the production VM (the owner, or an attacker who gets root), and the deploy path, which can change what worker-capture runs. Restrictions: SSH key-only access for the owner; CI deploys through a forced-command key that can only run the deploy script with a released tag (D-29) and never receives decryption keys; production deploys need the user's approval in a protected GitHub environment; no other humans have access.
+  - **Stated plainly: a root-level compromise of the production VM defeats the process separation.** The split protects against the likelier failures (a database or backup leak, a compromised API process, a leaked API secret file); (A) adds detection and instant revocation for the worst case. Separating worker-capture onto its own VM would raise the bar (root on the API host would no longer suffice) for about €6 a month; it's listed as a cost lever (Q-15).
+  - **Local development and tests** use a local key provider behind the same interface; configuration refuses it when `APP_ENV` is `staging` or `production`.
+- **Rationale:** (A) keeps the property the user cares about: the API can't decrypt capture secrets even if fully compromised, with no credential in the API at all. Over (B), it adds an audit trail, rate alerting and instant revocation, and keeps the long-term key off the VM, for a few euros a month and a dependency on a Google project that exists anyway.
+
+### D-20: Configuration and secrets: validated at start-up; SOPS-encrypted secret files per service
+- **Options considered (secret storage on Hetzner):** (a) GitHub environment secrets written to the VM by CI at deploy; (b) **SOPS with age**: encrypted files in the repository, decrypted on the VM with a host-held key; (c) files maintained by hand on the VM; (d) a secrets service (Vault, Infisical, a cloud secret manager).
+- **Decision:**
+  - **Validation:** one zod schema per process kind (API, worker-capture, worker-general, migrate) built from shared parts, parsed once at start-up; on failure the process prints the **names** of missing or invalid variables and the rule each broke (never values) and exits non-zero before opening any port or connection. Secret-typed values print as `[redacted]`. Secrets are read from files (`*_FILE` variables pointing at Compose secret mounts); non-secret settings from environment variables. `.env.example` lists every variable that's read, with safe development values; a test checks schema and example list the same variables.
+  - **Storage: (b).** `infra/secrets/<environment>/<service>.sops.yaml`, one file per service, encrypted to two age recipients: that environment's VM key and the owner's personal key (kept with an offline copy). The deploy script decrypts each file on the VM into a tmpfs directory readable only by that service's container user, and Compose mounts it into that container only. CI, agents and developers never hold the staging or production age keys. Development uses `.env` files (`node --env-file`) with throwaway values.
+  - **Process-specific secrets** exist only in that process's file: the capture service-account key and the Google OAuth client secret in worker-capture's; the `api-secrets` key, cursor key and presigning credentials in the API's; the erasure-log and export write keys in worker-general's; the backup repository key and passphrase only in the Postgres container's.
+- **Rationale:** PLT-US-5 and CR X-5. SOPS gives versioned, reviewable secret changes without a secrets service, keeps decryption on the VM, and maps one file to one container, which is what D-19's split needs. Option (a) would put every production secret in CI; (c) isn't reproducible; (d) is more infrastructure than an invite-only deployment needs.
 
 ### D-21: Error model: `BudmonError` keys become oRPC error codes; nothing internal leaks; the outcome is reported
 - **Options considered:** keep `BudmonError` with a custom body; adopt oRPC's error envelope; RFC 9457 problem details.
@@ -822,12 +876,12 @@ Decisions D-1 to D-4, the queue and worker part of D-9, D-11's push, the core of
   - Every response carries `X-Request-Id` (the trace ID). `message` is developer-facing English; clients map keys to wording.
 - **Rationale:** keeps the pattern the review said to keep, fixes X-3 and X-4 structurally (one interceptor), and the `outcome` field stops clients from claiming "nothing was changed" when they can't know.
 
-### D-22: Security baseline: rate limits shared through Postgres, CORS, headers, limits, hashing utilities
+### D-22: Security baseline: rate limits shared through Postgres, same-origin API, headers, limits, hashing utilities
 - **Options considered (rate-limit storage):** per-instance memory only; Redis; Postgres; the cloud's edge rate limiting (paid).
 - **Decision:**
-  - **Rate limits:** a coarse per-instance in-memory limit per IP on all routes, plus **shared limits in Postgres** (`rate_limit_counters`, fixed windows) for sensitive operations, per IP and per target account (email HMAC). Modules declare limits per procedure in their LLDs. Exceeding a limit returns `RATE_LIMITED` with `Retry-After`. The client IP comes from the hosting proxy's header with an exact trusted-hop count.
-  - **CORS:** only the configured web origin(s), credentials allowed for them; no wildcard.
-  - **Headers:** helmet on the API (`Content-Security-Policy: default-src 'none'`, `X-Content-Type-Options`, `Referrer-Policy: no-referrer`, HSTS); the web host serves a strict CSP (no inline script; `connect-src` limited to the API and telemetry endpoints).
+  - **Rate limits:** a coarse per-instance in-memory limit per IP on all routes, plus **shared limits in Postgres** (`rate_limit_counters`, fixed windows) for sensitive operations, per IP and per target account (email HMAC). Modules declare limits per procedure in their LLDs. Exceeding a limit returns `RATE_LIMITED` with `Retry-After`. The client IP comes from Caddy's `X-Forwarded-For`, trusting exactly one hop (the `caddy` container's network address).
+  - **CORS:** none; the web app and API share one origin, and the API answers no preflights (D-36).
+  - **Headers:** helmet on the API (`Content-Security-Policy: default-src 'none'`, `X-Content-Type-Options`, `Referrer-Policy: no-referrer`, HSTS); Caddy serves the SPA with a strict CSP (no inline script; `connect-src 'self'` plus the Sentry endpoint), HSTS and `Referrer-Policy: no-referrer`.
   - **Limits:** JSON body 100 kB by default (per-route override in the LLD), request timeout 30 s, Fastify's default header and URL limits.
   - **Hashing utilities:** Argon2id (`@node-rs/argon2`, OWASP parameters) for passwords and recovery codes; HMAC-SHA-256 for high-entropy tokens; constant-time compare; 256-bit random token generator. `identity` decides where each is used.
 - **Rationale:** stateless instances need shared counters for limits to mean anything (US-13); a Postgres upsert per sensitive request is cheap at this scale, with no new infrastructure. Argon2id is the OWASP recommendation and avoids bcrypt's 72-byte truncation.
@@ -847,25 +901,26 @@ Decisions D-1 to D-4, the queue and worker part of D-9, D-11's push, the core of
     1. *Unexpected errors carry no message.* On the server and in both apps, errors that aren't `BudmonError` (or a client's own typed errors) are reported and logged as type, stack frames and an allowlisted code only (for example Postgres SQLSTATE, Node `errno` code, HTTP status); their `message` is dropped, because messages of runtime errors can contain values (a `RangeError` with an amount, a `SyntaxError` quoting a body, Android's `NumberFormatException` with the input). Database driver errors lose `detail`, `where`, `parameters` and query text. Third-party SDK errors (Google's Gaxios errors carry request config and the bearer token) are serialised through an allowlist: HTTP status, provider reason code, retryable flag.
     2. *Job failures are sanitised* by the handler wrapper before pg-boss stores them (D-10); pg-boss's `error` event is logged through the same serialiser.
     3. *Validation errors* lose their `cause` (which holds the input or output) before logging or reporting (D-21).
-    4. *No sensitive values in URLs:* paths and query strings carry only IDs, enums, dates, limits and encrypted cursors (§5.2, D-32), because URLs end up in Cloud Run request logs, browser history and breadcrumbs. Web router search parameters follow the same rule.
+    4. *No sensitive values in URLs:* paths and query strings carry only IDs, enums, dates, limits and encrypted cursors (§5.2, D-32), because URLs end up in Caddy's access logs, browser history and breadcrumbs. Web router search parameters follow the same rule.
     5. *Outbound calls:* HTTP client spans and breadcrumbs record scheme, host and path only, never query strings (provider API keys and Gmail search strings live there).
     6. *Telemetry configuration:* span names and `http.route` use templates; no headers or bodies recorded; database spans keep parameterised SQL text, never parameter values; custom span attributes go through the allowlist.
     7. *Sentry in all apps:* `sendDefaultPii: false`, no request bodies, no local variables, no attachments; **no Session Replay on web**; **no screenshots or view hierarchy on Android**; web console breadcrumbs off; navigation breadcrumbs and transaction names stripped of query strings; a `beforeSend`/`beforeBreadcrumb` that keeps only allowlisted fields.
     8. *Postgres server logs:* `log_error_verbosity = terse` (no DETAIL lines such as "Failing row contains…"), `log_min_error_statement = panic` (failing statements aren't logged), `log_statement = none`, `log_parameter_max_length = 0` and `log_parameter_max_length_on_error = 0`.
-    9. *Infrastructure logs*, configured by a checklist kept in the OpenTofu code: Cloud Run request logs (paths only, safe by rule 4), Cloud SQL flags (rule 8), PgBouncer (connection events only, no query logging), Pub/Sub (no message logging), Cloud Logging retention 30 days.
-  - **Layer 4: canaries.** The **privacy canary suite** (CI) drives real flows (API requests, worker jobs, failures and unexpected errors, including a failing job) with canary values in every sensitive field, captures all logs, an in-memory span and metric exporter, Sentry's test transport, **and `pgboss.job` output**, and fails if any canary appears. Each module's LLD adds its flows. Web and Android have unit tests on their Sentry scrubbers. A **staging canary gate** runs the same canary flows against staging before each production promotion and searches Cloud Logging, Sentry and Grafana for the canaries (which also covers infrastructure logs CI can't see); a hit blocks promotion.
+    9. *Infrastructure logs*, configured by a checklist kept with the deploy files: Caddy access logs record method, path without query string, status, duration and upstream timing, with all request and response headers removed; Postgres settings per rule 8 in the committed `postgresql.conf`; pgBackRest at `info` level (no data); Docker `json-file` rotation (3 × 10 MB per container) as the only local copy; Pub/Sub without message logging; the host's SSH and system logs stay on the host (journald, 14 days).
+    10. *Alloy allowlist:* Grafana Alloy relays all OTLP data and collects container logs, and drops any span or log attribute and any metric label outside the platform's allowlist before export, a second, independent copy of rules 1, 5 and 6.
+  - **Layer 4: canaries.** The **privacy canary suite** (CI) drives real flows (API requests, worker jobs, failures and unexpected errors, including a failing job) with canary values in every sensitive field, captures all logs, an in-memory span and metric exporter, Sentry's test transport, **and `pgboss.job` output**, and fails if any canary appears. Each module's LLD adds its flows. Web and Android have unit tests on their Sentry scrubbers. A **staging canary gate** runs the same canary flows against staging before each production promotion and searches Grafana Cloud (Loki logs, which include Caddy, Postgres and container logs, Tempo traces, Prometheus labels) and Sentry for the canaries, which covers infrastructure logs CI can't see; a hit blocks promotion.
   - **Clients:** web and Android report errors to Sentry (one organisation, one project per app) with the internal user ID only (A42), and send a W3C `traceparent` header so client errors line up with server traces. They don't export spans in the MVP.
-  - **Retention:** Sentry and Grafana Cloud at their free-plan retention (30 days or less, confirmed when the accounts are set up); Cloud Logging 30 days; Pub/Sub messages 7 days. The privacy policy says operational logs keep internal IDs, never names or financial data, for up to 30 days.
-  - **No Collector in the MVP**; adding one with an attribute-allowlist processor is the first step if free tiers or risk demand it.
+  - **Retention:** Sentry and Grafana Cloud at their free-plan retention (30 days or less, confirmed when the accounts are set up); local container logs a few days at most (rotation by size); host journald 14 days; Pub/Sub messages 7 days. The privacy policy says operational logs keep internal IDs, never names or financial data, for up to 30 days.
+  - **Grafana Alloy on each VM** is the collector: apps export OTLP to it, it adds the allowlist layer (rule 10), ships container logs, and collects host metrics (node exporter subset) and Postgres metrics (postgres exporter, via a read-only monitoring role).
 - **Rationale:** guidelines fail silently; deny-lists miss new field names (and message scrubbing by pattern is a deny-list); allowlists fail closed. The canaries are what make the rule hard to break: a new log line, span attribute, job failure or infrastructure setting that carries a payee fails CI or blocks the release.
 
 ### D-25: Metrics cardinality, latency targets and alerting
 - **Options considered (alerting):** none; Sentry alerts only; Grafana Cloud alerting to email; push to the owner's phone. Capture health: job failures; notification silence; connection state gauges.
 - **Decision:**
   - **Metric labels (PLT-BR-7):** only bounded values: `service`, `environment`, `http_route` (template), `method`, `status_class`, `client_kind`, `queue`, `job_state`, `module`, `error_key` (bounded by the error catalog), `source_kind` (gmail/sms), `connection_status` (an enum owned by `sources`), `age_bucket` (24h/72h). Never user IDs, emails, amounts, account or connection IDs, raw paths or instance IDs. Histograms use 6 fixed buckets. Each LLD lists its metrics and labels; the platform keeps a series budget under 5,000 of the free tier's 10,000.
-  - **Core metrics:** HTTP count and duration; queue depth, job duration and outcomes, `jobs_dead_lettered_total`; `gmail_push_received_total{matched}`; `fx_rates_fetched_total`; worker heartbeat; `reconcile_corrections_total`; **`capture_connections{source_kind, connection_status}`** and **`capture_connections_stale{source_kind, age_bucket}`** (active connections with no successful sync in 24 or 72 hours), computed every 5 minutes. **A successful sync** is defined per source kind: for **Gmail**, any completed sync run for the connection, including the safety-net sync when there's no new mail, with a requirement on `sources` that the safety-net sync runs at least every 6 hours per active connection; for **SMS**, a sync only happens when a bank SMS arrives, so SMS staleness is shown on the dashboard but **excluded from alerting** in the MVP (an app heartbeat is `sources`' option later). The gauges are by a worker-general job from counts only; Node runtime metrics.
-  - **Token expiry is connection state, not job failure:** when a sync finds a refresh token expired or revoked, the job completes and the connection moves to a "needs reconnect" status that the user sees (`sources` designs the state and prompt). So expected weekly expiries (Q-11) never dead-letter or alert; they show on the dashboard as counts.
-  - **Alerting (proposed, Q-3):** Grafana Cloud alerting, email to the product owner, on: API health check failing for 5 minutes (Grafana synthetic check); a worker heartbeat missing for 5 minutes; Gmail notifications backing up (oldest unacknowledged older than 15 minutes); **any active Gmail connection stale for 24 hours**; any job dead-lettered in a capture queue, or more than 5 dead-lettered in any queue in an hour; API 5xx above 5% for 10 minutes; no new FX day for 36 hours; KMS errors in the last 15 minutes.
+  - **Core metrics:** HTTP count and duration; queue depth, job duration and outcomes, `jobs_dead_lettered_total`; `gmail_push_received_total{matched}`; `fx_rates_fetched_total`; worker heartbeat; `reconcile_corrections_total`; **`capture_connections{source_kind, connection_status}`** and **`capture_connections_stale{source_kind, age_bucket}`** (active connections with no successful sync in 24 or 72 hours), computed every 5 minutes. **A successful sync** is defined per source kind: for **Gmail**, any completed sync run for the connection, including the safety-net sync when there's no new mail, with a requirement on `sources` that the safety-net sync runs at least every 6 hours per active connection; for **SMS**, a sync only happens when a bank SMS arrives, so SMS staleness is shown on the dashboard but **excluded from alerting** in the MVP (an app heartbeat is `sources`' option later). The gauges are computed by a worker-general job from counts only. Node runtime metrics. **Host and database metrics** (via Alloy): disk usage, memory, CPU steal, Postgres connections, replication-free WAL size, last successful backup and WAL archive time.
+  - **Token expiry is connection state, not job failure:** when a sync finds a refresh token expired or revoked, the job completes and the connection moves to a "needs reconnect" status that the user sees (`sources` designs the state and prompt). So expected expiries (§9, Gmail publishing status) never dead-letter or alert; they show on the dashboard as counts.
+  - **Alerting (accepted by the user):** Grafana Cloud alerting, email to the product owner, on: API health check failing for 5 minutes (Grafana synthetic check); a worker heartbeat missing for 5 minutes; Gmail notifications backing up (oldest unacknowledged older than 15 minutes); **any active Gmail connection stale for 24 hours**; any job dead-lettered in a capture queue, or more than 5 dead-lettered in any queue in an hour; API 5xx above 5% for 10 minutes; no new FX day for 36 hours; KMS errors in the last 15 minutes. **Added for self-hosting:** disk usage above 80%; memory above 90% for 10 minutes; Postgres connections above 80% of `max_connections`; no successful backup for 26 hours; WAL archiving failing for 15 minutes; TLS certificate expiring within 14 days (Caddy renews automatically; this catches failures). **KMS decrypt-rate anomaly** is a Google Cloud Monitoring alert by email (D-19). The deploy script silences the health alert during deploys (D-29).
   - A second, independent uptime check is deferred.
 - **Rationale:** the backlog alert catches a dead listener; the stale-connection alert catches what a backlog can't (an expired watch, a broken sync, a token problem the code didn't classify) because it measures the outcome, successful syncs; treating expiry as state avoids weekly false alarms. All within free tiers.
 
@@ -878,6 +933,7 @@ Decisions D-1 to D-4, the queue and worker part of D-9, D-11's push, the core of
   - **Determinism:** injectable `Clock` and ID generator; every external integration (KMS, Pub/Sub, Gmail, OAuth, FX provider, object storage, FCM, email, Sentry transport) behind an interface with an in-memory fake. Factories per table in `apps/server/test/factories/`.
   - **Dependency injection:** D-31.
   - **Web end-to-end:** **Playwright** against the real API, workers and a database built by the schema step (D-12), started by Playwright's `webServer`, with `@axe-core/playwright` checks on each screen.
+  - **Web table performance test:** a Playwright test on a 100,000-row fixture checks D-7's targets (time to first rows, long frames while scrolling, DOM row count).
   - **Android:** JUnit, MockK and Turbine for ViewModels; Room and Compose UI tests on the JVM with Robolectric; OkHttp MockWebServer for the generated client; a small instrumented smoke suite on an emulator, run on release candidates.
   - **Shared test vectors** (`packages/shared/test-vectors/*.json`) for money formatting, rounding, conversion and the wire codec, run by both TypeScript and Kotlin suites.
   - **Platform-owned suites every module extends:** privacy canary (D-24), default-deny (§7.1), contract rules (D-6).
@@ -892,35 +948,68 @@ Decisions D-1 to D-4, the queue and worker part of D-9, D-11's push, the core of
   4. server integration tests (Testcontainers), including the privacy canary, default-deny and pooler compatibility suites;
   5. web end-to-end (Playwright, Chromium; all three browsers on release candidates);
   6. Android (when `apps/android/`, `packages/contract/` or `packages/shared/test-vectors/` changed, and on release candidates): ktlint and Android lint, Kotlin client generation, unit and Robolectric tests, `assembleDebug`;
-  7. on main: build container images and the web bundle (no deploy). On a release or hotfix tag (created by the pipeline on the merge commit after re-running D-12's check (i) on it): build, run `db:migrate` and deploy to staging, run the staging canary gate, upload the Android build to distribution; production is a manual promotion of the same build (D-29).
+  7. on main: build container images and the web bundle (no deploy). On a release or hotfix tag (created by the pipeline on the merge commit after re-running D-12's check (i) on it): build and push images to GitHub Container Registry, deploy to staging through the forced-command SSH deploy (D-29), run the staging canary gate, upload the Android build to distribution; production is a manual, user-approved promotion of the same images.
   `pnpm check` runs stages 1 to 4 locally; `pnpm check:all` adds end-to-end and Android (`./gradlew check`). Main is protected: required checks green before merge (the user merges).
 - **Rationale:** PLT-US-12; path filters keep the slow Android job off unrelated changes while catching contract and test-vector changes; slower suites run on release candidates rather than nightly.
 
 ### D-28: Local development: compose for infrastructure, one command for the stack
 - **Options considered:** everything in containers; infrastructure in containers and apps on the host; dev containers.
-- **Decision:** `infra/compose.yaml` (replacing the root `compose.yaml`) runs Postgres (pinned version), PgBouncer, and **Mailpit** (local SMTP with a web inbox, so developers and QA can follow invitation and reset links). Apps run on the host with hot reload. `pnpm dev` starts compose, waits for the database, builds or updates the schema with the development schema step (D-12: push, no migrations), seeds development data (idempotent), then runs the API, one worker with both roles, and the web dev server. Integrations default to local stand-ins: KMS → local key provider; FX → fixed sample rates; email → Mailpit; FCM → logged no-op; object storage → a local filesystem store under `.data/` served by a development-only route; Gmail → disabled unless real development credentials are configured. Android builds against the local API from the emulator. The README documents prerequisites (Node, pnpm via Corepack, Docker, JDK and Android Studio) and commands. Seed data is a platform framework; modules add their rows in their own slices.
-- **Rationale:** PLT-US-2; host-run apps keep hot reload and debugging simple; pinned containers keep the database identical to CI; stand-ins let anyone run Budmon with no cloud accounts.
+- **Decision:** `infra/compose.yaml` (replacing the root `compose.yaml`) runs Postgres (the same pinned image as production, D-29) and **Mailpit** (local SMTP with a web inbox, so developers and QA can follow invitation and reset links). Apps run on the host with hot reload; Vite's dev server proxies `/api` to the local API, so the web app is same-origin locally as in production (D-36). `pnpm dev` starts compose, waits for the database, builds the schema with the development schema step (D-12: push onto an empty database, no migrations) if it doesn't exist, seeds development data (idempotent), then runs the API, one worker with both roles, and the web dev server. Integrations default to local stand-ins: KMS → local key provider; FX → fixed sample rates; email → Mailpit; FCM → logged no-op; object storage → a local filesystem store under `.data/` served by a development-only route; Gmail → disabled unless real development credentials are configured. Android builds against the local API from the emulator. The README documents prerequisites (Node, pnpm via Corepack, Docker, JDK and Android Studio) and commands. Seed data is a platform framework; modules add their rows in their own slices.
+- **Rationale:** PLT-US-2; host-run apps keep hot reload and debugging simple; the pinned image keeps the database identical to CI and production; stand-ins let anyone run Budmon with no cloud accounts.
 
-### D-29: Hosting, environments and deployment (proposal; needs user confirmation, Q-4)
+### D-29: Hosting, environments and deployment for the invite-only stage: Hetzner VMs with Docker Compose (user decision for Hetzner; planner decision for the design)
 - **Options considered:**
-  - (a) **One small VM** (for example Hetzner) running everything with Docker Compose: cheapest, but self-managed Postgres, backups, patching and TLS, and KMS would need a long-lived key file.
-  - (b) **PaaS plus managed Postgres** (Fly.io or Render, plus Neon or Supabase with built-in poolers): pleasant, but three or four vendors, and KMS again needs a key file.
-  - (c) **Google Cloud:** Cloud Run for the API (request-based billing, scales to zero), worker-capture on Cloud Run with instance-based billing and one minimum instance, worker-general per Q-12, Cloud SQL for PostgreSQL (Enterprise edition, smallest suitable tier, private IP), Cloud Run reaching the private network through Direct VPC egress, Cloud Storage buckets (D-35), Firebase Hosting for the web app, Secret Manager, Artifact Registry, Cloud KMS and Pub/Sub.
-- **Decision:** (c), with infrastructure in OpenTofu under `infra/` (including the IAM bindings of D-19 and the logging checklist of D-24). **Environments:** production, plus staging if Q-9 is accepted (deployed from release tags, smallest sizes, separate Google project and OAuth client). **Releases** are cut from main as `release/<version>` pull requests into main carrying that release's single migration; they must be up to date with main to merge, and the pipeline tags the merge commit after re-checking it (D-12). Hotfixes follow D-12's `hotfix/<version>` path (Q-14). **Deploy order:** build images → run `pnpm db:migrate` (committed migrations only) as a one-off job → roll out API and workers → publish web → staging canary gate (D-24) before promoting the same build to production manually. CI deploys through GitHub OIDC federation (no service-account keys). Android release builds go to the invited group through Firebase App Distribution (Q-8). Region: Q-4.
-- **Cost estimate (Q-4),** monthly, at launch; Cloud Run's instance-based rates were checked ($0.000018 per vCPU-second and $0.000002 per GiB-second, with a monthly free allowance); the other figures are from memory and must be checked against current pricing:
-  - Cloud Run worker, 1 vCPU and 1 GiB always on: about $50 each.
-  - Cloud SQL Enterprise: about $10 to $30 shared-core, about $50 for 1 dedicated vCPU, plus storage and backups (a few dollars).
-  - Small Compute Engine VM (e2-small): about $13 to $15.
-  - API on Cloud Run (request-based, low traffic), KMS, Secret Manager, Pub/Sub, Storage, Artifact Registry, Firebase Hosting: about $5 to $10 combined.
-  - **As drawn in v0.1** (two Cloud Run workers, PgBouncer VM, dedicated Cloud SQL): about **$170 to $180 for production**, plus about **$60 to $80 for staging**: roughly **$230 to $260** in total, well above v0.1's estimate.
-  - **Recommended lean setup:** worker-general and PgBouncer on one e2-small VM (Q-12 option c), worker-capture on Cloud Run, shared-core Cloud SQL: about **$80 to $100 for production**. **Staging keeps the two worker identities separate** (so D-19's IAM split and egress rules run for real before production): worker-general and PgBouncer on one e2-small VM with the general service account, worker-capture on its own e2-micro VM with the capture service account, shared-core Cloud SQL: about **$40 to $60**.
-  - **Cost levers:** no permanent staging (−$40 to $60; Q-9); worker-capture on its own small VM with an attached service account instead of Cloud Run (about −$35, at the cost of patching a second VM); shared-core instead of dedicated Cloud SQL until load requires it.
-- **Rationale:** Gmail and Pub/Sub already need a Google Cloud project; per-process workload identities are what make "only the capture worker can decrypt" enforceable without key files (D-19). Everything scales out when Budmon goes public. Cost: more than a single VM, and lock-in for infrastructure (the application stays portable: containers, Postgres, OTLP). Any VM is a single point of failure, accepted under best-effort availability (P9).
+  - Host: (a) **Hetzner Cloud VMs** (the user's direction); (b) a self-run machine at home (no off-site redundancy, residential IP and uplink, physical risk; rejected while a VM costs a few euros); (c) Google Cloud (v0.3; rejected by the user on cost).
+  - Process management: **Docker Compose** with images from CI; systemd units running Node directly; a lightweight orchestrator (k3s, Nomad, Coolify/Dokku-style PaaS layers).
+  - Staging: (i) **a second small VM**; (ii) a second Compose project on the production VM with its own database and secrets; (iii) a VM created on demand per release and deleted after.
+  - Infrastructure as code: OpenTofu; click-ops plus a written runbook.
+- **Decision:**
+  - **Location:** Hetzner Germany (Nuremberg or Falkenstein, `eu-central`) for both VMs (A-11); backups and buckets at Backblaze B2's EU region (D-30, D-35), so backups are off-provider.
+  - **Production VM:** CX33 (4 shared vCPU, 8 GB RAM, 80 GB local disk). **Staging VM:** CX23 (2 shared vCPU, 4 GB, 40 GB), always on, option (i): it keeps staging failures (a runaway migration, a full disk) from touching production and exercises the same deploy path, for about €6 a month. Option (ii) was rejected because staging runs release candidates before they're trusted and shares the kernel, disk and memory with production; (iii) is a cost lever (Q-19).
+  - **Containers per VM** (one Compose project, images pinned by digest): `caddy` (TLS via Let's Encrypt, serves the SPA, reverse-proxies `/api/*` and `/health/ready` to `api`, security headers, maintenance switch), `api`, `worker-general`, `worker-capture`, `postgres` (official Postgres image plus pgBackRest), `alloy` (Grafana Alloy), and a one-off `migrate` container. Separate Docker networks: `edge` (caddy, api), `data` (api, workers, migrate, postgres, alloy); Postgres publishes no port. Containers run as distinct non-root UIDs with read-only root filesystems, `no-new-privileges`, all capabilities dropped and memory limits; no container mounts the Docker socket (Alloy reads container log files read-only).
+  - **Images:** built in CI and pushed to GitHub Container Registry (private), tagged with the release version; the VM pulls with a read-only token. Old images are pruned to the last 5 releases.
+  - **Deploy mechanism:** a GitHub Actions job in a protected environment (`staging`: automatic on release and hotfix tags; `production`: manual promotion, requires the user's approval) connects over SSH as user `deploy`, whose key is restricted with a forced command (`command="/usr/local/bin/budmon-deploy"`, no PTY, no forwarding) that accepts only `<environment> <tag>` matching `^(staging|production) v[0-9]+\.[0-9]+\.[0-9]+(-hotfix\.[0-9]+)?$`. The script, on the VM:
+    1. pulls the release's images; if pulling fails, it stops with the old release untouched;
+    2. decrypts that environment's SOPS files into tmpfs (D-20);
+    3. if the release is a queue upgrade (D-12), turns the maintenance switch on and stops both workers;
+    4. runs the `migrate` container (`pnpm db:migrate`, which re-runs D-12's check (i) first);
+    5. runs `docker compose up -d` with the new images; Caddy holds and retries requests for up to 10 s while `api` restarts, so a normal deploy is seen as a short delay;
+    6. waits up to 60 s for `/health/ready`; on failure, restarts the previous release's application images (migrations are forward-only and expand-then-contract, so the previous code runs on the new schema) and fails the job;
+    7. turns maintenance off if it turned it on, and creates a 15-minute Grafana alert silence for that environment's health check around steps 3 to 6.
+  - **Maintenance switch** (no code deploy needed): Caddy checks for a flag file (`/srv/budmon/<environment>/maintenance/on`, mounted read-only). When present it answers `/api/*` with `503` and the standard error envelope (`SERVICE_UNAVAILABLE`, J-7) and `/health/ready` with `503 {"status":"maintenance"}`. The owner toggles it with `budmonctl maintenance on|off` over SSH; the deploy script uses the same command. Outside maintenance, `/health/ready` is answered by the API: `200` when the database is reachable and its migration level equals the one the running code expects, otherwise `503`, so new code on an old schema (or the reverse) is visible at once.
+  - **Hotfix while staging is ahead of production** (a release candidate on staging not yet promoted): the hotfix branches from the production tag (D-12). The staging database holds only synthetic data, so the deploy script, given a hotfix tag lower than staging's current release, rebuilds staging's database from scratch (drop, migrate to the hotfix's level, seed), deploys the hotfix, and runs the canary gate; the open release is re-cut on top of the merged-back hotfix afterwards.
+  - **Host configuration:** cloud-init (committed) installs Docker, creates users, sets SSH key-only access, unattended security upgrades and the Docker log rotation; Hetzner Cloud Firewall allows only 22, 80 and 443.
+  - **Infrastructure as code:** **OpenTofu**, kept small: Hetzner servers, firewalls and SSH keys (`hcloud` provider); the Google Cloud pieces (project services, KMS key rings and keys, the capture service account and its IAM binding, Pub/Sub topics and subscriptions); B2 buckets and scoped application keys. State is encrypted with OpenTofu's client-side state encryption and stored in a B2 bucket. Service-account and B2 key secrets are created outside OpenTofu and stored in SOPS, so the state never contains them. Rationale: the IAM binding that enforces D-19 and the two environments should be reviewable and recreatable; the footprint is small enough that this is a few files, not a platform.
+  - **Environments:** `development` (local), `test` (CI), `staging`, `production`. One Google Cloud project with per-environment key rings, service accounts, Pub/Sub topics and OAuth clients.
+- **Cost estimate (invite-only stage),** monthly, excluding VAT. Hetzner server prices are the post-June-2026 list prices as reported by secondary sources (Hetzner's own price page was blocked by this environment's network); everything marked "est." is an estimate I couldn't check:
 
-### D-30: Backups and restore (proposal; needs user confirmation, Q-1)
-- **Options considered:** retention of 7, 14 or 30 days; with or without point-in-time recovery (PITR); provider backups only, or also logical dumps elsewhere.
-- **Decision:** the provider's automated **daily backups, retained 14 days**, plus **PITR for 7 days**, same region; no extra dumps in the MVP. A **restore drill** into a scratch instance every 3 months, with a runbook. **Erasure after restore:** `identity`'s erasure step first writes an erasure record (internal user ID and time only) to the `erasure-log` bucket (D-35) and only then deletes data, so a record always exists for every erasure that happened; the restore runbook replays every record newer than the backup, and replay is idempotent (erasing an already-erased user does nothing). The privacy policy states: "Deleted data is removed from our backups within 14 days of erasure."
-- **Rationale:** matches the analyst's proposal (PLT-US-15) and bounds how long deleted data lingers (XC-16). PITR covers "a bad change an hour ago". Record-before-delete plus idempotent replay means a restore never resurrects a deleted user.
+  | Item | Monthly |
+  | ---- | ------- |
+  | Production VM, CX33 | €8.49 |
+  | Staging VM, CX23 | €5.49 |
+  | Two primary IPv4 addresses | about €1.20 (est.) |
+  | Backblaze B2: backups, exports, erasure log (a few GB) | under €1 (est.) |
+  | Google Cloud: KMS asymmetric key versions and decrypt operations; Pub/Sub within free tier | about €1 to €3 (est.) |
+  | Grafana Cloud, Sentry (free tiers), GitHub Container Registry | €0 to €1 (est.) |
+  | FX provider (D-15): Open Exchange Rates free plan, or Developer plan if its terms require | €0, or about €11 ($12) |
+  | Domain, amortised (D-36): `.com` about €1; `.ai` about €6 to €8 (est.; `.ai` registrations are multi-year) | €1 to €8 |
+  | **Total** | **about €18 to €40** |
+
+  Cost levers: drop always-on staging for an on-demand staging VM (saves about €6); keep staging always on but downsize nothing further (CX23 is the smallest x86 size listed).
+- **Rationale:** a single VM per environment with Compose is the cheapest setup that keeps containers, Postgres and OTLP portable, and it's operable by one person with a deploy script, cloud-init and a small OpenTofu module. The design stays honest about what a single host can't do (D-19's residual risk, no high availability under P9) and keeps the path to public scale a deployment change (§7.6).
+
+### D-30: Backups and restore: pgBackRest to off-provider object storage (user decision for the policy: daily, 14 days, 7-day PITR; planner decision for the mechanism)
+- **Options considered:** pgBackRest; WAL-G; nightly `pg_dump` only (no PITR, rejected); Hetzner's server backups (whole-disk images, not consistent for a running database, kept on the same provider; rejected as the database backup). Repository: Hetzner Object Storage (€6.49/month base, same provider) vs Backblaze B2 (pay per use, a different provider).
+- **Decision:**
+  - **pgBackRest** inside the `postgres` container, repository on **Backblaze B2 (EU region)** through its S3-compatible API, in a dedicated bucket with a key scoped to that bucket and held only by the Postgres container.
+  - **Client-side encryption** (`repo1-cipher-type=aes-256-cbc`); the passphrase is in SOPS and in the owner's password manager (losing it means losing the backups).
+  - **Schedule:** full backup weekly, differential daily, continuous WAL archiving (asynchronous, compressed) with `archive_timeout = 300` (at most about 5 minutes of data loss).
+  - **Retention:** time-based, 14 days (`repo1-retention-full-type=time`, `repo1-retention-full=14`): every daily backup of the last 14 days is restorable, and WAL is kept for that whole window, so point-in-time recovery covers 14 days, which meets the accepted 7. Deleted users' data therefore leaves backups within 14 days of erasure, as the privacy policy will state.
+  - **Monitoring:** a systemd timer runs `pgbackrest check` and `info` and writes the last-success timestamps for Alloy to export; alerts on no successful backup for 26 hours and on WAL archiving failing for 15 minutes (D-25).
+  - **Restore drill** every 3 months, following a runbook: create a temporary Hetzner VM, restore the latest backup and a point in time, run integrity checks and the erasure replay, record the time taken, delete the VM (a few cents). Staging never receives production data.
+  - **Erasure after restore:** `identity`'s erasure first writes an erasure record (internal user ID and time) to the `erasure-log` bucket (D-35) and then deletes data; the restore runbook replays every record newer than the restore point; replay is idempotent.
+  - Staging's database isn't backed up (synthetic data, rebuilt by its deploys when needed).
+- **Rationale:** pgBackRest is mature, supports time-based retention, encryption, parallel restore and `verify`. An off-provider repository means an account problem or a Hetzner location failure doesn't take the backups with it, and B2 costs cents at this size (estimate) against Hetzner Object Storage's €6.49 base. Its S3 compatibility with pgBackRest is expected but I couldn't verify it here; the fallback is Hetzner Object Storage in a different Hetzner location.
 
 ### D-31: Composition root and injectable dependencies instead of singletons
 - **Options considered:** keep `getInstance()` singletons; a DI container library; a hand-written composition root with constructor injection.
@@ -963,85 +1052,113 @@ Decisions D-1 to D-4, the queue and worker part of D-9, D-11's push, the core of
   | `server/tsconfig.json` | (CR §1.3) | Replaced by per-package configs extending `packages/config` bases (no `rootDir: "."`, no `jsx` on the server). |
   | `package.json` scripts and dependencies | Rework | Workspace scripts (D-5) with real `build`, `test`, `db:reset`, `db:release-migration`, `db:migrate`; the old `db:push` script is replaced by the guarded `db:reset` (D-12). Removed: `@rollup/plugin-typescript`, `rollup`, `tslib`, `@types/mssql`, Express and `@types/express`, morgan and `@types/morgan`, `@trpc/server`, `jsonwebtoken` and `@types/jsonwebtoken`, `drizzle-zod`, `dotenv`, bcrypt and `@types/bcrypt`. |
   | `server/.gitignore` | (CR §3.4) | Prisma line removed; ignores consolidated in the root `.gitignore` (including `.data/` and `.env*` except `.env.example`). |
-  | `compose.yaml` | Keep (rework) | Moved to `infra/compose.yaml`, image pinned, PgBouncer and Mailpit added (D-28). |
+  | `compose.yaml` | Keep (rework) | Moved to `infra/compose.yaml`, image pinned, Mailpit added (D-28). |
   | Root `.prettierrc` | (CR §4.1: rework) | Replaced by the full Prettier config in `packages/config`, referenced from the root. |
   | `.zed/settings.json` | (CR §1.1) | Kept (personal editor setting, harmless). |
   | `code-bites.md`, empty root `README.md` | (CR §1.1) | A real README (layout, prerequisites, commands, environments) replaces both; `code-bites.md` deleted. |
   | Debug endpoints `GET /`, `GET /auth/test-auth` | (CR §3.4) | Gone with the files above. |
 
-  The first slice also proposes CLAUDE.md's "Project conventions" text (based on CR §4.2, updated for this HLD); only the user approves CLAUDE.md, so the text goes into the pull request for the user to accept (Q-10). It includes the database rules agents follow: rebuild the development database only with `pnpm db:reset`; never write migration files outside `release/*` and `hotfix/*` branches.
+  The first slice also proposes CLAUDE.md's "Project conventions" text (based on CR §4.2, updated for this HLD); only the user approves CLAUDE.md, so the text goes into the pull request for the user to accept (Q-10). It includes the database rules agents follow (and states that the web app is SolidJS): rebuild the development database only with `pnpm db:reset`; never write migration files outside `release/*` and `hotfix/*` branches.
 - **Rationale:** decided by the user; doing it inside the slice means the skeleton and the removals are reviewed together.
 
-### D-35: Private object storage for exports and the erasure log
-- **Options considered:** storing exports in Postgres (`bytea`); generating exports on the fly in the API response; object storage with signed URLs.
-- **Decision:** Google Cloud Storage behind a platform `ObjectStore` interface (filesystem store locally, in-memory fake in tests). Buckets per environment, all with uniform bucket-level access and public access prevention, encrypted at rest by Google:
-  - **`exports`:** written by worker-general (`identity`'s export job) under `users/<userId>/exports/<exportId>`; downloaded only through **V4 signed URLs valid 15 minutes**, issued by the API after an authorization check (the API's identity can sign URLs and read, not list or delete); lifecycle deletion after 7 days; `identity`'s erasure deletes the user's prefix. Object names contain IDs only.
-  - **`erasure-log`:** append-only erasure records (D-30); written by the identity performing erasure, which can create but not delete or overwrite objects; a 30-day retention lock, then lifecycle deletion.
-- **Rationale:** exports are a full copy of a user's financial data, so they need private storage, short-lived access and guaranteed deletion (XC-16, XC-17); generating them in the API would break PLT-BR-6 for large exports and Postgres isn't a good file store. The erasure log must live outside the database to survive a restore. Cost: a few cents a month.
+### D-35: Private S3-compatible object storage for exports and the erasure log
+- **Options considered:** storing exports in Postgres (`bytea`); streaming exports from the API; object storage with presigned URLs. Provider: Hetzner Object Storage; Backblaze B2; Cloudflare R2.
+- **Decision:** a platform `ObjectStore` interface over the S3 API (filesystem store locally, in-memory fake in tests), on **Backblaze B2 (EU region)**, the same provider as backups (D-30) but separate buckets and keys. Per environment:
+  - **`exports`:** private bucket. worker-general writes under `users/<userId>/exports/<exportId>` with a key scoped to this bucket (read, write, delete); downloads only through **S3 presigned URLs valid 15 minutes**, issued by the API after an authorization check, signed with a separate read-only key held by the API. Deletion after 7 days by a platform purge job (deterministic and tested), with a bucket lifecycle rule as a backstop; `identity`'s erasure deletes the user's prefix. Object names contain IDs only.
+  - **`erasure-log`:** append-only erasure records (D-30), written by worker-general with a key that can write but not delete (B2 application keys carry per-bucket capabilities), with Object Lock retention of 30 days where available, then lifecycle deletion.
+- **Rationale:** exports are a full copy of a user's financial data, so they need private storage, short-lived access and guaranteed deletion (XC-16, XC-17); generating them in the API would break PLT-BR-6 for large exports. The erasure log must live outside the database to survive a restore. Scoped keys give least privilege per process. B2's capability-scoped keys and Object Lock are as I remember them; I couldn't verify current details here, and the fallback is Hetzner Object Storage with per-project credentials.
+
+### D-36: Domain, same-origin API under a path, and the API version in the path
+- **Context:** the user will try to acquire `budmon.ai` or `budmon.com`, and suggested the API as a subdomain or as a subpath like `/api/v<x>_<y>/`.
+- **Options considered:**
+  - Placement: (a) **subpath on the web app's origin** (`https://<domain>/api/...`); (b) subdomain (`https://api.<domain>/...`).
+  - Version in the path: (1) **major only, `/api/v1`**, with additive changes (D-6); (2) major and minor, `/api/v<x>_<y>/`.
+- **Decision:** **(a) and (1).** The web app is served at `https://<domain>/`, the API at `https://<domain>/api/v1/...`, the health endpoint at `https://<domain>/health/ready`, all through the same Caddy site.
+  - **Same origin** means no CORS at all (the API sends no `Access-Control-*` headers and rejects preflights), cookies can be `Secure; HttpOnly; SameSite=Strict` scoped to `Path=/api` if `identity` chooses cookies, the CSP is `connect-src 'self'` plus the telemetry endpoints, and one certificate covers everything. Android uses the same base URL. The later Electron app (spec §5 Later) will need either CORS for its origin or a custom protocol; that's designed when it's scheduled.
+  - **Version:** the path carries the **major version only**. Because the contract evolves additively (D-6), a minor version in the path would either force every client to change URLs for non-breaking changes or require the server to serve every `v1_y` alias as the same routes, which adds nothing. The contract's version (`1.<minor>`) is published in `openapi.json` (`info.version`) and in an `X-Budmon-API-Version` response header, which clients can log and Sentry can tag. `/api/v2` exists only if the whole API is ever redesigned; individual breaking changes are new procedures (D-6). This differs from the user's suggestion and is flagged as Q-16.
+  - **Domain choice** doesn't change the design; until a domain is acquired, staging and production use a placeholder in configuration.
+- **Rationale:** a single origin is the simplest and safest setup for one host (no CORS surface, strictest cookie policy) and doesn't block scaling: CDNs and load balancers route by path. A subdomain would only pay off when the API and web are hosted separately, which the scaling path can still do later behind the same paths.
 
 ## 9. Risks
 
 | Risk | Impact | Mitigation |
 | ---- | ------ | ---------- |
 | oRPC is young and evolving (a v2 is in development). | API churn could force rework of contract or handler code. | Pin an exact version; keep oRPC behind the platform's procedure bases, codec and error interceptor; the OpenAPI document is the stable external contract. |
-| OpenAPI Generator's Kotlin output may handle oRPC's OpenAPI 3.1 output poorly (unions, `oneOf`, nullable), and the money codec's override may not apply to both input and output schemas. | Android compile errors, `String` instead of `Long`, or web amounts typed as strings. | **First contract slice spike:** emit `openapi.json` for representative shapes (money in inputs and outputs, nested objects, discriminated unions, nullable fields, enums, the error envelope), generate and compile the Kotlin client, and check the web's inferred types; the contract-rules test (D-6) then guards the result. Contract-authoring rules are tightened if needed. |
-| pg-boss behind PgBouncer in transaction mode, and transactional `send` through a Drizzle transaction under a different role. | Subtle failures (locks, privileges on maintenance-created objects) or a weaker enqueue guarantee. | The pooler compatibility suite (D-26) and the first queue slice verify it; fallback: pg-boss's internal connection goes direct while enqueue stays in the app's transaction. |
-| Free-tier limits (Sentry about 5k errors a month; Grafana 10k series and log volume). | Missing data in an incident storm. | SDK sampling and rate limits; series budget (D-25); `info` log level; monthly usage check; paid tiers are cheap. |
-| A privacy leak through an SDK default, an infrastructure log, or a runtime error message. | Breaks PLT-BR-1, the headline privacy promise. | D-24's boundaries, canary suite in CI (including job output), staging canary gate (including infrastructure logs), scrubber tests in each app, review checklist on SDK upgrades. |
-| Gmail OAuth while unverified: Google's documentation says refresh tokens may expire after 7 days unless the client is approved for production. | Weekly reconnection for every user; capture stops until they reconnect. | Treated as connection state with a user prompt and dashboard counts (D-25); the publishing-status choice is Q-11, verified by a spike before `sources` is designed. |
-| Google Cloud cost above expectations. | Monthly cost higher than planned. | Revised estimate and levers (D-29); billing budget alerts; staging scaled down or dropped (Q-9). |
-| Single maintainer operating cloud infrastructure. | Slow incident response, forgotten upgrades. | Managed services where affordable, infrastructure as code, runbooks (restore, key rotation, canary gate), email alerts. |
-| A VM (PgBouncer, and worker-general under Q-12 (c)) is a single point of failure. | Database or background work unavailable while it's down. | Container-optimised VM with auto-restart; heartbeat and health alerts; best effort accepted (P9). |
-| FX provider free tiers may lack historical endpoints or forbid this use. | Back-dated conversions unavailable, or a licence problem. | Q-5; provider behind an interface; a paid plan is inexpensive. |
-| Release-time migrations (D-12): data-preserving changes are deferred until a release is cut; `drizzle-kit generate` asks interactive rename questions an agent can't answer, so renames come out as drop-and-create. | A missed rename or backfill could lose data in staging or production; a `drizzle-kit` upgrade could break the prompt driver. | Each module's LLD lists *Release migration notes*; the pending-schema-changes report shows the coming diff on every pull request; generation runs under a pseudo-terminal driver that answers "create" and lists every ambiguity, so the software-engineer knows which statements to hand-edit; the test-architect's upgrade test and the risky-statement check gate the release pull request; staging (Q-9) runs it before production; PITR (D-30) is the last resort. |
+| OpenAPI Generator's Kotlin output may handle oRPC's OpenAPI 3.1 output poorly (unions, `oneOf`, nullable), and the money codec's override may not apply to both input and output schemas. | Android compile errors, `String` instead of `Long`, or web amounts typed as strings. | **First contract slice spike:** emit `openapi.json` for representative shapes (money in inputs and outputs, nested objects, discriminated unions, nullable fields, enums, the error envelope), generate and compile the Kotlin client, check the web's inferred types; the contract-rules test (D-6) then guards the result. |
+| pg-boss's transactional `send` through a Drizzle transaction under a different database role. | Privilege errors on maintenance-created objects, or a weaker enqueue guarantee. | Verified in the first queue slice with integration tests (default privileges from `budmon_queue`); fallback: grant explicit privileges in the queue schema step. |
+| Single VM per environment: a host failure, a full disk, or a bad kernel update takes production down; Postgres is self-managed. | Downtime (best effort accepted, P9); data loss bounded by WAL archiving (about 5 minutes). | Health, disk, memory, backup-age and WAL-archive alerts (D-25); tested restores every 3 months (D-30); cloud-init and OpenTofu rebuild a host in under an hour; Hetzner snapshots before risky host changes. |
+| Root compromise of the production VM. | Defeats the API/worker-capture separation; exposes the database. | Hardening (§7.5), forced-command deploy key, user-approved production deploys, KMS audit and rate alerts with instant revocation (D-19); separate VM for worker-capture as an option (Q-15). |
+| Data on the VM's disk isn't encrypted at the block level. | A disk-level leak at the provider would expose the database (credentials stay sealed; backups are encrypted). | Accepted for the invite-only stage; full-disk encryption revisited before public launch. |
+| Hetzner raised prices three times in 2026. | Costs rise again. | Absolute amounts are small; containers, Postgres and OTLP are portable to another provider. |
+| Solid 2.0 is at release candidate; Kobalte is pre-1.0. | A framework migration soon after launch; component library gaps or breaking changes. | Start on Solid 1.9; migrate when 2.0 and the libraries are stable; spike the accessible components first (D-7); keep UI primitives behind Budmon's own component layer. |
+| FX: free-plan terms may not allow Budmon's use; the fallback (`fawazahmed0/exchange-api`) has no SLA and aggregated sources. | Paid plan needed; fallback rates may differ slightly from the primary. | Q-18; `provider` recorded per stored day; fallback used only after the primary fails for 6 hours. |
+| Backblaze B2's compatibility with pgBackRest and its key capabilities weren't verified here. | Backup or least-privilege design needs adjusting. | Verified in the backup slice; fallback Hetzner Object Storage in another location (D-30, D-35). |
+| Free-tier limits (Sentry about 5k errors a month; Grafana 10k series and log volume). | Missing data in an incident storm. | SDK sampling and rate limits; series budget (D-25); Alloy drops verbose host metrics; monthly usage check. |
+| A privacy leak through an SDK default, an infrastructure log, or a runtime error message. | Breaks PLT-BR-1. | D-24's boundaries, Alloy's attribute allowlist, CI canary suite (including job output), staging canary gate (including Caddy, Postgres and container logs in Loki), scrubber tests in each app. |
+| Gmail OAuth "In production" without verification (Q-11 (b), accepted): token lifetime unconfirmed. | Weekly reconnection if tokens still expire. | The spike before `sources` is designed; fallback (a) weekly reconnection with a one-tap prompt; token expiry is a connection state, not an alert (D-25). |
+| Release-time migrations (D-12): data-preserving changes are deferred until a release is cut. | A missed rename or backfill could lose data in staging or production; a `drizzle-kit` upgrade could break the prompt driver. | Release migration notes in each LLD; the pending-changes report on every pull request; the pseudo-terminal driver lists every ambiguity; upgrade test and risky-statement check; staging before production; PITR (D-30). |
 | Exact-money discipline erodes (someone uses `number` arithmetic). | Rounding drift, violating XC-1. | Branded `Money` type, codec, lint rules, shared test vectors, review checklist. |
 
 ## 10. Assumptions
 
 | ID | Assumption |
 | -- | ---------- |
-| A-1 | PLT-BR-6 ("ingestion runs in workers, never in the API") allows the API to **receive** inbound data that can only arrive over HTTP (SMS uploaded by the Android app, OAuth callbacks), as long as it only validates, seals, stores and enqueues it; all processing happens in a worker. |
-| A-2 | The platform owns currency reference data, market rates and conversion (D-15); no other module claims them. |
-| A-3 | The repository is (or will be) hosted on GitHub, so CI is GitHub Actions. |
+| A-1 | PLT-BR-6 ("ingestion runs in workers, never in the API") allows the API to **receive** inbound data that can only arrive over HTTP (SMS uploaded by the Android app, OAuth callbacks), as long as it only validates, seals, stores and enqueues it. |
+| A-2 | The platform owns currency reference data, market rates and conversion (D-15). |
+| A-3 | The repository is (or will be) hosted on GitHub, so CI is GitHub Actions and images go to GitHub Container Registry. |
 | A-4 | Invite-only load: up to about 100 users, 100 to 300 transactions per user per month, a few requests per second at peak. |
 | A-5 | API messages are English-only and for developers; clients localise by error key. |
 | A-6 | Android minimum version is 8.0 (API 26). |
-| A-7 | One product owner (A28) receives all alerts by email; their address lives in deployment configuration, not in code. |
+| A-7 | One product owner (A28) receives all alerts by email; their address lives in deployment configuration. |
 | A-8 | No single amount exceeds ±(2^53 − 1) minor units (D-14). |
-| A-9 | Two-step verification secrets (IDN-US-8) must be verified inside the API during sign-in, so they can't be under the capture-only key (Q-2). |
-| A-10 | Matching a transaction's local calendar date to the rate of the same UTC day is acceptable precision for budgets and reports (D-15). |
+| A-9 | Two-step verification secrets (IDN-US-8) are verified inside the API, so they use the `api-secrets` key, not the capture key (D-19). |
+| A-10 | Matching a transaction's local calendar date to the rate of the same UTC day is acceptable precision (D-15). |
+| A-11 | Hetzner's German locations suit the invited group (EU data location, reasonable latency to Europe and the Middle East). |
+| A-12 | Android builds reach the invited group through Firebase App Distribution (v0.3 Q-8, unanswered; recommendation stands). |
+| A-13 | The first slice's pull request proposes CLAUDE.md's "Project conventions" text for the user to approve (v0.3 Q-10, unanswered; recommendation stands). |
 
 ## 11. Open questions
 
+**Resolved by the user** (2026-10-05, [platform decisions](../../product/notes/2026-10-05-platform-decisions.md)):
+
+| v0.3 question | Answer | Recorded in |
+| ------------- | ------ | ----------- |
+| Q-1 Backups | Accepted: daily, 14 days, 7-day PITR. | D-30 |
+| Q-2 Capture-only key scope | Accepted as proposed. | D-19 |
+| Q-3 Alerts | Accepted. | D-25 |
+| Q-4 Hosting | Hetzner (or an inexpensive self-managed server); design for the invite-only stage. | D-29 |
+| Q-5 FX provider | Find something that works for little money. | D-15 (recommendation; Q-18) |
+| Q-6 Domain | `budmon.ai` or `budmon.com`; API as subdomain or subpath such as `/api/v<x>_<y>/`. | D-36 (Q-16) |
+| Q-7 Language | A documentation-style rule (recorded in the planner's instructions); the app's own UI tone remains open. | Q-17 |
+| Q-9 Staging | Keep, but cheaper. | D-29 |
+| Q-11 Gmail publishing status | (b) "In production" without verification, confirmed by a spike before `sources`; (a) as fallback. | §9, D-25 |
+| Q-12 Production pooler | None at launch. | D-18 |
+| Q-13 Release step | Accepted; the `/release` command is drafted when there's something to release. | D-12 |
+| Q-14 Hotfixes | (a) from the last release. | D-12, D-29 |
+| Q-8, Q-10 | Not answered; recommendations stand. | A-12, A-13 |
+
+**Open:**
+
 | # | Question | Proposal | Blocks |
 | - | -------- | -------- | ------ |
-| Q-1 | Backups (PLT-US-15): frequency, retention, privacy-policy wording. | Daily backups kept 14 days, plus 7 days of point-in-time recovery; quarterly restore drill; erasures replayed after a restore; the privacy policy says deleted data leaves backups within 14 days (D-30). | The backup part of the platform LLD. |
-| Q-2 | PLT-US-6: what else gets the same protection as Gmail tokens? | Gmail tokens, pending OAuth exchanges, SMS content awaiting processing and (later) user-provided AI keys under the capture-only key. Two-step verification secrets under a separate key the API can decrypt, because sign-in happens in the API: that protects against a database leak but not a compromised API (D-19, A-9). | `identity`'s 2FA design; the crypto part of the platform LLD. |
-| Q-3 | Alerting (PLT-US-11): channel and the list of alerts. | Email to you from Grafana Cloud for the alerts in D-25. The spec's "Gmail silent for over an hour" is replaced by two alerts: notifications backing up for 15 minutes (listener down) and any active Gmail connection without a successful sync for 24 hours (capture broken for any other reason; Gmail's safety-net sync runs at least every 6 hours, so silence means a fault). SMS connections are on the dashboard only, because they sync only when a bank SMS arrives. Token expiries show as counts on the dashboard and don't email you. | The alerting part of the platform LLD. |
-| Q-4 | Hosting, cost and region: accept Google Cloud (D-29)? Revised estimate: about $230 to $260 a month as originally drawn, or about $120 to $160 with the recommended lean setup (worker-general and PgBouncer on one small VM, shared-core database, and a staging environment that keeps the two worker identities separate on two small VMs); about $80 to $100 without staging. Only Cloud Run's rates were checked; the rest are estimates. And which region should hold the data (closest to the invited group, for example a European or Middle East region)? | Google Cloud with the lean setup; region chosen by you. | Deployment slices only. |
-| Q-5 | Exchange-rate provider. | Open Exchange Rates or ExchangeRate-API, after checking that the plan's terms allow this use and include historical rates; a paid plan if not. | The FX slice. |
-| Q-6 | Domain name for the web app and API. | You choose; both on the same registrable domain (for example `app.<domain>` and `api.<domain>`). | Deployment slices. |
-| Q-7 | Design language: `docs/design/ux-guidelines.md` doesn't exist and XC-24 (P8) is open. | Accept P8 (English first, WCAG 2.2 AA, Android accessibility guidelines, calm and plain tone) and have `identity` propose `ux-guidelines.md`. | Any module's screens. |
-| Q-8 | Android distribution to the invited group. | Firebase App Distribution rather than a Play Store internal track while SMS permission compliance is out of scope. | Android release slice. |
-| Q-9 | Staging environment (about $40 to $60 a month scaled down, with the capture and general workers still under separate identities). Keep it? | Yes, scaled down, so release migrations, the capture/general permission split, releases and the staging canary gate (D-24) run on real infrastructure before production. Without it, the canary gate would run against production with a dedicated test user. | Deployment slices. |
-| Q-10 | CLAUDE.md "Project conventions" (PLT-US-1 says you approve it). | The first slice's pull request proposes the text for you to accept or edit. | Part of the first slice's review. |
-| Q-11 | Gmail publishing status. In Google's "Testing" status, refresh tokens for Gmail's restricted scope expire after 7 days, so every user would reconnect weekly. Options: (a) accept weekly reconnection with a one-tap prompt; (b) set the consent screen to "In production" without verification: still capped at 100 users, users see an "unverified app" warning, and tokens may then last longer (Google's documentation is ambiguous here, so it needs checking); (c) start Google's verification and security assessment early (costly and slow; normally only for a public launch). | (b), confirmed by a short spike (connect a test account, check token lifetime past 7 days) before `sources` is designed; (a) as the fallback. | `sources` design; not the platform's slices. |
-| Q-12 | Production pooler at about 100 users. (a) PgBouncer on its own small VM (private network, TLS, patching, a single point of failure; about $13 to $15 a month); (b) no production pooler at launch: code stays pooler-ready, Cloud Run maximum instances × pool size kept below the database's connection limit, pooler added when scaling (lowest operations effort); (c) PgBouncer and worker-general together on one small VM (worker-general has no decrypt permission, and it saves an always-on Cloud Run service, about $50 a month). | (c); (b) if minimal operations matter more than cost. | Deployment slices. |
-| Q-13 | Release process (D-12): staging and production deploys now happen per release (`release/<version>` pull request into main with one migration, written by the software-engineer, upgrade test by the test-architect, reviewed by the code-reviewer, merged by you), not on every merge to main. That's a new step in the pipeline (`docs/design/README.md` describes only `/project-brief`, `/design-module` and `/build-module`). | Add a `/release` step that runs the release migration, the release checks and the staging deploy; the planner can draft it once you agree. | The first deployment; not development. |
-| Q-14 | Hotfixes under the release model: because main may hold unreleased schema changes, how is an urgent fix shipped? (a) a hotfix release branched from the last release tag, with its own migration if needed, the same checks and staging canary gate, then merged back into main; (b) always cut a full release from main, shipping whatever else is on main; (c) allow a direct production deploy for emergencies, skipping staging. | (a), as designed in D-12 (pending your answer). (b) is simpler but can force unfinished schema changes out; (c) bypasses the checks that protect data. | The release step (Q-13). |
+| Q-15 | Capture-only decryption on a single Hetzner VM (D-19). Accept option (A): Google Cloud KMS with an asymmetric key, the API holding only the public key and worker-capture alone holding the decrypt credential, with audit logging, a decrypt-rate alert and instant revocation? Accept the residual risk that **root on the production VM can decrypt capture secrets**? Optionally run worker-capture on its own small VM (about €6 a month more) so that root on the main VM isn't enough. | (A), residual risk accepted for the invite-only stage, worker-capture on the main VM; revisit the separate VM before public launch. | The crypto slice. |
+| Q-16 | API path: you suggested `/api/v<x>_<y>/`. Proposed instead: `/api/v1` with additive changes, the minor version in `openapi.json` and an `X-Budmon-API-Version` header (D-36), because a minor version in the path forces URL changes for non-breaking changes. Same origin as the web app (subpath, not subdomain). | `/api/v1`, same origin. | The first contract slice. |
+| Q-17 | The app's own UI conventions (P8 for end users): English first with layouts ready for other languages and right-to-left; WCAG 2.2 AA on web and Android accessibility guidelines; a calm, non-judgemental tone toward spending. | Accept; `identity` proposes `ux-guidelines.md` from it. | Any module's screens. |
+| Q-18 | FX provider budget: Open Exchange Rates' free plan (1,000 requests a month, daily historical rates, USD base) if its terms allow Budmon's use, otherwise its Developer plan at $12 a month; `fawazahmed0/exchange-api` (free, CC0, includes EGP, historical by date) as fallback. Up to $12 a month OK? | Yes. | The FX slice. |
+| Q-19 | Cost levers (D-29): keep staging always on (CX23, about €6 a month), or create it on demand per release (cents, slower releases)? | Always on. | Deployment slices. |
+| Q-20 | Domain: which one you acquire (`.ai` is several times the price of `.com` and is registered for multiple years). Not blocking: configuration uses a placeholder until then. | Your choice. | Production deploy only. |
 
 ## 12. Out of scope / future work
 
-- An OpenTelemetry Collector with redaction processing (D-24).
-- Client-side trace export (Grafana Faro or OTel web/Android) (D-24).
+- Public-scale deployment (§7.6): dedicated or managed Postgres with a replica, a transaction-mode pooler, several API hosts behind a load balancer, separate worker hosts, a CDN for the SPA.
+- Full-disk encryption on the VMs; high availability; cross-provider failover (before any public launch).
+- An OpenTelemetry Collector beyond Alloy's allowlist; client-side trace export (D-24).
 - Postgres row-level security (before any public launch, D-23).
 - Real-time updates (SSE or WebSockets) if a later story needs them (§5.2).
 - A persisted offline read cache and full offline use on Android (XC-22, later).
 - A separate egress design for user-hosted AI endpoints (XC-12, flagged for `capture`, D-19).
-- Kotlin Multiplatform data layer when iOS is scheduled (D-8).
-- Turborepo or Nx if builds get slow (D-5).
-- BullMQ on Redis if job volume outgrows Postgres (PD).
-- Table partitioning, only if ever needed (PD).
+- Kotlin Multiplatform data layer when iOS is scheduled (D-8); CORS or a custom protocol for the Electron app (D-36).
+- The `/release` command (D-12, drafted when there's something to release).
+- Turborepo or Nx if builds get slow (D-5); BullMQ on Redis if job volume outgrows Postgres (PD); table partitioning only if ever needed (PD).
 - A status page; a second independent uptime check; an in-app error and health view for the owner (spec P22).
-- Cross-region backups and high availability (before any public launch).
 - Public-launch requirements: Google verification and security assessment, Play Store SMS compliance (spec §5 Later).
