@@ -108,6 +108,7 @@ It must cover:
 
 # Writing standards
 
+- Match the register to the document (user's preference). Plain, accessible language belongs only in very high-level documents. HLDs that deal with protocols, technologies, algorithms and the like should use precise technical language, and LLDs should always be technical.
 - Be specific. "Validate the input" says nothing. Say which fields, which rules, and which error is returned.
 - Prefer tables and lists over prose for schemas, functions, endpoints and errors. Use Mermaid for diagrams.
 - Use the names the codebase uses.

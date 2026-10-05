@@ -16,3 +16,22 @@ Decided by the user in conversation, as input for the `platform` HLD. The planne
 | API servers | Stateless, so more can be added | |
 | Observability | OpenTelemetry instrumentation; structured logs with pino; Sentry (free plan to start) for errors on backend, web and Android, and Grafana Cloud's free tier for traces, metrics and logs (confirmed: "we'll go with this") | Hard rule, user: "yes, totally, very important": logs, traces and error reports never contain amounts, payees, message content or tokens. Keep metric labels low-cardinality (free tier: 10k active series). |
 | Scale target | Design for public scale, launch invite-only | |
+
+## Answers to the platform HLD v0.3 open questions (2026-10-05)
+
+| Question | Answer (user's words where useful) |
+| -------- | ---------------------------------- |
+| Web app framework (D-7) | "can we make the webapp a solid or vanilla ts web app instead? since sometimes the app will show big tables and performance will be crucial" → SolidJS (vanilla TS rejected: it would mean hand-building a component, state and routing layer; table performance comes from virtualisation, which Solid supports). |
+| Q-1 Backups | Accepted: daily, 14-day retention, 7 days point-in-time recovery. |
+| Q-2 Capture-only key | Accepted as proposed. |
+| Q-3 Alerts | Accepted ("awesom"). |
+| Q-4 Hosting | "hosting during the first stage where it's invite only will probably run on hetzner or on a locally run and managed not so expensive server" — hosting, environments and costs are to be designed for the invite-only stage. |
+| Q-5 FX provider | "we'll have to find something that works and not for too much money" — research cheap/free options that cover currencies like EGP and historical rates. |
+| Q-6 Domain | "let's try getting budmon.ai or budmon.com and we can have the backend be a subdomain or just a subpath like /api/v<x>_<y>/" |
+| Q-7 Language | "english first, accessible and calm only in very high-level documents. however technical talk its good for hld's that involve protocols, technologies, algorithms or any such things, and is definitely the preferred language for lld's" (recorded as a documentation-style rule in the planner's instructions; the app's own UI tone is still open, P8). |
+| Q-9 Staging | "sounds good, I guess, but let's find a cheaper option cuz that sounds like too much. when discussing deployment and running costs and environments please concern yourself with the invite-only stage" |
+| Q-11 Gmail publishing status | Recommendation accepted: (b) "In production" without verification, confirmed by a spike before `sources` is designed; (a) as fallback. |
+| Q-12 Production pooler | "none at launch" |
+| Q-13 Release step | Accepted; "let's get to it when we have something to release". |
+| Q-14 Hotfixes | (a) built from the last release. |
+| Q-8, Q-10 | Not answered; recommendations stand as assumptions. |
