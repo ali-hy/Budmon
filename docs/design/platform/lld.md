@@ -2,7 +2,7 @@
 module: platform
 doc: lld
 status: draft # draft | in-review | approved
-version: 0.2
+version: 0.3
 hld_version: 1.0
 author: planner
 approved_by:
@@ -58,6 +58,8 @@ Nothing in that list changes application code (D-29 rule 2).
 | 0.2     | 2026-10-05 | **P-6** (slices): S-15 is split into S-15a, S-15b and S-15c, and S-11 into S-11a and S-11b (S-13 suggestion). Canaries move to `@budmon/test-support` (F-198, delivered in S-3), and the Sentry capture endpoint becomes F-194. S-15a depends on S-11b; S-16 depends on S-11b and S-13. Test-case slice labels are updated. |
 | 0.2     | 2026-10-05 | **P-7** (inherited grants): `pg_read_all_data` and `pg_monitor` are granted `WITH INHERIT TRUE`; the migrator gets `pg_monitor WITH ADMIN` from cluster bootstrap so it can grant it on. §3.3, F-14 and F-15 now agree. TP-2.20 is new. |
 | 0.2     | 2026-10-05 | Suggestions: **S-1** a provisional conversion of a past date also enqueues a backfill (F-132, TP-9.5b). **S-2** `fx` is built for every worker role (F-96). **S-3** body handling between Fastify and oRPC is specified, with a fallback (F-55, TP-4.19). **S-4** F-79 writes `/tmp/heartbeat` through an injected writer (TP-6.10). **S-5** Caddy has a fixed address and is the only trusted proxy (`TRUSTED_PROXY` in `prod-s0.env`, TP-5.10). **S-6** `unavailable` kinds for non-envelope 502/503/504, and 503 `unknown` maps to the "couldn't confirm" message (F-202, F-203, F-252). **S-7** Android 401 keeps entries pending; `SENDING` resets on start (F-255, TP-13.5). **S-8** the sequence number is `release.yml`'s `GITHUB_RUN_NUMBER`, with a full-history checkout (F-185). **S-9** distinct UIDs per service (F-172, F-175). **S-10** pgBackRest connects as `budmon_admin` over the socket with a peer mapping (`pg_ident.conf`, §7.4). **S-11** merge-back check F-6b (TP-14.9). **S-12** new cases TP-2.19, TP-4.20, TP-9.18, TP-11.29, TP-13.14, TP-13.15. **S-13** S-11 split. None declined. Q-1 (FX before 2024-03-02) added to §11 for the user. |
+| 0.3     | 2026-10-05 | Plan review round 2, **P-1** (restricted tag creation): a repository ruleset restricts creating, updating and deleting `refs/tags/v*` to a single bypass actor, the GitHub App `budmon-release-tagger` (no users or admins). The App has `contents: write` on this repository only. Its private key lives only in the `tagging` environment, whose branch policy is `main` only. `tag.yml` always runs from `main` and verifies the release PR, or the owner-approved, green hotfix/infra PR, before tagging that exact SHA. TP-16.8 now checks the ruleset and the environment through a `repo-guards` job, and the first-deploy runbook sets them up. |
+| 0.3     | 2026-10-05 | **S-1:** Postgres starts with `-c ident_file=/etc/budmon/pg_ident.conf` (mounted from the bundle), the same arguments everywhere. `ADMIN_PASSWORD` is explained (required by `initdb`, never used for login). New TP-15.1b covers peer login and `pgbackrest check` as OS user `postgres`. **S-2:** `seq = GITHUB_RUN_NUMBER + RELEASE_SEQ_OFFSET`, with a rename runbook; TP-14.6b added. **S-3:** the rehearsal copies by digest with `crane copy` and asserts digests are unchanged; `rehearse` has `id-token: write`; `verify-signature` checks its digest list equals `build`'s outputs that `rehearse` received and `sign` signed. **S-4:** `budmon-deploy status` and the deploy log report a pending `clear-previous` (TP-15.7b). None declined. |
 
 ## Amendments
 
@@ -151,7 +153,7 @@ Nothing in that list changes application code (D-29 rule 2).
 | `images/web/Dockerfile` | Upstream `caddy` plus the built SPA. |
 | `images/postgres/{Dockerfile,budmon-entrypoint.sh,postgresql.base.conf}` | Postgres 18 plus pgBackRest, with the boot safeguards (F-170). |
 | `infra/compose.yaml` | Local development: Postgres (same image as production) and Mailpit (D-28). |
-| `infra/deploy/main/` | `compose.stage0.yaml` (main project on the stage-0 VM), `compose.stage1.yaml`, `Caddyfile`, `alloy/config.alloy`, `postgres/pg_hba.prod-s0.conf`, `postgres/pg_hba.prod-s1.conf`, `postgres/pg_hba.dryrun.conf`, `postgres/postgresql.conf`, `pgbackrest/pgbackrest.conf`, `steps/deploy.sh`. |
+| `infra/deploy/main/` | `compose.stage0.yaml` (main project on the stage-0 VM), `compose.stage1.yaml`, `Caddyfile`, `alloy/config.alloy`, `postgres/pg_hba.prod-s0.conf`, `postgres/pg_hba.prod-s1.conf`, `postgres/pg_hba.dryrun.conf`, `postgres/pg_ident.conf`, `postgres/postgresql.conf`, `pgbackrest/pgbackrest.conf`, `steps/deploy.sh`. |
 | `infra/deploy/capture/` | `compose.stage0.yaml` (capture project on the stage-0 VM), `compose.stage1.yaml`, `squid/squid.conf` (stage 1), `alloy/config.alloy` (stage 1), `steps/deploy.sh`. |
 | `infra/deploy/deployments/{prod-s0,prod-s1,dryrun}.env` | Per-deployment, non-secret values: `INFRA_STAGE`, `DOMAIN`, image registry path, fixed addresses (F-175). |
 | `infra/deploy/bootstrap/budmon-deploy` | The bootstrap (bash, F-171). |
@@ -163,7 +165,7 @@ Nothing in that list changes application code (D-29 rule 2).
 | `infra/systemd/{budmon-boot.service,pgbackrest-full.timer,pgbackrest-diff.timer,pgbackrest-*.service,budmon-backup-metrics.timer,budmon-backup-metrics.service}` | Host units (S-15c). |
 | `infra/secrets/<deployment>/<host-role>/<service>.sops.yaml`, `infra/secrets/.sops.yaml` | Secret files (D-20); `.sops.yaml` holds the creation rules mapping each `<deployment>/<host-role>` path to its age recipients. |
 | `infra/tofu/{main.tf,hetzner.tf,gcp.tf,b2.tf,grafana.tf,variables.tf,stage0.tfvars}` | OpenTofu for stage 0 (S-15c). |
-| `infra/runbooks/{restore-drill.md,first-deploy.md,rotate-role-password.md}` | Runbooks (S-15b, S-15c). |
+| `infra/runbooks/{restore-drill.md,first-deploy.md,rotate-role-password.md,rename-release-workflow.md}` | Runbooks (S-15b, S-15c). |
 
 ### 2.4 Pinned versions
 
@@ -1766,7 +1768,8 @@ Pure functions with no I/O. Imported by the server and the web app. Android mirr
   2. If `$PGDATA/PG_VERSION` is missing:
      - `BUDMON_FIRST_SETUP=1` → run the upstream `docker-entrypoint.sh` initialisation with `POSTGRES_USER=budmon_admin`, `POSTGRES_PASSWORD_FILE=/run/secrets/ADMIN_PASSWORD` and `POSTGRES_DB=postgres`. `10-budmon.sh` runs the bootstrap SQL with `psql -v migrator_verifier="$(cat /run/secrets/MIGRATOR_VERIFIER)" -v dbname=budmon`.
      - Otherwise print `Refusing to initialise an empty data directory without BUDMON_FIRST_SETUP=1` and exit 70.
-  3. Otherwise `exec docker-entrypoint.sh postgres -c config_file=/etc/budmon/postgresql.conf -c hba_file=/etc/budmon/pg_hba.conf`.
+  3. Otherwise `exec docker-entrypoint.sh postgres -c config_file=/etc/budmon/postgresql.conf -c hba_file=/etc/budmon/pg_hba.conf -c ident_file=/etc/budmon/pg_ident.conf`. `pg_hba.conf` and `pg_ident.conf` are mounted read-only from the bundle at `/etc/budmon/`. These are the **only** start-up arguments, and the rehearsal and the CI image tests start the image the same way (they use the stage's Compose file, not their own command line).
+  - **`ADMIN_PASSWORD`** is needed only because the upstream entrypoint requires a superuser password at `initdb`. After that, `budmon_admin` logs in only by `peer` over the socket (no `host` line exists), so the password is never used for a login. It stays in the Postgres secret file as a break-glass value, usable only by temporarily editing `pg_hba.conf`.
 - **Configuration** (`infra/deploy/main/postgres/postgresql.conf`, mounted read-only):
   - **Logging (D-24 rule 8):** `log_error_verbosity = terse`, `log_min_error_statement = panic`, `log_statement = none`, `log_parameter_max_length = 0`, `log_parameter_max_length_on_error = 0`, `log_destination = stderr`.
   - **Connections and TLS:** `password_encryption = scram-sha-256`, `ssl = on` with `ssl_cert_file`/`ssl_key_file` = `/run/secrets/TLS_CERT` and `/run/secrets/TLS_KEY`, `listen_addresses = '${BUDMON_LISTEN_ADDRESSES}'` (through `-c` from Compose), `max_connections = 100`.
@@ -1796,7 +1799,8 @@ Pure functions with no I/O. Imported by the server and the web app. Android mirr
   5. For every application image in the manifest: F-174 verification, then `docker pull <image@digest>` (exit 13 on failure). Third-party images are pulled by their digest from the manifest.
   6. Run `steps/deploy.sh <tag>` from the `main` bundle, then from the `capture` bundle on a `main,capture` host (F-172), passing the step's exit code through.
   7. Write `state.json`: `previous ← current`, `current ← { tag, seq }`. Exit 0.
-- **`status`:** prints `state.json` and `docker compose ps --format json` for each project.
+- **`status`:** prints `state.json` and `docker compose ps --format json` for each project. It also prints `migrator_previous_password_used: true|false`, read from the last migrate run's log line (F-92), and the reminder "run `budmonctl secrets clear-previous`" when true.
+- **Deploy log:** after step 4 of F-172, if the migrate container's output contains the `migrator_previous_password_used` event, the bootstrap writes `NOTICE migrator rotation applied; run budmonctl secrets clear-previous --deployment <d>` to stdout, which the release workflow's `deploy` job surfaces as a GitHub Actions `::notice::`.
 - **`--boot`:** for `state.current`, decrypts secrets and runs `compose up -d` for each role from the extracted bundle. No pull, no migrate. Always exits 0 and logs to journald.
 - **`--self-test`:** prints the anchors' SHA-256 and the host role.
 - **Exit codes:** 0 ok; 10 bad tag; 11 sequence rejected; 12 verification failed; 13 pull failed; 15 migrate failed; 16 not ready, rolled back; 17 rollback failed; 18 secrets decryption failed.
@@ -1841,7 +1845,7 @@ Pure functions with no I/O. Imported by the server and the web app. Android mirr
   - Production images and bundles are signed only by the `sign` job of `release.yml`, which is triggered **only** by `push: tags: ["v*"]`. Its SAN is therefore always `…/.github/workflows/release.yml@refs/tags/<tag>`, which the regex matches.
   - Nothing signs with this identity from a branch ref. `tag.yml`, which creates the tags, signs nothing.
 - **Rehearsal anchors** (`infra/deploy/rehearsal/trust/`): `identity.regex` = `^https://github\.com/<owner>/<repo>/\.github/workflows/rehearsal\.yml@refs/(pull/[0-9]+/merge|tags/v[0-9]+\.[0-9]+\.[0-9]+(-(hotfix|infra)\.[0-9]+)?)$`. `rehearsal.yml` is a reusable workflow called from `ci.yml` (pull requests: ref `refs/pull/<n>/merge`) and from `release.yml` (ref `refs/tags/<tag>`). The SAN of a reusable workflow is the called file at the caller's ref.
-- **Changing anchors without a rebuild:** F-171 step 4 self-update. A bundle carrying new anchors is verified with the current ones first, so a renamed workflow is shipped by one release, signed under the old name, that widens the regex.
+- **Changing anchors without a rebuild:** F-171 step 4 self-update. A bundle carrying new anchors is verified with the current ones first. So a renamed release workflow is shipped by one release, signed under the old name, that widens the regex. **Before** the first run of the renamed workflow, the repository variable `RELEASE_SEQ_OFFSET` is raised above the last released sequence number (F-185), because a renamed or recreated workflow restarts `GITHUB_RUN_NUMBER` at 1. The runbook `rename-release-workflow.md` lists both steps. Renaming isn't expected; the procedure exists so it can never strand the hosts.
 
 #### F-175: Compose files and deployment values
 - **Files:** `infra/deploy/main/compose.stage0.yaml`, `infra/deploy/capture/compose.stage0.yaml`, `compose.stage1.yaml` (both roles), `infra/deploy/deployments/<deployment>.env`
@@ -2010,7 +2014,8 @@ Pure functions with no I/O. Imported by the server and the web app. Android mirr
 #### F-185: `releaseSequence`
 - **File:** `tools/ci/releaseSequence.ts`
 - **Signature:** `export function releaseSequence(env: Readonly<Record<string, string | undefined>>): number`
-- **Behaviour:** returns `Number(env.GITHUB_RUN_NUMBER)` from the `release.yml` run, which GitHub increments for every run of that workflow, never reuses and keeps across re-run attempts. It doesn't depend on fetched tags or tag deletion. This number is the manifest's `seq` and the web build number.
+- **Behaviour:** returns `Number(env.GITHUB_RUN_NUMBER) + Number(env.RELEASE_SEQ_OFFSET ?? "0")` from the `release.yml` run. `GITHUB_RUN_NUMBER` increments for every run of that workflow, is never reused and is kept across re-run attempts. `RELEASE_SEQ_OFFSET` is a repository variable (default `0`), raised only when the workflow is renamed or recreated (F-174). The result doesn't depend on fetched tags or tag deletion. It's the manifest's `seq` and the web build number.
+- **Errors:** a non-integer `RELEASE_SEQ_OFFSET` → `Error("RELEASE_SEQ_OFFSET invalid")`.
 - **Errors:** missing or non-integer → `Error("GITHUB_RUN_NUMBER missing")`.
 
 #### F-195: `runRehearsal`
@@ -2018,7 +2023,7 @@ Pure functions with no I/O. Imported by the server and the web app. Android mirr
 - **Signature:** `export async function runRehearsal(opts: { mode: "full" | "infra"; previousTag: string | null; images: { server: string; web: string; postgres: string }; bundles: { main: string; capture: string }; workDir: string }, deps: { exec: (cmd: string, args: string[], o?: object) => Promise<{ code: number; stdout: string }> /* [inj] */ }): Promise<{ ok: boolean; steps: { name: string; ok: boolean; detail: string }[] }>`
 - **Steps** (each recorded; the first failure stops the run, except that cleanup and artifact collection always run):
   1. `verify-bundles`:
-     - copies the images and bundles under test into a local `registry:2` container;
+     - copies the images and bundles under test into a local `registry:2` container with `crane copy <ref@digest> localhost:5000/<name>@<digest>`. It's a manifest copy, never a rebuild or re-push of rebuilt images, so the digests are identical; the step asserts each copied digest equals its input;
      - signs them keylessly as `rehearsal.yml` (`cosign sign --yes`, `id-token: write`);
      - fetches the current Sigstore trusted root;
      - runs the **real** bootstrap's `verify_ref` (F-174) with the rehearsal anchors, which must pass, and with the **production** anchors, which must fail (wrong workflow);
@@ -2941,6 +2946,7 @@ The platform's slices are **capability slices** rather than one story each. Each
 | Scenario | Happy / unhappy | Expected | Tests |
 | -------- | --------------- | -------- | ----- |
 | Postgres boot safeguards | unhappy and happy | As in F-170. | TP-15.1 |
+| Peer login for `budmon_admin` and pgBackRest | happy and unhappy | As in F-170. | TP-15.1b |
 | Postgres logs don't leak | unhappy | No canary. | TP-15.2 |
 | `pg_hba` rules, stage 0 | happy and unhappy | As in F-175. | TP-15.3 |
 | Caddy behaviour | happy and unhappy | As in F-175. | TP-15.13 |
@@ -2954,6 +2960,7 @@ The platform's slices are **capability slices** rather than one story each. Each
 | Scenario | Happy / unhappy | Expected | Tests |
 | -------- | --------------- | -------- | ----- |
 | Bootstrap: tag, sequence, verification, self-update | unhappy and happy | As in F-171/F-174. | TP-15.4 to TP-15.7 |
+| Pending migrator rotation reported | happy | As in F-171 `status`. | TP-15.7b |
 | Deploy steps: order, rollback, queue upgrade under maintenance, secrets, placeholders | happy and unhappy | As in F-172. | TP-15.8, TP-15.9 |
 | Host `budmonctl` | happy | As in F-173. | TP-15.10 |
 | Owner `budmonctl`: SCRAM, rotation (including the migrator), init | happy and unhappy | As in F-190 to F-192, F-92. | TP-15.11, TP-15.12 |
@@ -2990,20 +2997,30 @@ The platform's slices are **capability slices** rather than one story each. Each
 | Stage-0 overlay | happy and unhappy | Ready; worker-capture can't reach Postgres except through `capture-db`. | TP-16.7 |
 | Release workflow structure | happy | Tag pushed by `tag.yml`; `release.yml` signs only after the rehearsal; approval gate; deploy. | TP-16.8 |
 | Real signatures against the anchors | happy and unhappy | Rehearsal and release identities verify only against their own anchors. | TP-16.9, TP-16.10 |
+| Sequence offset after a workflow rename | happy and unhappy | As in F-185. | TP-14.6b |
 
-- **Tagging workflow** (`tag.yml`):
-  - **Triggers:** `push` to `main` whose head commit is a merge of a `release/*` pull request (detected through the GitHub API); and `workflow_dispatch` with input `ref` (a `hotfix/*` or `infra/*` branch whose pull request checks passed).
+- **Who can create release tags.** A tag push runs the `release.yml` stored at the tagged commit under the production signing identity, so **creating a `v*` tag is restricted to `tag.yml`**:
+  - **Repository ruleset** `release-tags`: target tags matching `refs/tags/v*`, rules "restrict creations", "restrict updates" and "restrict deletions", enforcement active. The bypass list contains **only** the GitHub App `budmon-release-tagger`: no users, not even the owner or repository admins; no teams; no deploy keys.
+  - **The App:** installed on this repository only, with repository permission `contents: write` and nothing else (no workflows, actions, administration or packages permissions).
+  - **Its private key** is stored **only** as the secret `TAGGER_APP_PRIVATE_KEY` of a GitHub environment `tagging`, whose deployment-branch policy allows `main` only. Only jobs that declare `environment: tagging` and run from `main` can read it. The App ID is the environment variable `TAGGER_APP_ID`.
+  - The runbook `infra/runbooks/first-deploy.md` adds: create the App, install it on the repository only, create the `tagging` environment with the key, create the ruleset, and record that the owner's own account isn't on the bypass list.
+- **Tagging workflow** (`tag.yml`), which **always runs from `main`**:
+  - **Triggers:** `push` to `main` whose head commit is a merge of a `release/*` pull request (detected through the GitHub API); and `workflow_dispatch` (dispatched on `main`; any other ref fails the first step) with inputs `kind` (`hotfix` or `infra`) and `pr` (a pull-request number).
   - **Jobs:**
-    1. `verify`: check (i) on that commit (release/hotfix), or F-6 plus the infra-only diff rule (infra).
-    2. `tag`: creates and pushes `vX.Y.Z[-hotfix.N|-infra.N]` on that commit, with the version from the branch name. The push uses a **GitHub App installation token** (`actions/create-github-app-token`; the App has `contents: write` only), because tags pushed with `GITHUB_TOKEN` don't trigger other workflows.
+    1. `verify` (no secrets):
+       - **Release:** the merge commit's pull request has a head branch matching `release/v<semver>` and base `main`.
+       - **Dispatch:** the pull request `pr` must have a head branch matching `^(hotfix|infra)/v<semver>(-(hotfix|infra)\.\d+)?$` consistent with `kind`; base `main`; state open; an approving review from the repository owner on its current head SHA; and every required check successful on that SHA.
+       - Records the commit SHA to tag (the merge commit, or the PR's head SHA), then runs check (i) on it (release/hotfix), or F-6 plus the infra-only diff rule (infra).
+    2. `tag`: `environment: tagging`, `needs: verify`. Mints an installation token with `actions/create-github-app-token`, scoped to this repository, using `TAGGER_APP_ID`/`TAGGER_APP_PRIVATE_KEY`. Creates the annotated tag `vX.Y.Z[-hotfix.N|-infra.N]` on exactly the SHA from `verify` (version from the branch name) and pushes it with that token. A token from the App is needed because tags pushed with `GITHUB_TOKEN` don't trigger other workflows, and only the App can bypass the ruleset.
   - It signs nothing.
+- **Consequence:** a production signature (`release.yml@refs/tags/v…`) can only come from a commit that was merged to `main` through a reviewed release pull request, or from the head of an owner-approved hotfix/infra pull request with green checks. In both cases `release.yml` is the reviewed one, and its `sign` job needs `rehearse`. This is what HLD D-29's "root on the main VM can at most re-deploy a signed release" relies on.
 - **Release workflow** (`release.yml`):
   - **Trigger:** `push: tags: ["v*"]` only. `actions/checkout` uses `fetch-depth: 0` and `fetch-tags: true` for the previous-release lookups.
   - **Jobs:**
     1. `build`: `BUDMON_BUILD_NUMBER = releaseSequence(env)` (F-185). Builds the images and both bundles (infra: bundles only, reusing the previous release manifest's image digests) and pushes them **unsigned**, by digest.
-    2. `rehearse`: calls `rehearsal.yml` with those digests (needs `build`).
+    2. `rehearse`: calls `rehearsal.yml` with those digests as inputs (needs `build`), with `permissions: { contents: read, id-token: write, packages: read }` (`id-token: write` for the rehearsal's own keyless signing in step 1).
     3. `sign`: needs `rehearse`. `cosign sign --yes` on every new image and bundle digest, under `release.yml@refs/tags/<tag>`.
-    4. `verify-signature`: needs `sign`. Runs the bootstrap's `verify_ref` (F-174) with the **production** anchors, taken from the bundle just built, against every digest in the manifest (including reused ones). This is the real-signature test on every release.
+    4. `verify-signature`: needs `sign` (and therefore `build` and `rehearse`). First asserts that the digest list it verifies is **exactly** `build`'s output digest list, which is also the input `rehearse` received (job outputs compared as sorted JSON), and that `sign` signed exactly that list. Then runs the bootstrap's `verify_ref` (F-174) with the **production** anchors, taken from the bundle just built, against every digest in the manifest (including reused ones). This is the real-signature test on every release.
     5. `deploy`: needs `verify-signature`. `environment: production` (required reviewer: the user). Runs `ssh -i $DEPLOY_KEY deploy@$HOST "deploy <tag>"`, with the host key pinned in the `known_hosts` secret.
     6. `android`: uploads the release APK to Firebase App Distribution (A-12) after `deploy` succeeds (release and hotfix only).
 - **Acceptance criteria:** the rehearsal passes for the first release candidate. The production deploy uses exactly the digests the tagged rehearsal ran. No digest is signed unless its rehearsal passed.
@@ -3274,9 +3291,11 @@ Types: **U** unit, **I** integration (real Postgres and/or HTTP in-process), **E
 | TP-14.4 | S-14 | I | F-182 | fixture projects: consistent; a migration missing a column; a stale snapshot; no migrations | Run | ok; `dumpDiff` mentions the column; `snapshotClean:false`; ok |
 | TP-14.5 | S-14 | U | F-184 | SQL with each pattern; with `-- reviewed: safe because empty table` above one; `-- reviewed: x` | Run | Each flagged with its line; the reviewed one not flagged; the too-short reason still flagged |
 | TP-14.6 | S-14 | U | F-185 | `["v0.1.0","v0.1.1-hotfix.1","x","v0.2.0-infra.1"]` | | 3 |
+| TP-14.6b | S-16 | U | F-185 offset | none | env `GITHUB_RUN_NUMBER=7`, no offset; with `RELEASE_SEQ_OFFSET=100`; offset `x` | 7; 107; `Error` |
 | TP-14.7 | S-14 | I | F-183 | no previous tag | Run the upgrade harness | Reports "skipped: baseline", passes |
 | TP-14.8 | S-14 | S | `ci.yml` | `actionlint`; a test parsing `ci.yml` | | `migrations` job conditions per branch type as in §10.1 |
 | TP-14.9 | S-14 | I | F-6b | fixture repos: (a) a hotfix migration that applies and is absent from the pending report; (b) a hotfix whose change still shows as pending; (c) a migration that fails on an empty database; (d) an infra merge-back adding a migration | Run | (a) ok; (b) problem "hotfix change still pending"; (c) "migrations don't apply"; (d) problem |
+| TP-15.1b | S-15a | I | F-170 peer mapping | image started with the stage-0 Compose service definition; MinIO repository | As OS user `postgres` in the container: `psql -U budmon_admin -c 'select 1'`; `pgbackrest --stanza=budmon stanza-create`; `pgbackrest check`; as another OS user, `psql -U budmon_admin` | Succeeds ×3 without a password; the last is rejected |
 | TP-15.1 | S-15a | I | F-170 | built image; empty bind mount | Start without the flag; with the flag; restart with data; without a mounted `/var/lib/postgresql/data` | Exit 70 with the message; initialised, `budmon_migrator` exists, `budmon` owned by it; starts; exit 70 |
 | TP-15.2 | S-15a | I | F-170 config | running image | As `budmon_app`, run an `INSERT` violating a check constraint with a canary value | Container log has an error line without the canary or the statement |
 | TP-15.3 | S-15a | I | `pg_hba.prod-s0` | stage-0 Compose in CI with throwaway secrets | `budmon_capture` from worker-capture over `verify-full`; `budmon_capture` with `sslmode=disable`; `budmon_app` from worker-capture's address; `budmon_admin` over TCP | ok; rejected; rejected; rejected |
@@ -3284,6 +3303,7 @@ Types: **U** unit, **I** integration (real Postgres and/or HTTP in-process), **E
 | TP-15.5 | S-15b | U (bats) | F-171 sequence | state current seq 5, previous 4; manifests seq 6, 4, 3, 5; state null | | Accept, accept (rollback), exit 11, exit 11, accept |
 | TP-15.6 | S-15b | U (bats) | F-174 | `cosign` stub failing | deploy | Exit 12; nothing extracted; no `docker` calls |
 | TP-15.7 | S-15b | U (bats) | F-171 self-update | bundle with a different bootstrap | deploy | New bootstrap installed, `.previous` kept, re-exec once (`BUDMON_REEXEC=1`), no loop |
+| TP-15.7b | S-15b | U (bats) | F-171 status and deploy log | migrate stub output containing the `migrator_previous_password_used` event; then without it | `deploy`, then `status` | stdout has the `NOTICE … clear-previous` line and `status` prints `migrator_previous_password_used: true` with the reminder; without the event, `false` and no notice |
 | TP-15.8 | S-15b | U (bats) | F-172 | `docker` stub recording calls; (a) `exec api … --ready` stub failing; (b) `queueUpgrade:true` with every stub succeeding and a Caddy stub that would answer 503 | deploy | (a) Order: decrypt, silence, migrate, `up` main, capture `up`, readiness via `docker compose exec -T api node dist/main/healthcheck.js --ready`; then the rollback `up` with the previous bundle; exit 16. (b) Maintenance on before migrate; readiness passes without touching Caddy; maintenance off at the end; exit 0 |
 | TP-15.9 | S-15b | U (bats) | F-172 secrets | `sops` stub output JSON; a file with `__FILL_ME__` | deploy | Files written per key, mode 0400 and owner per service; `capture` keys only under `/run/budmon/secrets/worker-capture`; the placeholder → exit 18 |
 | TP-15.10 | S-15b | U (bats) | F-173 | stubs | `maintenance on`, `status`, `off`, `reboot`, `foo` | Flag created; `on`; removed; compose stop capture, then main, then `systemctl reboot`; exit 64 |
@@ -3302,7 +3322,7 @@ Types: **U** unit, **I** integration (real Postgres and/or HTTP in-process), **E
 | TP-16.5 | S-16 | E | canary flows | rehearsal stack | Flows: a request whose body fails validation with a canary in a field; malformed JSON containing a canary; an FX backfill failing because fake FX returns 500 with a canary body; a `GET` with a canary in the query string | Scan finds no canary in any source listed in F-195 step 8 (capture-path flows are added by `sources`) |
 | TP-16.6 | S-16 | E | steps 9, 10 | rehearsal with a doctored overlay adding `INFRA_STAGE=0` to `api`; another mounting capture secrets into `api` | Run | Step 9 fails; step 10 fails |
 | TP-16.7 | S-16 | E | F-199 | stage-0 overlay | Run | Ready; worker-capture's connection to `PG_DATA_IP:5432` fails |
-| TP-16.8 | S-16 | S | `tag.yml`, `release.yml` | actionlint + a structure test | Parse | `release.yml` triggers only on `push: tags: v*`; `sign` needs `rehearse`; `verify-signature` needs `sign`; `deploy` needs `verify-signature` and has `environment: production`; `tag.yml` pushes with an App token and contains no `cosign sign`; `checkout` has `fetch-depth: 0` |
+| TP-16.8 | S-16 | S | `tag.yml`, `release.yml`, repository settings | actionlint + a structure test; a scheduled and on-demand CI job `repo-guards` using `gh api` with a read-only admin-scoped token stored as the `repo-guards` environment secret | Parse; query `GET /repos/{o}/{r}/rulesets` and the ruleset detail; `GET /repos/{o}/{r}/environments/tagging` | `release.yml` triggers only on `push: tags: v*`; `sign` needs `rehearse`; `verify-signature` needs `sign`; `deploy` needs `verify-signature` and has `environment: production`; `tag.yml` has no `cosign sign`, its `tag` job has `environment: tagging` and `needs: verify`, its dispatch path fails on a non-`main` ref; `checkout` has `fetch-depth: 0`. A ruleset targets `refs/tags/v*` with creation, update and deletion restricted, enforcement `active`, and a bypass list of exactly one actor of type `Integration` (the App). The `tagging` environment's branch policy allows `main` only. Any deviation fails the job and opens an issue |
 | TP-16.9 | S-16 | E | F-174 with real signatures | rehearsal step 1 (every release PR) and `release.yml` `verify-signature` (every release) | Verify rehearsal-signed digests with the rehearsal anchors; with the production anchors; release-signed digests with the production anchors | Pass; fail (exit 12); pass |
 | TP-16.10 | S-16 | U (bats) | anchor regexes | none | Production regex against SANs `…/release.yml@refs/tags/v1.2.0`, `…@refs/tags/v1.2.0-hotfix.1`, `…@refs/tags/v1.2.0-infra.1`, `…/release.yml@refs/heads/main`, `…/ci.yml@refs/tags/v1.2.0`; rehearsal regex against `…/rehearsal.yml@refs/pull/12/merge` and `…/rehearsal.yml@refs/heads/x` | match ×3, no ×2; match, no |
 
