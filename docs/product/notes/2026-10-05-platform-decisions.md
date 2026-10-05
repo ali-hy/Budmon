@@ -35,3 +35,16 @@ Decided by the user in conversation, as input for the `platform` HLD. The planne
 | Q-13 Release step | Accepted; "let's get to it when we have something to release". |
 | Q-14 Hotfixes | (a) built from the last release. |
 | Q-8, Q-10 | Not answered; recommendations stand as assumptions. |
+
+## Answers to the platform HLD v0.5 open questions (2026-10-05)
+
+| Question | Answer (user's words where useful) |
+| -------- | ---------------------------------- |
+| Q-15 Capture-only decryption | Asked for the recommended way: "I don't mind using one or two more servers to avoid this, if that's what's needed". Also asked whether running the capture worker on Google Cloud is the better option. |
+| Q-16 API path | "alright, sounds good, major versions only for the api" → `/api/v1`. |
+| Q-17 App UI conventions | Accepted (English first, accessible, calm non-judgemental tone), plus: "we should definitely have something from the very start for languages" (i18n from day one). Asked "is accessibility a big requirement here?" (open). |
+| RTL rules | "if you use css you must use the *-inline-start and *-inline-end properties, and if you use tailwind you must use the *s and *e properties like ms, ps, me, pe and such. except for a few exceptions. arrow icons (and only some other icons) should be flipped in rtl languages as well using -scale-1 and such transformations. I might be missing some things so please review this list of items that need to be covered for rtl. we will have to test this in an rtl language, but we'll leave this for after the mvp is completed" |
+| FX storage | "we can have our own logic for handling the storage of only the relevant historical rates if possible, because that might allow us to use a cheaper service. we can also use a certain standard exchange that we store daily like currency-to-usd as much as possible" |
+| Q-19 Staging | "for the invite-only stage we will have only one environment no staging." |
+| Q-20 Domain | "we want a cheap domain that would be well recognized. .com is good. we could look at .io as well. but I think .com is our best bet" → budmon.com (fallback .io). |
+| Q-18 FX budget | Not answered directly; see FX storage. |
