@@ -1,7 +1,7 @@
 ---
 module: platform
 doc: hld
-status: draft # draft | in-review | approved
+status: in-review # draft | in-review | approved
 version: 0.3
 author: planner
 approved_by:
