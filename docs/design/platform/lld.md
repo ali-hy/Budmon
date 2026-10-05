@@ -2,7 +2,7 @@
 module: platform
 doc: lld
 status: draft # draft | in-review | approved
-version: 0.3
+version: 0.4
 hld_version: 1.0
 author: planner
 approved_by:
@@ -60,6 +60,8 @@ Nothing in that list changes application code (D-29 rule 2).
 | 0.2     | 2026-10-05 | Suggestions: **S-1** a provisional conversion of a past date also enqueues a backfill (F-132, TP-9.5b). **S-2** `fx` is built for every worker role (F-96). **S-3** body handling between Fastify and oRPC is specified, with a fallback (F-55, TP-4.19). **S-4** F-79 writes `/tmp/heartbeat` through an injected writer (TP-6.10). **S-5** Caddy has a fixed address and is the only trusted proxy (`TRUSTED_PROXY` in `prod-s0.env`, TP-5.10). **S-6** `unavailable` kinds for non-envelope 502/503/504, and 503 `unknown` maps to the "couldn't confirm" message (F-202, F-203, F-252). **S-7** Android 401 keeps entries pending; `SENDING` resets on start (F-255, TP-13.5). **S-8** the sequence number is `release.yml`'s `GITHUB_RUN_NUMBER`, with a full-history checkout (F-185). **S-9** distinct UIDs per service (F-172, F-175). **S-10** pgBackRest connects as `budmon_admin` over the socket with a peer mapping (`pg_ident.conf`, §7.4). **S-11** merge-back check F-6b (TP-14.9). **S-12** new cases TP-2.19, TP-4.20, TP-9.18, TP-11.29, TP-13.14, TP-13.15. **S-13** S-11 split. None declined. Q-1 (FX before 2024-03-02) added to §11 for the user. |
 | 0.3     | 2026-10-05 | Plan review round 2, **P-1** (restricted tag creation): a repository ruleset restricts creating, updating and deleting `refs/tags/v*` to a single bypass actor, the GitHub App `budmon-release-tagger` (no users or admins). The App has `contents: write` on this repository only. Its private key lives only in the `tagging` environment, whose branch policy is `main` only. `tag.yml` always runs from `main` and verifies the release PR, or the owner-approved, green hotfix/infra PR, before tagging that exact SHA. TP-16.8 now checks the ruleset and the environment through a `repo-guards` job, and the first-deploy runbook sets them up. |
 | 0.3     | 2026-10-05 | **S-1:** Postgres starts with `-c ident_file=/etc/budmon/pg_ident.conf` (mounted from the bundle), the same arguments everywhere. `ADMIN_PASSWORD` is explained (required by `initdb`, never used for login). New TP-15.1b covers peer login and `pgbackrest check` as OS user `postgres`. **S-2:** `seq = GITHUB_RUN_NUMBER + RELEASE_SEQ_OFFSET`, with a rename runbook; TP-14.6b added. **S-3:** the rehearsal copies by digest with `crane copy` and asserts digests are unchanged; `rehearse` has `id-token: write`; `verify-signature` checks its digest list equals `build`'s outputs that `rehearse` received and `sign` signed. **S-4:** `budmon-deploy status` and the deploy log report a pending `clear-previous` (TP-15.7b). None declined. |
+| 0.4     | 2026-10-05 | Plan review round 3, **P-1** (self-approval): a hotfix/infra tag is approved through a new `tag-approval` environment (required reviewer: the owner, "prevent self-review" off; the user said "i don't mind you approving ur own request"), because GitHub doesn't allow approving one's own pull request. `tag.yml` gains an `approve` job on the dispatch path, and `tag` re-checks that the PR head SHA hasn't changed. The verify logic moves into F-186 `verifyTagRequest` (PR open, base `main`, branch name, checks green, head SHA recorded), with TP-16.11. TP-16.8's `repo-guards` also checks `tag-approval`'s reviewer and its prevent-self-review setting. |
+| 0.4     | 2026-10-05 | **S-1:** residual risk stated: the owner's account can change the ruleset and environments, mitigated by hardware-key 2FA and detection by `repo-guards` (hourly, on pushes to `main`, on demand; a failure opens a `security` issue and GitHub emails the owner). **S-2:** F-186 requires the hotfix/infra head to descend from the last successful production deployment's tag, and computes the infra-only diff against that tag; new `hotfix.md` runbook line: never "Update branch" before tagging. None declined. |
 
 ## Amendments
 
@@ -120,7 +122,7 @@ Nothing in that list changes application code (D-29 rule 2).
 | `packages/shared/` (`@budmon/shared`) | `src/money/*`, `src/time/*`, `src/ids/*`, `src/i18n/*`, `src/json/canonical.ts`, `src/index.ts`, `test-vectors/*.json` (S-1). |
 | `packages/contract/` (`@budmon/contract`) | `src/common/{money,dates,ids,cursor,errors,create,version}.ts`, `src/meta/metaContract.ts`, `src/index.ts`, `src/rules/contractRules.ts`, `scripts/emitOpenapi.ts`, `openapi.json` (S-4). |
 | `infra/budmonctl/` (`@budmon/budmonctl`) | The owner-side CLI in TypeScript (`src/cli.ts`, `src/scram.ts`, `src/secrets.ts`), plus `host/budmonctl` (bash, host-side commands) (S-15b). |
-| `tools/ci/` (`@budmon/tools-ci`) | `checkMigrationFiles.ts`, `checkMergeBack.ts`, `checkApiMinor.ts`, `checkCatalogs.ts`, `checkEnvExample.ts`, `releaseSequence.ts` (S-0, S-2, S-4, S-11a, S-14, S-16). |
+| `tools/ci/` (`@budmon/tools-ci`) | `checkMigrationFiles.ts`, `checkMergeBack.ts`, `verifyTagRequest.ts`, `checkApiMinor.ts`, `checkCatalogs.ts`, `checkEnvExample.ts`, `releaseSequence.ts` (S-0, S-2, S-4, S-11a, S-14, S-16). |
 | `tools/rehearsal/` (`@budmon/tools-rehearsal`) | Rehearsal harness: `src/run.ts`, `src/fakeGoogle.ts`, `src/fakeFx.ts`, `src/scan.ts`, `src/stage0Overlay.ts` (S-16). |
 
 ### 2.3 Created: applications, images and infrastructure
@@ -165,7 +167,7 @@ Nothing in that list changes application code (D-29 rule 2).
 | `infra/systemd/{budmon-boot.service,pgbackrest-full.timer,pgbackrest-diff.timer,pgbackrest-*.service,budmon-backup-metrics.timer,budmon-backup-metrics.service}` | Host units (S-15c). |
 | `infra/secrets/<deployment>/<host-role>/<service>.sops.yaml`, `infra/secrets/.sops.yaml` | Secret files (D-20); `.sops.yaml` holds the creation rules mapping each `<deployment>/<host-role>` path to its age recipients. |
 | `infra/tofu/{main.tf,hetzner.tf,gcp.tf,b2.tf,grafana.tf,variables.tf,stage0.tfvars}` | OpenTofu for stage 0 (S-15c). |
-| `infra/runbooks/{restore-drill.md,first-deploy.md,rotate-role-password.md,rename-release-workflow.md}` | Runbooks (S-15b, S-15c). |
+| `infra/runbooks/{restore-drill.md,first-deploy.md,rotate-role-password.md,rename-release-workflow.md,hotfix.md}` | Runbooks (S-15b, S-15c). |
 
 ### 2.4 Pinned versions
 
@@ -2018,6 +2020,20 @@ Pure functions with no I/O. Imported by the server and the web app. Android mirr
 - **Errors:** a non-integer `RELEASE_SEQ_OFFSET` → `Error("RELEASE_SEQ_OFFSET invalid")`.
 - **Errors:** missing or non-integer → `Error("GITHUB_RUN_NUMBER missing")`.
 
+#### F-186: `verifyTagRequest`
+- **File:** `tools/ci/verifyTagRequest.ts` (run by `tag.yml`'s `verify` job) · **Layer:** CI script (S-16)
+- **Signature:** `export async function verifyTagRequest(input: { trigger: { kind: "release"; mergeSha: string } | { kind: "hotfix" | "infra"; pr: number } }, deps: { github: { pullForMerge(sha: string): Promise<Pull | null>; pull(n: number): Promise<Pull>; requiredChecksGreen(sha: string): Promise<boolean>; lastSuccessfulProductionDeployment(): Promise<{ ref: string } | null> } /* [inj] */; git: { isAncestor(a: string, b: string): Promise<boolean>; changedFiles(base: string, head: string): Promise<string[]> } /* [inj] */ }): Promise<{ ok: boolean; sha: string | null; version: string | null; problems: string[] }>`, where `Pull = { state: "open" | "closed"; merged: boolean; base: string; headRef: string; headSha: string }`.
+- **Behaviour:**
+  - **Release:** the PR merged as `mergeSha` must have head branch `^release/v\d+\.\d+\.\d+$` and base `main`. `sha = mergeSha`; `version` from the branch.
+  - **Hotfix/infra:**
+    1. The PR must be open, with base `main`, and a head branch matching `^(hotfix|infra)/v\d+\.\d+\.\d+-(hotfix|infra)\.\d+$` whose two kind segments equal `kind`. Its required checks must be green on `headSha`.
+    2. The last deployed tag is `lastSuccessfulProductionDeployment().ref`, the latest GitHub deployment to environment `production` with status `success`, which `release.yml`'s `deploy` job creates. `isAncestor(lastTag, headSha)` must hold.
+    3. For `infra`, `changedFiles(lastTag, headSha)` must all be under `infra/`.
+    4. `sha = headSha`.
+
+    With no successful deployment yet, steps 2 and 3 are skipped.
+- **Problems** (exact strings): `branch name invalid`, `base is not main`, `pull request not open`, `checks not green`, `not descended from <tag>`, `infra-only diff violated: <first file>`.
+
 #### F-195: `runRehearsal`
 - **File:** `tools/rehearsal/src/run.ts`; CLI `pnpm --filter @budmon/tools-rehearsal rehearse --mode full|infra --previous <tag|none>`
 - **Signature:** `export async function runRehearsal(opts: { mode: "full" | "infra"; previousTag: string | null; images: { server: string; web: string; postgres: string }; bundles: { main: string; capture: string }; workDir: string }, deps: { exec: (cmd: string, args: string[], o?: object) => Promise<{ code: number; stdout: string }> /* [inj] */ }): Promise<{ ok: boolean; steps: { name: string; ok: boolean; detail: string }[] }>`
@@ -2984,7 +3000,7 @@ The platform's slices are **capability slices** rather than one story each. Each
 
 ### S-16: Release rehearsal and release workflow (D-41, D-27 step 7)
 - **Depends on:** S-15
-- **Functions:** F-185, F-194 to F-197, F-199, `.github/workflows/{rehearsal,tag,release}.yml`.
+- **Functions:** F-185, F-186, F-194 to F-197, F-199, `.github/workflows/{rehearsal,tag,release,repo-guards}.yml`; runbook `hotfix.md`.
 - **Scenarios:**
 
 | Scenario | Happy / unhappy | Expected | Tests |
@@ -2997,23 +3013,34 @@ The platform's slices are **capability slices** rather than one story each. Each
 | Stage-0 overlay | happy and unhappy | Ready; worker-capture can't reach Postgres except through `capture-db`. | TP-16.7 |
 | Release workflow structure | happy | Tag pushed by `tag.yml`; `release.yml` signs only after the rehearsal; approval gate; deploy. | TP-16.8 |
 | Real signatures against the anchors | happy and unhappy | Rehearsal and release identities verify only against their own anchors. | TP-16.9, TP-16.10 |
+| Tag requests: release, approved hotfix/infra, wrong ancestry, red checks, invalid names, infra diff | happy and unhappy | As in F-186. | TP-16.11 |
 | Sequence offset after a workflow rename | happy and unhappy | As in F-185. | TP-14.6b |
 
 - **Who can create release tags.** A tag push runs the `release.yml` stored at the tagged commit under the production signing identity, so **creating a `v*` tag is restricted to `tag.yml`**:
   - **Repository ruleset** `release-tags`: target tags matching `refs/tags/v*`, rules "restrict creations", "restrict updates" and "restrict deletions", enforcement active. The bypass list contains **only** the GitHub App `budmon-release-tagger`: no users, not even the owner or repository admins; no teams; no deploy keys.
   - **The App:** installed on this repository only, with repository permission `contents: write` and nothing else (no workflows, actions, administration or packages permissions).
   - **Its private key** is stored **only** as the secret `TAGGER_APP_PRIVATE_KEY` of a GitHub environment `tagging`, whose deployment-branch policy allows `main` only. Only jobs that declare `environment: tagging` and run from `main` can read it. The App ID is the environment variable `TAGGER_APP_ID`.
-  - The runbook `infra/runbooks/first-deploy.md` adds: create the App, install it on the repository only, create the `tagging` environment with the key, create the ruleset, and record that the owner's own account isn't on the bypass list.
+  - **Owner approval for hotfix/infra tags** comes from a GitHub environment `tag-approval`, not from a pull-request review. GitHub doesn't let anyone approve their own pull request, and the owner (or agents working under the owner's account) usually opens hotfix/infra PRs. `tag-approval` settings: required reviewer = the repository owner; **"Prevent self-review" off** (an environment approval works on one's own runs; the user confirmed this is acceptable); deployment-branch policy `main` only; no secrets.
+  - The runbook `infra/runbooks/first-deploy.md` adds:
+    - create the App and install it on the repository only;
+    - create the `tagging` environment with the key, and the `tag-approval` environment as above;
+    - create the ruleset, and record that the owner's own account isn't on the bypass list;
+    - in `infra/runbooks/hotfix.md`: never press "Update branch" (or merge `main` into) an open hotfix/infra pull request before it's tagged, because that breaks the ancestry check below.
 - **Tagging workflow** (`tag.yml`), which **always runs from `main`**:
   - **Triggers:** `push` to `main` whose head commit is a merge of a `release/*` pull request (detected through the GitHub API); and `workflow_dispatch` (dispatched on `main`; any other ref fails the first step) with inputs `kind` (`hotfix` or `infra`) and `pr` (a pull-request number).
   - **Jobs:**
-    1. `verify` (no secrets):
-       - **Release:** the merge commit's pull request has a head branch matching `release/v<semver>` and base `main`.
-       - **Dispatch:** the pull request `pr` must have a head branch matching `^(hotfix|infra)/v<semver>(-(hotfix|infra)\.\d+)?$` consistent with `kind`; base `main`; state open; an approving review from the repository owner on its current head SHA; and every required check successful on that SHA.
-       - Records the commit SHA to tag (the merge commit, or the PR's head SHA), then runs check (i) on it (release/hotfix), or F-6 plus the infra-only diff rule (infra).
-    2. `tag`: `environment: tagging`, `needs: verify`. Mints an installation token with `actions/create-github-app-token`, scoped to this repository, using `TAGGER_APP_ID`/`TAGGER_APP_PRIVATE_KEY`. Creates the annotated tag `vX.Y.Z[-hotfix.N|-infra.N]` on exactly the SHA from `verify` (version from the branch name) and pushes it with that token. A token from the App is needed because tags pushed with `GITHUB_TOKEN` don't trigger other workflows, and only the App can bypass the ruleset.
+    1. `verify` (no secrets): runs F-186 `verifyTagRequest`, which records the commit SHA to tag, then runs check (i) on it (release/hotfix), or F-6 plus the infra-only diff rule (infra) against the last deployed tag.
+    2. `approve` (dispatch path only): `environment: tag-approval`, `needs: verify`. The job's summary shows the PR number, head SHA, kind, version and F-186's report, so the owner approves exactly what will be tagged. It does nothing else.
+    3. `tag`: `environment: tagging`, `needs: [verify, approve]` (`approve` skipped on the release path; the user merging the release PR into `main` is the approval there). It first re-reads the PR (dispatch path) and fails if its head SHA changed since `verify`. Mints an installation token with `actions/create-github-app-token`, scoped to this repository, using `TAGGER_APP_ID`/`TAGGER_APP_PRIVATE_KEY`. Creates the annotated tag `vX.Y.Z[-hotfix.N|-infra.N]` on exactly the SHA from `verify` (version from the branch name) and pushes it with that token. A token from the App is needed because tags pushed with `GITHUB_TOKEN` don't trigger other workflows, and only the App can bypass the ruleset.
   - It signs nothing.
-- **Consequence:** a production signature (`release.yml@refs/tags/v…`) can only come from a commit that was merged to `main` through a reviewed release pull request, or from the head of an owner-approved hotfix/infra pull request with green checks. In both cases `release.yml` is the reviewed one, and its `sign` job needs `rehearse`. This is what HLD D-29's "root on the main VM can at most re-deploy a signed release" relies on.
+- **Consequence:** a production signature (`release.yml@refs/tags/v…`) can only come from:
+  - a commit the user merged into `main` through a release pull request with green required checks (only the user merges, CLAUDE.md); or
+  - the head of a hotfix/infra pull request with green checks, descended from the last deployed tag, whose tagging the owner approved in `tag-approval`.
+
+  In both cases `release.yml` is the reviewed one, and its `sign` job needs `rehearse`. This is what HLD D-29's "root on the main VM can at most re-deploy a signed release" relies on.
+- **Residual risk (stated, accepted):**
+  - Repository admins, i.e. the owner's account, can edit or disable the `release-tags` ruleset and the `tagging`/`tag-approval` environments, so a compromised owner GitHub account defeats this chain. Mitigations: hardware-key 2FA on the owner's account (first-deploy runbook).
+  - `repo-guards` (TP-16.8) runs **hourly** (`cron: "17 * * * *"`), on every push to `main`, and on demand. On failure it opens an issue labelled `security` and fails the run; GitHub's failed-workflow notification emails the owner. A change to the guards is therefore noticed within about an hour, not prevented.
 - **Release workflow** (`release.yml`):
   - **Trigger:** `push: tags: ["v*"]` only. `actions/checkout` uses `fetch-depth: 0` and `fetch-tags: true` for the previous-release lookups.
   - **Jobs:**
@@ -3322,7 +3349,8 @@ Types: **U** unit, **I** integration (real Postgres and/or HTTP in-process), **E
 | TP-16.5 | S-16 | E | canary flows | rehearsal stack | Flows: a request whose body fails validation with a canary in a field; malformed JSON containing a canary; an FX backfill failing because fake FX returns 500 with a canary body; a `GET` with a canary in the query string | Scan finds no canary in any source listed in F-195 step 8 (capture-path flows are added by `sources`) |
 | TP-16.6 | S-16 | E | steps 9, 10 | rehearsal with a doctored overlay adding `INFRA_STAGE=0` to `api`; another mounting capture secrets into `api` | Run | Step 9 fails; step 10 fails |
 | TP-16.7 | S-16 | E | F-199 | stage-0 overlay | Run | Ready; worker-capture's connection to `PG_DATA_IP:5432` fails |
-| TP-16.8 | S-16 | S | `tag.yml`, `release.yml`, repository settings | actionlint + a structure test; a scheduled and on-demand CI job `repo-guards` using `gh api` with a read-only admin-scoped token stored as the `repo-guards` environment secret | Parse; query `GET /repos/{o}/{r}/rulesets` and the ruleset detail; `GET /repos/{o}/{r}/environments/tagging` | `release.yml` triggers only on `push: tags: v*`; `sign` needs `rehearse`; `verify-signature` needs `sign`; `deploy` needs `verify-signature` and has `environment: production`; `tag.yml` has no `cosign sign`, its `tag` job has `environment: tagging` and `needs: verify`, its dispatch path fails on a non-`main` ref; `checkout` has `fetch-depth: 0`. A ruleset targets `refs/tags/v*` with creation, update and deletion restricted, enforcement `active`, and a bypass list of exactly one actor of type `Integration` (the App). The `tagging` environment's branch policy allows `main` only. Any deviation fails the job and opens an issue |
+| TP-16.11 | S-16 | U | F-186 | fake GitHub API and git | (a) release merge; (b) dispatch, hotfix PR open, base main, checks green, head descends from the last deployed tag; (c) same but head not descended (branch updated from main); (d) a required check failing; (e) PR closed; (f) head branch `hotfix/x`; (g) infra PR whose diff against the last deployed tag touches `apps/`; (h) no successful production deployment yet | (a), (b) ok with the SHA; (c) problem `not descended from <tag>`; (d) `checks not green`; (e) `pull request not open`; (f) `branch name invalid`; (g) `infra-only diff violated`; (h) ancestry check skipped (first release), others applied |
+| TP-16.8 | S-16 | S | `tag.yml`, `release.yml`, repository settings | actionlint + a structure test; a scheduled and on-demand CI job `repo-guards` using `gh api` with a read-only admin-scoped token stored as the `repo-guards` environment secret | Parse; query `GET /repos/{o}/{r}/rulesets` and the ruleset detail; `GET /repos/{o}/{r}/environments/tagging` | `release.yml` triggers only on `push: tags: v*`; `sign` needs `rehearse`; `verify-signature` needs `sign`; `deploy` needs `verify-signature` and has `environment: production`; `tag.yml` has no `cosign sign`, its `tag` job has `environment: tagging` and `needs: verify`, its dispatch path fails on a non-`main` ref; `checkout` has `fetch-depth: 0`. A ruleset targets `refs/tags/v*` with creation, update and deletion restricted, enforcement `active`, and a bypass list of exactly one actor of type `Integration` (the App). The `tagging` environment's branch policy allows `main` only. The `tag-approval` environment exists with exactly one required reviewer (the owner), `prevent_self_review: false` and a `main`-only branch policy. `tag.yml`'s `tag` job needs `approve` on the dispatch path. `repo-guards` has the hourly schedule. Any deviation fails the job and opens an issue |
 | TP-16.9 | S-16 | E | F-174 with real signatures | rehearsal step 1 (every release PR) and `release.yml` `verify-signature` (every release) | Verify rehearsal-signed digests with the rehearsal anchors; with the production anchors; release-signed digests with the production anchors | Pass; fail (exit 12); pass |
 | TP-16.10 | S-16 | U (bats) | anchor regexes | none | Production regex against SANs `…/release.yml@refs/tags/v1.2.0`, `…@refs/tags/v1.2.0-hotfix.1`, `…@refs/tags/v1.2.0-infra.1`, `…/release.yml@refs/heads/main`, `…/ci.yml@refs/tags/v1.2.0`; rehearsal regex against `…/rehearsal.yml@refs/pull/12/merge` and `…/rehearsal.yml@refs/heads/x` | match ×3, no ×2; match, no |
 
