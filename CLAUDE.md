@@ -27,8 +27,9 @@ Not done yet. When asked to do it:
 | `server/src/errors/index.ts`, `server/src/auth/authErrors.ts` | `BudmonError` | `WditError` |
 | `README.md` | — | Use "WhereDidITap" as the project name |
 
-- Leave the GitHub repo name (`ali-hy/Budmon`) alone; the owner renames it in
-  GitHub settings.
+- The GitHub repo is already renamed to `ali-hy/WhereDidITap` (old
+  `ali-hy/Budmon` URLs redirect). Local clones can update their remote with
+  `git remote set-url origin https://github.com/ali-hy/WhereDidITap`.
 - The server connects using `DATABASE_URL` in `server/.env`. After the rename,
   tell the user to change the database name in that URL to `wdit` and recreate
   the Postgres container.
