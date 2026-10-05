@@ -48,3 +48,14 @@ Decided by the user in conversation, as input for the `platform` HLD. The planne
 | Q-19 Staging | "for the invite-only stage we will have only one environment no staging." |
 | Q-20 Domain | "we want a cheap domain that would be well recognized. .com is good. we could look at .io as well. but I think .com is our best bet" → budmon.com (fallback .io). |
 | Q-18 FX budget | Not answered directly; see FX storage. |
+
+## Answers to the platform HLD v0.6 open questions (2026-10-05)
+
+| Question | Answer (user's words where useful) |
+| -------- | ---------------------------------- |
+| Rollout stages (new) | "before inviting people I will initially be testing on my own, and during that period I don't expect to need too much security or privacy" — a personal (owner-only) stage comes before the invite-only stage. |
+| Q-15 Capture isolation | "alright, we'll do it on its own hetzner server right before I start inviting people" |
+| Encryption at rest / manual unlock | "I want to understand this in more detail later. is it okay to leave it to a later stage of the mvp? initially the work will all be for me personally, and then before I start inviting people, I'll introduce the encryption and all the other privacy and security items" |
+| Q-21 Accessibility | "sure thing, yes pay attention to it, just note that it's not a showstopper, that's all." |
+| Pooler | "we can take this into consideration later when we start thinking about making the application go public" |
+| RTL list | "this is basically an exhaustive list"; lint guards and the pseudo-RTL test: "yes please." |
