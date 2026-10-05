@@ -59,3 +59,15 @@ Decided by the user in conversation, as input for the `platform` HLD. The planne
 | Q-21 Accessibility | "sure thing, yes pay attention to it, just note that it's not a showstopper, that's all." |
 | Pooler | "we can take this into consideration later when we start thinking about making the application go public" |
 | RTL list | "this is basically an exhaustive list"; lint guards and the pseudo-RTL test: "yes please." |
+
+## Staging the infrastructure (2026-10-05)
+
+User: "before inviting people I will initially be testing on my own, and during that period I don't expect to need too much security or privacy. however we will be building the codebase and logic for that, but the infrastructure will be only for me. so what i'm saying is: the codebase/logic is planned for two stages: invite-only and public and the infrastructure is planned for 3: just me, invite-only, and public."
+
+| Topic | Answer |
+| ----- | ------ |
+| Capture isolation (Q-15 part 1) | Dedicated Hetzner capture VM: "we'll do it on its own hetzner server right before I start inviting people". |
+| Encryption at rest + manual unlock (Q-15 part 2, D-40) | "I want to understand this in more detail later. is it okay to leave it to a later stage of the mvp? initially the work will all be for me personally, and then before I start inviting people, I'll introduce the encryption and all the other privacy and security items" → deferred to the invite-only infrastructure stage; to be explained to the user in more detail before then. |
+| Accessibility (Q-21) | Baseline accepted: "yes pay attention to it, just note that it's not a showstopper". |
+| Connection pooler | "we can take this into consideration later when we start thinking about making the application go public". |
+| RTL list | "this is basically an exhaustive list"; lint guards and the pseudo-RTL test from day one: "yes please". |
