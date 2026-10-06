@@ -31,7 +31,7 @@ The software-engineer or test-architect agent, or the main conversation relaying
 
 1. Read the question, the code or tests it came up in, and the relevant HLD/LLD sections.
 2. Decide the behaviour. Pick what's most consistent with the spec summary, the HLD, the rest of the LLD and the existing code, and when in doubt, the safer option for the user's money and data.
-3. Write it into the LLD: update every section it affects (function catalog, API contract, error catalog, slices, test plan) so the LLD is specific again, **and** add a row to the LLD's *Amendments* table (`A-n`). Bump the minor version and add a changelog row. The LLD keeps `status: approved`; amendments don't reset approval. They're reviewed by the user on the PR instead.
+3. Write it into the LLD (and update the LLD brief to match): update every section it affects (function catalog, API contract, error catalog, slices, test plan) so the LLD is specific again, **and** add a row to the LLD's *Amendments* table (`A-n`). Bump the minor version and add a changelog row. The LLD keeps `status: approved`; amendments don't reset approval. They're reviewed by the user on the PR instead.
 4. **If the answer conflicts with the HLD**, update the HLD as well, in the same way: change the affected section, add a decision (`D-n`) or edit the existing one, bump the version, and add a changelog row saying "amended during implementation of <module>: A-n". Reference the HLD change from the amendment row.
 5. Mark the amendment **needs user confirmation** when it's a product or business decision the user would reasonably want to make themselves (such as fees, limits, what users can see or share, data deletion), or when it changes the HLD. Otherwise mark it **planner decision**.
 6. Return the amendment ID(s), the sections you changed, any test cases you added or changed (so the test architect knows), and a one-line answer to each question.
@@ -105,6 +105,15 @@ It must cover:
 - **Slices.** The build order. Each slice (`S-n`) is **one story/journey from the HLD**, built end to end: the data, logic, API and UI it needs, covering its happy path **and** its unhappy scenarios. For each slice: the story it delivers (`US-n`), the functions it introduces or extends (`F-n`), its scenarios (happy and unhappy, each pointing to test cases), what it depends on (earlier slices), and acceptance criteria. Slice `S-0` may set up shared foundations (tables, scaffolding, test tooling) when several stories need them. Keep slices small enough to review in one sitting.
 - **Test plan.** Test cases (`TP-n`), each tied to a slice and to the function(s) or endpoint it exercises, with type (unit, integration, or end-to-end/UI), setup, input and expected result. Cover every function in the catalog, every error in the error catalog, every unhappy scenario in the slices, authorization across users, and the boundary values. If the repo has no test tooling yet, specify it: the framework, where tests live, the `test` script, fixtures/factories, and how integration tests get a database and reset it between tests.
 - **Open questions.** Must be empty before the LLD can be approved.
+
+# The LLD brief
+
+Every LLD comes with `docs/design/<module>/lld-brief.md`, written from `docs/design/_templates/lld-brief.md`. The LLD is written for the agents; the brief is what the owner reads to review and approve it. Write it in plain language, explaining technical terms briefly where they're unavoidable.
+
+- **Focus on what a human should review:** what the module builds, everything needing the owner's attention (deviations, decisions you made that the HLD left open, assumptions, open questions, manual steps), the data, the API and screens, the build plan, testing and risks.
+- **Always summarise the function catalog, never copy it.** Group functions by area: what each area does, how many functions it has, and only the few that matter most (money, security, privacy, data loss).
+- **Keep it short.** Aim for something readable in about 15 minutes.
+- **Keep it in sync.** Whenever the LLD changes (a review revision or an implementation-time amendment), update the brief in the same change and set its `summarises:` field to the LLD version it reflects. If the two disagree, the LLD wins.
 
 # Writing standards
 

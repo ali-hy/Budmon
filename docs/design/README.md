@@ -23,6 +23,7 @@ Budmon is built by a pipeline of agents (`.claude/agents/`), run through three c
 - **Spec summary** (`docs/product/spec-summary.md`): every module with its stories (`<MODULE>-US-n`) and business rules, plus cross-cutting requirements and the build order. Each module is designed from this.
 - **HLD** (`<module>/hld.md`): the big decisions, i.e. tables, user experience (journeys, screens, states), protocols and integrations.
 - **LLD** (`<module>/lld.md`): the implementation contract: exact schemas, a **function catalog** (every function's file, signature, behaviour, errors and dependencies), API contract, **slices** (the build order, one story each) and the test plan. The test architect writes tests from it before any code exists, so it has to be exact.
+- **LLD brief** (`<module>/lld-brief.md`): a short, human-readable summary of the LLD for the owner to review and approve: what it builds, what needs a decision, data, API, a summary of the function catalog, the build plan, testing and risks. It's kept in sync with every LLD change; if they disagree, the LLD wins.
 
 ## Status and approval
 
@@ -30,7 +31,7 @@ Each design document has a `status` in its front matter: `draft` → `in-review`
 
 The exception is **amendments during implementation**. When an agent hits a case the LLD doesn't define, the planner defines it in place: an `A-n` row in the LLD's *Amendments* table, plus an HLD update if the answer conflicts with the HLD. Approval stands, and the build carries on. Amendments are listed in the PR description for the user to review, with those marked *needs user confirmation* first.
 
-Templates are in [`_templates/`](./_templates) and [`../product/_templates/`](../product/_templates).
+Templates (including `lld-brief.md`) are in [`_templates/`](./_templates) and [`../product/_templates/`](../product/_templates).
 
 ## Index
 

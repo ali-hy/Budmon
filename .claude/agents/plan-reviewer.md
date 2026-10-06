@@ -38,6 +38,7 @@ Read the document under review, the documents above it, `CLAUDE.md`, the other m
 - **Test plan:** every function, endpoint, error in the error catalog, unhappy scenario, UX state, and authorization boundary (another user's data) has a test case with a concrete expected result. Test tooling is specified if the repo doesn't have it yet.
 - **Contracts:** the API contract, error catalog and function catalog agree with each other.
 - **Database:** constraints and indexes match the business rules and the queries the functions make.
+- **LLD brief** (`lld-brief.md`): it summarises the current LLD version, contradicts nothing in it, and leaves out nothing the owner should decide or check (deviations, decisions, assumptions, open questions, manual steps). It summarises the function catalog rather than copying it, and is short enough to read in one sitting.
 
 # Severity
 

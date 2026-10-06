@@ -29,7 +29,7 @@ Invoke the **planner** to write (or continue) the document. If it returns questi
 
 Set the document's status to `in-review` and commit it. Then give the user:
 
-- the document link and a short summary of its key decisions (for an HLD: tables, screens, protocols/integrations; for an LLD: slices and anything notable in the function catalog or test plan),
+- the document link and a short summary of its key decisions (for an HLD: tables, screens, protocols/integrations). For an LLD, point the user to `lld-brief.md`, which is the version meant for them to review; the full `lld.md` is the agents' contract,
 - the plan-reviewer's *questions for the user* and the planner's open questions,
 - what's needed: answers, then approval.
 
