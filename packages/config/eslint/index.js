@@ -23,16 +23,44 @@ const PINO = {
 const DRIZZLE_PATTERNS = ["drizzle-orm", "drizzle-orm/*"];
 
 /**
- * @param {{ paths?: Array<string | { name: string; message?: string }>; patterns?: string[] }} extra
- * @returns {[string, { paths: Array<string | { name: string; message?: string }>; patterns: string[] }]}
+ * @param {Array<{ paths: object[]; patterns: object[] }>} parts
+ * @returns {[string, { paths: object[]; patterns: object[] }]}
  */
-function restricted(extra) {
-  return ["error", { paths: [PINO, ...(extra.paths ?? [])], patterns: extra.patterns ?? [] }];
+function restricted(...parts) {
+  return [
+    "error",
+    {
+      paths: [PINO, ...parts.flatMap((part) => part.paths)],
+      patterns: parts.flatMap((part) => part.patterns),
+    },
+  ];
 }
 
-const ROUTER_PATTERNS = [...DRIZZLE_PATTERNS, "**/db/**", "**/*Repo.js"];
-const SERVICE_PATTERNS = [...DRIZZLE_PATTERNS, "**/db/client.js"];
-const HTTP_PATTERNS = ["**/*Repo.js"];
+const L1 =
+  "Layering: routers don't use the database. Call the module's service (*Service.ts) instead.";
+const L2 =
+  "Layering: routers don't import repositories. Call the module's service (*Service.ts) instead.";
+const L3 =
+  "Layering: services don't build queries. Call the module's repository (*Repo.ts) with the DbHandle you were given.";
+const L4 =
+  "Layering: services don't open database connections. Take a DbHandle from the caller (withTransaction, F-13) instead.";
+const L5 = "Layering: platform/http doesn't import repositories. Go through a service instead.";
+
+const ROUTER = {
+  paths: [{ name: "pg", message: L1 }],
+  patterns: [
+    { group: [...DRIZZLE_PATTERNS, "**/db/**"], message: L1 },
+    { group: ["**/*Repo.js"], message: L2 },
+  ],
+};
+const SERVICE = {
+  paths: [{ name: "pg", message: L3 }],
+  patterns: [
+    { group: DRIZZLE_PATTERNS, message: L3 },
+    { group: ["**/db/client.js"], message: L4 },
+  ],
+};
+const HTTP = { paths: [], patterns: [{ group: ["**/*Repo.js"], message: L5 }] };
 
 /**
  * @param {{ tsconfigRootDir: string }} options
@@ -67,27 +95,24 @@ export function createBudmonEslintConfig({ tsconfigRootDir }) {
     {
       files: ["**/*.{ts,tsx,mts,cts,js,mjs,cjs}"],
       ignores: [`${SERVER_SRC}/platform/observability/**`],
-      rules: { "no-restricted-imports": restricted({}) },
+      rules: { "no-restricted-imports": restricted() },
     },
     {
       files: [`${SERVER_SRC}/*/*Router.ts`],
-      rules: { "no-restricted-imports": restricted({ paths: ["pg"], patterns: ROUTER_PATTERNS }) },
+      rules: { "no-restricted-imports": restricted(ROUTER) },
     },
     {
       files: [`${SERVER_SRC}/*/*Service.ts`, `${SERVER_SRC}/platform/*/*Service.ts`],
-      rules: { "no-restricted-imports": restricted({ paths: ["pg"], patterns: SERVICE_PATTERNS }) },
+      rules: { "no-restricted-imports": restricted(SERVICE) },
     },
     {
       files: [`${SERVER_SRC}/platform/http/**/*.ts`],
-      rules: { "no-restricted-imports": restricted({ patterns: HTTP_PATTERNS }) },
+      rules: { "no-restricted-imports": restricted(HTTP) },
     },
     {
       files: [`${SERVER_SRC}/platform/http/*Service.ts`],
       rules: {
-        "no-restricted-imports": restricted({
-          paths: ["pg"],
-          patterns: [...SERVICE_PATTERNS, ...HTTP_PATTERNS],
-        }),
+        "no-restricted-imports": restricted(SERVICE, HTTP),
       },
     },
     {
@@ -98,7 +123,10 @@ export function createBudmonEslintConfig({ tsconfigRootDir }) {
     {
       files: MONEY_FILES,
       rules: {
-        "no-restricted-globals": ["error", "parseFloat"],
+        "no-restricted-globals": [
+          "error",
+          { name: "parseFloat", message: "parseFloat is forbidden; use the money helpers" },
+        ],
         "no-restricted-properties": [
           "error",
           ...["Number", "globalThis", "window"].map((object) => ({

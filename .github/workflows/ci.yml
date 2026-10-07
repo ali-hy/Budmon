@@ -59,7 +59,8 @@ jobs:
         env:
           HEAD_REF: ${{ github.head_ref }}
           MERGE_BACK: ${{ contains(github.event.pull_request.labels.*.name, 'hotfix-merge-back') || contains(github.event.pull_request.labels.*.name, 'infra-merge-back') }}
+        working-directory: tools/ci
         run: |
           args=(--branch "$HEAD_REF" --changed-files "$RUNNER_TEMP/changed-files.txt")
           if [ "$MERGE_BACK" = "true" ]; then args+=(--hotfix-merge-back); fi
-          pnpm --filter @budmon/tools-ci exec tsx checkMigrationFiles.ts "${args[@]}"
+          ./node_modules/.bin/tsx checkMigrationFiles.ts "${args[@]}"

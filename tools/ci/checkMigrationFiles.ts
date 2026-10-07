@@ -19,7 +19,7 @@ export function checkMigrationFiles(
   if (migrations.length > 0) {
     return {
       ok: false,
-      message: `Migration files may only change on release/* and hotfix/* branches (D-12): ${migrations.join(", ")}`,
+      message: `Migration files may only change on release/* and hotfix/* branches (D-12): ${migrations.join(", ")}. Move these changes to a release/* or hotfix/* branch, or remove them from this pull request.`,
     };
   }
   return { ok: true };
@@ -104,7 +104,8 @@ export function runCheckMigrationFilesCli(
     deps.stderr(result.message);
     return 1;
   }
-  deps.stdout(`checkMigrationFiles: ok (${String(changedFiles.length)} changed files)`);
+  const n = changedFiles.length;
+  deps.stdout(`checkMigrationFiles: ok (${String(n)} changed file${n === 1 ? "" : "s"})`);
   return 0;
 }
 
