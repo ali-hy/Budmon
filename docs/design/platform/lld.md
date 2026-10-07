@@ -1,9 +1,9 @@
 ---
 module: platform
 doc: lld
-status: in-review # draft | in-review | approved
-version: 0.5
-hld_version: 1.0
+status: draft # draft | in-review | approved
+version: 0.6
+hld_version: 1.1
 author: planner
 approved_by:
 approved_on:
@@ -11,7 +11,7 @@ approved_on:
 
 # Platform: Low-Level Design
 
-Implements [HLD](./hld.md) v1.0 (approved 2026-10-05). Decisions are cited as **D-n** and journeys as **J-n** from the HLD; this document doesn't restate their rationale.
+Implements [HLD](./hld.md) v1.1 (draft; v1.0 was approved 2026-10-05, and v1.1 moves stage 0 to the owner's laptop). Decisions are cited as **D-n** and journeys as **J-n** from the HLD; this document doesn't restate their rationale.
 
 ## Scope boundary
 
@@ -70,6 +70,7 @@ Nothing in that list changes application code (D-29 rule 2).
 | 0.4     | 2026-10-05 | Plan review round 3, **P-1** (self-approval): a hotfix/infra tag is approved through a new `tag-approval` environment (required reviewer: the owner, "prevent self-review" off; the user said "i don't mind you approving ur own request"), because GitHub doesn't allow approving one's own pull request. `tag.yml` gains an `approve` job on the dispatch path, and `tag` re-checks that the PR head SHA hasn't changed. The verify logic moves into F-186 `verifyTagRequest` (PR open, base `main`, branch name, checks green, head SHA recorded), with TP-16.11. TP-16.8's `repo-guards` also checks `tag-approval`'s reviewer and its prevent-self-review setting. |
 | 0.4     | 2026-10-05 | **S-1:** residual risk stated: the owner's account can change the ruleset and environments, mitigated by hardware-key 2FA and detection by `repo-guards` (hourly, on pushes to `main`, on demand; a failure opens a `security` issue and GitHub emails the owner). **S-2:** F-186 requires the hotfix/infra head to descend from the last successful production deployment's tag, and computes the infra-only diff against that tag; new `hotfix.md` runbook line: never "Update branch" before tagging. None declined. |
 | 0.5     | 2026-10-05 | Plan review of v0.4 (ready for the user) suggestions applied; status set to `in-review`. **S-1:** `tag.yml`'s `approve` job (environment `tag-approval`) now runs on the release path too, so every tag needs an explicit owner click. Agents act under the owner's account, so a merged `release/*` PR alone no longer leads to a signed release. The cost is one click per release; **the user can drop this** (back to approval on the hotfix/infra path only) if it's not wanted. **S-2:** the residual-risk paragraph names the credentials agents must never hold (fine-grained tokens without "Deployments", "Administration", "Environments" or "Secrets"; no classic or OAuth `repo` tokens), and the first-deploy runbook adds the step. **S-3:** F-186 counts only `production` deployments created by `github-actions[bot]` from a `release.yml` push run with a tag-shaped ref; hand-made records are ignored; TP-16.11 adds cases (i) and (j). None declined. |
+| 0.6     | 2026-10-07 | **HLD v1.1 (stage 0 on the owner's Windows laptop)**; status back to `draft`. **Out of scope, moved to a future stage-1 LLD:** S-15a/b/c and S-16's server parts: deploy bundles, bootstrap and trust anchors (F-171, F-174), deploy steps (F-172), host-side `budmonctl` (F-173), cloud-init, host units and OpenTofu (F-176, F-177), the egress proxy, Alloy, pgBackRest scheduling, alert rules, SOPS secret sets and `rotate-role`/`init-deployment` (old F-191, F-192), `verifyTagRequest` (F-186), the stage-0 server overlay (F-199), `release.yml`, signing, the tag ruleset, the GitHub App, the `tagging`/`tag-approval`/`production` environments and `repo-guards`; tests TP-14.6b, TP-15.4 to TP-15.10, TP-15.12, TP-15.14, TP-15.15, TP-16.8 to TP-16.11 removed with them. **Added for stage 0:** `.gitattributes`; `infra/local/` (laptop Compose for `budmon-main` and `budmon-capture`, Caddy on `127.0.0.1:8080` with `auto_https off`, `pg_hba`) (F-175); `budmon-local` install/upgrade/rollback/restore with local pre-upgrade dumps (F-178); `gcp-bootstrap.sh` (F-179); `initLocalSecrets` (F-191) and F-11's placeholder rule; the FX gap check job and its start-up enqueue (F-139, F-78); the Android API base URL property (F-264); `tools/ci/tagRelease.sh` and a stage-0 `tag.yml` using `GITHUB_TOKEN`; `cli diagnostics:sentry-test` (F-93); config `GOOGLE_OAUTH_REDIRECT_ORIGIN` (§4.2, TP-2.21), so the Gmail redirect can be `http://localhost:8080` while `PUBLIC_ORIGIN` is the Tailscale name (HLD A-16); runbook `infra/runbooks/stage0-laptop.md`; §7.4 to §7.7 stage notes (B2 for exports and erasure log only, Sentry e-mails only, Tailscale, no registry). **Changed:** F-185 is now `buildNumber` from `git rev-list --count`; F-195 rehearsal runs the laptop topology (14 steps, including the migrator previous-password fallback and worker-capture's network isolation); F-170 has `archive_mode = off`; the health-check entry moved into F-175. **Slices:** S-15a/b/c and S-16 replaced by S-15 (stage-0 laptop stack) and S-16 (release rehearsal, stage-0 shape); S-9, S-13, S-14 extended. **Tests:** TP-2.21, TP-9.19, TP-9.20, TP-13.16, TP-14.10, TP-15.20 to TP-15.23, TP-15.25, TP-15.26, TP-16.12 added; TP-14.6, TP-15.1b, TP-15.3, TP-15.11, TP-15.13, TP-15.16 to TP-15.18, TP-16.3, TP-16.7 rewritten. **Open questions:** Q-2 (approval click) recorded as deferred to stage 1. |
 
 ## Amendments
 
@@ -124,13 +125,13 @@ Nothing in that list changes application code (D-29 rule 2).
 | `README.md` | Layout, prerequisites, commands, environments, the stage model (link to the HLD). |
 | `.github/workflows/ci.yml` | CI steps 1 to 6 (D-27), plus calls to `rehearsal.yml` (§4.17). |
 | `.github/workflows/rehearsal.yml` | Reusable release rehearsal, stage-0 shape (D-41, F-195). |
-| `.github/workflows/tag.yml` | Stage-0 tagging: on a merged `release/*` PR (or a dispatched `hotfix/*` PR), re-runs check (i) on the commit and pushes the tag with `GITHUB_TOKEN` (§9 S-14). The stage-1 LLD replaces it with the App-based chain. |
+| `.github/workflows/tag.yml` | Stage-0 tagging: on a merged `release/*` PR (or a dispatched `hotfix/*` PR), re-runs check (i) on the commit and pushes the tag with `GITHUB_TOKEN` through `tools/ci/tagRelease.sh` (§9 S-14, TP-14.10). `permissions: contents: write` only. The stage-1 LLD replaces it with the App-based chain. |
 | `packages/test-support/` (`@budmon/test-support`) | Test tooling owned by the test-architect: `src/canaries.ts` (F-198), shared fakes and helpers (§10.1) (S-3). |
 | `packages/config/` (`@budmon/config`) | `tsconfig/base.json`, `tsconfig/node.json`, `tsconfig/web.json`; `eslint/index.js` (F-1); `eslint/rules/*.js` (custom rules F-2 to F-4); `prettier/index.js`; `stylelint/index.js`. |
 | `packages/shared/` (`@budmon/shared`) | `src/money/*`, `src/time/*`, `src/ids/*`, `src/i18n/*`, `src/json/canonical.ts`, `src/index.ts`, `test-vectors/*.json` (S-1). |
 | `packages/contract/` (`@budmon/contract`) | `src/common/{money,dates,ids,cursor,errors,create,version}.ts`, `src/meta/metaContract.ts`, `src/index.ts`, `src/rules/contractRules.ts`, `scripts/emitOpenapi.ts`, `openapi.json` (S-4). |
 | `infra/budmonctl/` (`@budmon/budmonctl`) | The owner-side CLI in TypeScript: `src/cli.ts`, `src/scram.ts` (F-190), `src/localSecrets.ts` (F-191) (S-15). |
-| `tools/ci/` (`@budmon/tools-ci`) | `checkMigrationFiles.ts`, `checkMergeBack.ts`, `checkApiMinor.ts`, `checkCatalogs.ts`, `checkEnvExample.ts`, `buildNumber.ts` (S-0, S-2, S-4, S-11a, S-14, S-15). |
+| `tools/ci/` (`@budmon/tools-ci`) | `checkMigrationFiles.ts`, `checkMergeBack.ts`, `checkApiMinor.ts`, `checkCatalogs.ts`, `checkEnvExample.ts`, `buildNumber.ts`, `tagRelease.sh` (the stage-0 tagging step: validates the branch name `^(release|hotfix)/v\d+\.\d+\.\d+(-hotfix\.\d+)?$`, checks the PR was merged, runs `pnpm db:check-migrations` on the merge commit, refuses an existing tag, then `git tag` and `git push origin <tag>`) (S-0, S-2, S-4, S-11a, S-14, S-15). |
 | `tools/rehearsal/` (`@budmon/tools-rehearsal`) | Rehearsal harness: `src/run.ts`, `src/fakeGoogle.ts`, `src/fakeFx.ts`, `src/sentryCapture.ts` (S-16). |
 
 ### 2.3 Created: applications, images and infrastructure
@@ -178,7 +179,7 @@ Versions were checked against npm and Maven Central on 2026-10-05. Exact version
 | Lint | `eslint` 10.12.0, `typescript-eslint` 8.71.0, `eslint-plugin-formatjs` (latest 5.x), `eslint-plugin-jsx-a11y` (latest 6.x), `eslint-plugin-solid` (latest), `stylelint` 17.16.0, `stylelint-use-logical` 2.1.3, `prettier` 3.x |
 | Tests | `vitest` 5.0.3, `testcontainers` and `@testcontainers/postgresql` 12.2.0, `@playwright/test` 1.63.0, `@axe-core/playwright` 4.13.0, `msw` 3.0.2, `@solidjs/testing-library` 0.8.10, `node-pty` 1.1.0 (release tooling) |
 | Android | Kotlin 2.x latest stable (not a pre-release), AGP latest stable, Compose BOM latest stable, Room, WorkManager and Paging 3 latest stable, Hilt 2.60.1, OkHttp 5.5.0, Retrofit 3.0.0, kotlinx.serialization (latest stable), OpenAPI Generator Gradle plugin 7.14.0, Sentry Android 8.59.0, Robolectric 4.17, MockK 1.14.11, Turbine 1.2.1, ktlint 1.8.0 |
-| Infrastructure | Postgres **18** (image pinned by digest), pgBackRest 2.x from PGDG apt, Caddy 2.x, Grafana Alloy 1.x, Squid 6.x (`ubuntu/squid`), cosign 2.x, crane, sops 3.x, age 1.x, OpenTofu 1.10+ (all pinned by version and checksum in cloud-init and CI) |
+| Infrastructure (stage 0) | Postgres **18** (image pinned by digest), pgBackRest 2.x from PGDG apt (installed, unused until stage 1), Caddy 2.x, Docker Desktop with the WSL2 backend and Compose v2, Tailscale (Windows client), bats-core, shellcheck (pinned by version in CI). Alloy, Squid, cosign, crane, sops, age and OpenTofu are stage-1 tools (stage-1 LLD). |
 
 ## 3. Database
 
@@ -254,7 +255,7 @@ export const rateLimitCountersTable = pgTable("rate_limit_counters", {
 **Non-Drizzle stores:**
 - `pgboss` schema: owned by `budmon_queue`, installed by F-74.
 - `drizzle.__drizzle_migrations`: Drizzle's migrator, deployed and release-path databases only.
-- Buckets `exports` and `erasure-log` (F-140), and `backups` (pgBackRest, §7.6).
+- Buckets `exports` and `erasure-log` (F-140). The `backups` bucket (pgBackRest) is stage 1 (§7.4).
 
 ### 3.2 Changes to existing tables
 
@@ -266,12 +267,12 @@ The existing `users`, `accounts`, `account_owners`, `refresh_tokens` and `curren
 
 | Role | Attributes | Used by | Privileges |
 | ---- | ---------- | ------- | ---------- |
-| `budmon_admin` | SUPERUSER, LOGIN | Owner (`docker exec -u postgres … psql -U budmon_admin`) and pgBackRest, over the container's Unix socket only: `pg_hba` `local all budmon_admin peer map=local_admin`, with `pg_ident.conf` mapping OS user `postgres` to `budmon_admin`; no `host` line | All. |
+| `budmon_admin` | SUPERUSER, LOGIN | Owner (`docker exec -u postgres … psql -U budmon_admin`), `budmon-local`'s `pg_dump`/`pg_restore`, and pgBackRest from stage 1, over the container's Unix socket only: `pg_hba` `local all budmon_admin peer map=local_admin`, with `pg_ident.conf` mapping OS user `postgres` to `budmon_admin`; no `host` line | All. |
 | `budmon_migrator` | LOGIN, CREATEROLE, NOINHERIT | `migrate` container; dev/test schema step; `cli restore:verify` | Owns database `budmon` and schema `public`. Granted `budmon_queue` `WITH SET TRUE, INHERIT FALSE`; `pg_read_all_data` `WITH INHERIT TRUE`; `pg_monitor` `WITH ADMIN TRUE, INHERIT FALSE, SET FALSE`; `EXECUTE` on `bt_index_check`. Has ADMIN on the roles it creates. |
 | `budmon_app` | LOGIN, NOINHERIT | api, worker-general (domain writes) | Per `tableGrants` (F-16). On `pgboss`: `USAGE` on the schema, `SELECT, INSERT, UPDATE` on its tables and `EXECUTE` on its functions, through `ALTER DEFAULT PRIVILEGES FOR ROLE budmon_queue IN SCHEMA pgboss`. |
 | `budmon_capture` | LOGIN, NOINHERIT | worker-capture | Per `tableGrants`. On `pgboss`: the same as `budmon_app`; pg-boss runs with maintenance and scheduling off (F-77). |
 | `budmon_queue` | LOGIN, NOINHERIT | worker-general's pg-boss connections | Owns schema `pgboss`. |
-| `budmon_monitor` | LOGIN, NOINHERIT; member of `pg_monitor` **WITH INHERIT TRUE** | Alloy's postgres exporter | `CONNECT`, plus `pg_monitor`'s statistics views. |
+| `budmon_monitor` | LOGIN, NOINHERIT; member of `pg_monitor` **WITH INHERIT TRUE** | Alloy's postgres exporter (from stage 1; the role is created from the first release so the schema step is the same in every stage) | `CONNECT`, plus `pg_monitor`'s statistics views. |
 
 `REVOKE CREATE ON SCHEMA public FROM PUBLIC` and `REVOKE ALL ON DATABASE budmon FROM PUBLIC` are applied by F-15.
 
@@ -413,6 +414,7 @@ export interface RequestContext {
   2. F-181's pending report for the merged head must contain **none** of the hotfix migration's statements: each `--> statement-breakpoint`-separated statement, whitespace-normalised, is searched for in the report's SQL. Each one found adds `"hotfix change still pending: <first 60 characters>"`.
   - `hotfixMigrationFiles` are the migration files the pull request adds (`git diff --name-only --diff-filter=A origin/main...HEAD -- apps/server/drizzle/*.sql`). For an `infra-merge-back`, the list must be empty (problem otherwise).
   - `ok = problems.length === 0`.
+  - `infra/*` branches and the `infra-merge-back` label are used only from stage 1 (infrastructure-only releases, HLD D-29 rule 4). The rule is in F-6 and F-6b from day one so stage 1 changes no CI code; in stage 0 no such branch exists.
 
 #### F-7: `checkEnvExample`
 - **File:** `tools/ci/checkEnvExample.ts` · **Layer:** CI script (S-2)
@@ -604,6 +606,7 @@ Pure functions with no I/O. Imported by the server and the web app. Android mirr
 | `CAPTURE_PRIVATE_KEY_FILE` | worker with `capture`, `local` | PEM RSA private key (secret) | `.data/dev-secrets/capture_private.pem` |
 | `GOOGLE_OAUTH_CLIENT_ID` | api, worker with `capture` | non-empty; optional in development and for the api | (empty) |
 | `GOOGLE_OAUTH_CLIENT_SECRET_FILE` | worker with `capture` | secret; required when the client id is set | (empty) |
+| `GOOGLE_OAUTH_REDIRECT_ORIGIN` | api, worker with `capture` | an `https://` origin, or exactly `http://localhost:<port>` (allowed in every environment, HLD A-16); no path, query or trailing slash. api: defaults to `PUBLIC_ORIGIN`. Worker with `capture`: required when the client id is set. The `sources` LLD appends its callback path to build `redirect_uri` for both the authorization URL (F-119) and the code exchange (F-120), which must use the same value. | `http://localhost:5173` |
 | `MAILBOX_HMAC_KEY_FILE` | worker with `capture` | base64 ≥ 32 bytes (secret) | `.data/dev-secrets/mailbox_key` |
 | `FX_PROVIDER` | worker with `general` | `live\|fixed`; prod requires `live` | `fixed` |
 | `FX_PRIMARY_APP_ID_FILE` | worker with `general`, `live` | secret | (empty) |
@@ -1265,6 +1268,7 @@ Pure functions with no I/O. Imported by the server and the web app. Android mirr
   | `restore:verify` | F-150 | report JSON | 0 if ok, else 6 |
   | `erasure:replay --since <RFC 3339>` | F-151 | `{"replayed":n}` | 0, 2 if no handler is registered and records exist |
   | `jobs:capture-rewrap` | enqueues `platform.capture-rewrap` (F-118) | `{"enqueued":true}` | 0 |
+  | `diagnostics:sentry-test --yes` | `ErrorReporter.captureException(new Error("budmon sentry test"))` (F-34), then `flush(5000)` | `{"sent":true}`, or `{"sent":false}` when `SENTRY_DSN` is empty | 0; 2 without `--yes` |
 
   Unknown command → usage text, exit 64. Config kind: `worker` with `WORKER_ROLES=general` for every command except `secrets:rewrap-api` (kind `api`).
 
@@ -1800,6 +1804,7 @@ Stage 0 runs on the owner's Windows laptop (HLD D-29 v1.1): Docker Desktop with 
   - `DATA_SUBNET=172.30.40.0/24`, `PG_DATA_IP=172.30.40.10`;
   - `CAPTURE_DB_SUBNET=172.30.42.0/29`, `PG_CAPTURE_IP=172.30.42.2`, `WORKER_CAPTURE_IP=172.30.42.4`;
   - `APP_ENV=production`;
+  - `GOOGLE_OAUTH_REDIRECT_ORIGIN=http://localhost:8080` (passed to `api` and `worker-capture`; Gmail is connected from the laptop's browser, HLD D-29 and A-16);
   - `BUDMON_HOME` (default `~/.budmon`).
   - `PUBLIC_ORIGIN` comes from `~/.budmon/site.env` (`https://<laptop>.<tailnet>.ts.net`; F-178 writes it) and isn't committed.
 - **Main project** (`budmon-main`). Every application service runs `read_only: true`, `tmpfs: [/tmp]`, `cap_drop: [ALL]`, `security_opt: [no-new-privileges:true]`, its own non-root UID through Compose `user:` (api 10001, worker-general 10002, worker-capture 10003, migrate 10004, caddy 10005), and `restart: unless-stopped`. Images are `budmon/<image>:<tag>`, built locally by F-178.
@@ -1827,6 +1832,11 @@ Stage 0 runs on the owner's Windows laptop (HLD D-29 v1.1): Docker Desktop with 
   host    all     all             0.0.0.0/0                       reject
   hostssl all     all             0.0.0.0/0                       reject
   ```
+- **Health checks:** the server image has a `healthcheck` entry (`apps/server/src/main/healthcheck.ts`, run as `node dist/main/healthcheck.js`; delivered in S-6):
+  - `--heartbeat` (the workers' Compose `healthcheck`) reads `/tmp/heartbeat` (written by F-79) and exits 0 if it's younger than 60 s, otherwise 1;
+  - `--ready` (api) requests `http://127.0.0.1:3000/health/ready` with a 2 s timeout and exits 0 on 200, otherwise 1.
+
+  Compose: `interval: 15s`, `retries: 4`. F-178 checks readiness with `docker compose exec -T api node dist/main/healthcheck.js --ready`, directly against the API rather than through Caddy, because Caddy answers 503 while the maintenance flag exists.
 - **Caddyfile** (`infra/local/Caddyfile`):
   - Global options `auto_https off`; site `:8080`. TLS is terminated by Tailscale Serve on Windows (F-178 `install` prints the command).
   - `log` and the default logger use `format filter` with `request>uri regexp "\?.*$" ""`, `request>headers delete`, `resp_headers delete` and `request>remote_ip ip_mask 24 64`.
@@ -2247,10 +2257,12 @@ flowchart TD
   F144[F-144 exports purge] --> F140
   F151[F-151 erasure replay] --> F146
   F150[F-150 restore verify] --> F57
-  F171[F-171 bootstrap] --> F174[F-174 verify] & F172[F-172 deploy steps]
-  F172 --> F92 & F173[F-173 budmonctl host]
-  F191[F-191 rotate-role] --> F190[F-190 scram]
-  F195[F-195 rehearsal] --> F194[F-194 Sentry capture] & F196[F-196 fake Google] & F197[F-197 fake FX] & F198[F-198 canaries, test-support] & F199[F-199 stage-0 overlay] & F174 & F191
+  F78 --> F139[F-139 FX gap check]
+  F139 --> F131 & F73
+  F178[F-178 budmon-local] --> F191[F-191 initLocalSecrets] & F185[F-185 buildNumber] & F92 & F150
+  F191 --> F190[F-190 scram]
+  F179[F-179 gcp-bootstrap]
+  F195[F-195 rehearsal] --> F194[F-194 Sentry capture] & F196[F-196 fake Google] & F197[F-197 fake FX] & F198[F-198 canaries, test-support] & F191 & F178
   F200[F-200 web main] --> F201[F-201 api client] & F204[F-204 query client] & F206[F-206 i18n] & F217[F-217 web Sentry] & F216[F-216 router]
   F201 --> F346
   F203[F-203 messages] --> F202[F-202 toAppError]
@@ -2558,6 +2570,7 @@ The platform's slices are **capability slices** rather than one story each. Each
 | Valid configuration per process kind | happy | A frozen `Config`; secrets wrapped. | TP-2.1 |
 | Missing or invalid variables | unhappy | `ConfigError` with names only; values never printed; exit 78. | TP-2.2, TP-2.6 |
 | Production-only rules | unhappy | Each forbidden combination is reported. | TP-2.3 |
+| OAuth redirect origin | happy and unhappy | As in §4.2. | TP-2.21 |
 | `rehearsal` environment | happy and unhappy | Local KMS allowed; fs object store refused. | TP-2.4 |
 | Unreadable `*_FILE` | unhappy | "file not readable". | TP-2.5 |
 | `.env.example` drift | unhappy | `checkEnvExample` lists the differences. | TP-2.7 |
@@ -2646,7 +2659,7 @@ The platform's slices are **capability slices** rather than one story each. Each
 
 ### S-6: Jobs and workers (US-4)
 - **Depends on:** S-4
-- **Functions:** F-70 to F-81, F-91, F-93 (`jobs:dead` commands), F-19 steps 3 and 6 (extending S-2), healthcheck entry (F-172 note).
+- **Functions:** F-70 to F-81, F-91, F-93 (`jobs:dead` commands), F-19 steps 3 and 6 (extending S-2), the health-check entry (F-175 "Health checks").
 - **Scenarios:**
 
 | Scenario | Happy / unhappy | Expected | Tests |
@@ -2659,7 +2672,7 @@ The platform's slices are **capability slices** rather than one story each. Each
 | Handler success and failure; dead-lettering | happy and unhappy | No output on success; sanitised failure output; dead-letter after the retry limit. | TP-6.7 |
 | worker-capture as `budmon_capture` | happy and unhappy | Can process jobs; can't read platform tables it isn't granted. | TP-6.8 |
 | Missing queue at start-up; schedules | unhappy and happy | Exit 1; cron in UTC for general only. | TP-6.9 |
-| Heartbeat and health check | happy and unhappy | As in F-79/F-172. | TP-6.10 |
+| Heartbeat and health check | happy and unhappy | As in F-79 and F-175's health checks. | TP-6.10 |
 | Dead-letter list and redrive | happy | As in F-81. | TP-6.11 |
 | Maintenance purges | happy | As in F-80. | TP-6.12 |
 | Graceful stop | happy | `SIGTERM` stops within 30 s. | TP-6.13 |
@@ -2704,7 +2717,7 @@ The platform's slices are **capability slices** rather than one story each. Each
 
 ### S-9: FX rates and conversion (US-8)
 - **Depends on:** S-6
-- **Functions:** F-130 to F-138, F-23 (FX seeder), `fx_last_day_timestamp_seconds` (F-42).
+- **Functions:** F-130 to F-139, F-23 (FX seeder), `fx_last_day_timestamp_seconds` (F-42); F-78 gains the startup enqueue of F-139.
 - **Scenarios:**
 
 | Scenario | Happy / unhappy | Expected | Tests |
@@ -2720,6 +2733,7 @@ The platform's slices are **capability slices** rather than one story each. Each
 | Provider adapters | happy and unhappy | As in F-133. | TP-9.12, TP-9.13 |
 | Backfill; date not available | happy and unhappy | Stored; completes with metric. | TP-9.14 |
 | Subscriber validation; stored days final; freshness gauge | unhappy and happy | As stated. | TP-9.15 to TP-9.17 |
+| Gap check after the laptop was off; startup enqueue | happy and unhappy | As in F-139. | TP-9.19, TP-9.20 |
 
 ### S-10: Object storage, erasure log and restore verification (US-15 part, D-35)
 - **Depends on:** S-6
@@ -2793,7 +2807,7 @@ The platform's slices are **capability slices** rather than one story each. Each
 
 ### S-13: Android skeleton (D-8, J-1, J-2, J-4, J-5)
 - **Depends on:** S-4, S-7
-- **Functions:** F-250 to F-263, the generated client; CI step 6.
+- **Functions:** F-250 to F-264, the generated client; CI step 6.
 - **Scenarios:**
 
 | Scenario | Happy / unhappy | Expected | Tests |
@@ -2811,6 +2825,7 @@ The platform's slices are **capability slices** rather than one story each. Each
 | Generated client against `client-config` | happy | Parses. | TP-13.12 |
 | Emulator smoke (release candidates) | happy | Launches; S-1 shown when the minimum is raised. | TP-13.13 |
 | App start-up; connectivity | happy | As in F-250/F-259. | TP-13.14, TP-13.15 |
+| API base URL: release builds require an https property; debug uses the emulator alias | happy and unhappy | As in F-264. | TP-13.16 |
 
 ### S-14: Release-migration tooling (US-7)
 - **Depends on:** S-2
@@ -2827,7 +2842,7 @@ The platform's slices are **capability slices** rather than one story each. Each
 | Stage-0 tagging (`tag.yml`) | happy and unhappy | Tag only after check (i) on a merged release PR. | TP-14.10 |
 | Upgrade harness at the baseline | happy | Skipped. | TP-14.7 |
 | CI branch-type wiring | happy | As in D-12. | TP-14.8 |
-| Hotfix and infra merge-back checks | happy and unhappy | As in F-6b. | TP-14.9 |
+| Hotfix merge-back check (and the infra merge-back rule, used from stage 1) | happy and unhappy | As in F-6b. | TP-14.9 |
 
 ### S-15: Stage-0 laptop stack (D-29 stage 0)
 - **Depends on:** S-5 to S-10, S-11b (the web image embeds the built SPA and `version.json`), S-14
@@ -2852,7 +2867,7 @@ The platform's slices are **capability slices** rather than one story each. Each
   1. AC-15.1: `infra/runbooks/stage0-laptop.md` covers every step listed in the file plan, in order, and the owner completes it on the laptop. Budmon then answers at `https://<laptop>.<tailnet>.ts.net` from the laptop and from the phone (at home and on mobile data).
   2. AC-15.2: the owner connects Gmail from the laptop's browser through the `http://localhost:8080` redirect (A-16). This needs `sources`; until then, AC-15.2 is "the OAuth client exists with that redirect URI".
   3. AC-15.3: with the laptop asleep, the Android app (`stage0` release build, F-264) records an entry offline, and it syncs after the laptop wakes (TP-15.17).
-  4. AC-15.4: a deliberate test error (`cli` command `diagnostics:sentry-test`, available only with `APP_ENV=production` and a confirmation flag) arrives as a Sentry e-mail (TP-15.18).
+  4. AC-15.4: a deliberate test error (`cli diagnostics:sentry-test --yes`, F-93) arrives as a Sentry e-mail (TP-15.18).
 
 ### S-16: Release rehearsal (stage-0 shape) (D-41)
 - **Depends on:** S-15, S-11b, S-13
@@ -2908,7 +2923,7 @@ The repository has no test tooling yet. The test-architect sets it up in S-0 to 
   - The fixture `withAxe` runs `@axe-core/playwright` after each test and attaches the JSON report. It never fails the test (D-39).
   - Projects: `chromium` (PRs); `firefox` and `webkit` (release candidates); `pseudo-rtl` (locale `ar-XB`, PRs); `perf` (release candidates, Chromium, CPU throttling 4× through CDP `Emulation.setCPUThrottlingRate`).
 - **Android:** JUnit 4 + Robolectric 4.17 + MockK + Turbine. Room in-memory database. OkHttp `MockWebServer`. Compose UI tests (`createComposeRule`) with `LocalLayoutDirection provides LayoutDirection.Rtl` variants and `fontScale = 2f`. Shared vectors through the test resources source dir. `./gradlew testDebugUnitTest lint ktlintCheck`; `connectedDebugAndroidTest` on release candidates (emulator API 34).
-- **Bash:** `bats-core` (pinned) in `infra/deploy/bootstrap/test/*.bats` and `infra/budmonctl/host/test/*.bats`, with stub `cosign`, `crane`, `docker`, `sops` and `curl` on `PATH` recording calls. shellcheck on every script.
+- **Bash:** `bats-core` (pinned) in `infra/local/test/*.bats`, with stub `git`, `docker`, `pg_dump`, `pg_restore`, `gcloud`, `openssl` and `curl` on `PATH` recording calls. shellcheck on every script.
 - **CI jobs** (`ci.yml`):
 
   | Job | Steps (D-27) | Runs |
@@ -2917,9 +2932,9 @@ The repository has no test tooling yet. The test-architect sets it up in S-0 to 
   | `contract` | Drift, `oasdiff` against main, F-8, F-348 | Every PR |
   | `e2e` | 5 | Every PR |
   | `android` | 6 | Path filter, release candidates |
-  | `infra-lint` | TP-15.16 | Changes to `infra/`, `images/`, `.github/` |
+  | `infra-lint` | TP-15.16, bats | Changes to `infra/`, `images/`, `.github/` |
   | `migrations` | F-6 + report, or checks (i), (iii), (iv) | By branch type |
-  | `rehearsal` | `rehearsal.yml` | `release/*`, `hotfix/*`, `infra/*` PRs |
+  | `rehearsal` | `rehearsal.yml` (stage-0 shape, F-195) | `release/*` and `hotfix/*` PRs |
   | `dev-smoke` | TP-2.18 | `main` only |
 
 ### 10.2 Cases
@@ -2968,6 +2983,7 @@ Types: **U** unit, **I** integration (real Postgres and/or HTTP in-process), **E
 | TP-2.17 | S-2 | I | test tooling | any integration test | `SELECT current_user, current_database()` | `budmon_app`; a per-file `t_` database |
 | TP-2.18 | S-2 | E | F-22 | CI `dev-smoke` | `pnpm dev &`, poll `/health/ready` | 200 within 90 s |
 | TP-2.19 | S-2 | U | F-12 | `pg.Pool` constructor spy | `createDatabase` with `sslmode: "disable"`; with `verify-full` and a CA buffer | `max`, `application_name`, `statement_timeout: 30000`, `idle_in_transaction_session_timeout: 60000`; `ssl: false`; `ssl: { ca, rejectUnauthorized: true, servername: host }` |
+| TP-2.21 | S-2 | U | F-11 `GOOGLE_OAUTH_REDIRECT_ORIGIN` | `APP_ENV=production`, otherwise valid | api with the variable unset and `PUBLIC_ORIGIN=https://a.ts.net`; `http://localhost:8080`; `http://localhost:8080/`; `http://example.com`; `https://a.ts.net/cb`; capture worker with the client id set and the variable unset | `https://a.ts.net`; accepted; problem (trailing slash); problem (http only for localhost); problem (path); problem "required" |
 | TP-3.1 | S-3 | U | F-30 | none | `{userId:"u1", payee:"x", count:-1, route:"/a b", rateDate:"2026-10-05"}` | `{userId:"u1", count:"[invalid]", route:"[invalid]", rateDate:"2026-10-05"}`, `dropped: 3` |
 | TP-3.2 | S-3 | U | F-31 | `logCapture`, `onDrop` spy | `info("Bad Event!", {payee: CANARIES.payee})`; `error("x_failed", {}, new Error(CANARIES.message))` | Line 1 `event:"invalid_event"`, `dropped:2`, `onDrop(2)`; line 2 has `err.class:"Error"`; the canary is absent from all lines |
 | TP-3.3 | S-3 | U | F-32 | `Secret.of(CANARIES.token)` | `JSON.stringify`, `util.inspect({s})`, template, `console.log` captured | `[redacted]`; no canary |
@@ -3072,6 +3088,8 @@ Types: **U** unit, **I** integration (real Postgres and/or HTTP in-process), **E
 | TP-9.16 | S-9 | I | F-131 | stored day | `insertDay` again with different values | Returns 0; values unchanged |
 | TP-9.17 | S-9 | I | F-42 gauge | latest day 2026-10-04 | Collect metrics | `fx_last_day_timestamp_seconds` = epoch(2026-10-05T00:00Z) |
 | TP-9.18 | S-9 | I | F-23 FX seeder | development database | Run `runSeeders` twice | 30 days × 7 currencies with provider `fixed` after the first run; the second run inserts nothing and doesn't fail |
+| TP-9.19 | S-9 | I | F-139 | clock 2026-10-07T10:00Z; (a) empty `exchange_rates`; (b) latest day 2026-10-03; (c) latest day 2026-10-06; (d) latest day 2026-08-01 | `fxGapCheck` | (a) `enqueued: []`; (b) `["2026-10-04","2026-10-05","2026-10-06"]`, three `platform.fx-backfill` jobs with those `singletonKey`s; (c) `[]`; (d) 31 dates, the earliest 2026-09-06, the latest 2026-10-06; running (b) twice leaves three jobs |
+| TP-9.20 | S-9 | I | F-78, F-139 startup | fresh queue; (a) one general-role worker; (b) two general-role workers started together before either job runs; (c) a capture-role worker | `startWorkers` | (a) one `platform.fx-gap-check` job with `singletonKey "startup"`, and the schedule `45 6 * * *` (tz UTC) registered; (b) still one queued job; (c) none |
 | TP-10.1 | S-10 | U | F-140 | none | Valid and invalid keys per bucket; prefix `users/`; ttl 30 and 901 | Pass/`RangeError` as per the rules |
 | TP-10.2 | S-10 | I | F-142, F-145 | temp directory, dev API | put/list/delete/deletePrefix; presign then GET; GET after expiry; tampered token | Behaviour per F-140; 200 with `attachment`; 404 envelope ×2 |
 | TP-10.3 | S-10 | I | F-141 | MinIO Testcontainer | Same operations; GET the presigned URL; after `ttlSeconds` | Works; 403 after expiry; `delete` of a missing key is fine; `put` to an unknown bucket → `ObjectStoreError` |
@@ -3131,50 +3149,44 @@ Types: **U** unit, **I** integration (real Postgres and/or HTTP in-process), **E
 | TP-13.13 | S-13 | E | emulator smoke | API stub with `minimumVersionCode` > the app's | Launch | `UpdateRequiredScreen` visible |
 | TP-13.14 | S-13 | U | F-250 | Robolectric, `SENTRY_DSN` empty and set (test build config), WorkManager test helper | `onCreate` | Sentry not initialised / initialised with F-260's options; unique periodic work `outbox-sync` enqueued with a 15-minute interval and `CONNECTED` |
 | TP-13.15 | S-13 | U | F-259 | shadow `ConnectivityManager` | Default network validated; lost; validated again | `isOnline` emits true, false, true |
+| TP-13.16 | S-13 | S | F-264 | Gradle TestKit on the app module | `assembleRelease` without `budmon.apiBaseUrl`; with `http://x/`; with `https://x.ts.net` (no trailing slash); with `https://x.ts.net/`; `assembleDebug` without it | Fails with the message naming the property ×3; succeeds and `BuildConfig.API_BASE_URL` is `https://x.ts.net/`; debug uses `http://10.0.2.2:8080/`. The release merged manifest's network security config permits no cleartext; the debug one permits it only for `10.0.2.2` |
 | TP-14.1 | S-14 | U | F-180 | fake pty emitting a rename prompt, then success output | Run; output "No schema changes"; never exits; version `1.0` | Wrote `"\r"` once; `ambiguities` has the question; file returned; null; timeout error; validation error |
 | TP-14.2 | S-14 | I | F-180 real | temp copy of a fixture project with a snapshot and a schema that renames a column | Run | One ambiguity listed; SQL contains `ADD COLUMN` and `DROP COLUMN` (create chosen) |
 | TP-14.3 | S-14 | I | F-181 | repo fixture | Run | Returns SQL; `git status` clean |
 | TP-14.4 | S-14 | I | F-182 | fixture projects: consistent; a migration missing a column; a stale snapshot; no migrations | Run | ok; `dumpDiff` mentions the column; `snapshotClean:false`; ok |
 | TP-14.5 | S-14 | U | F-184 | SQL with each pattern; with `-- reviewed: safe because empty table` above one; `-- reviewed: x` | Run | Each flagged with its line; the reviewed one not flagged; the too-short reason still flagged |
-| TP-14.6 | S-14 | U | F-185 | `["v0.1.0","v0.1.1-hotfix.1","x","v0.2.0-infra.1"]` | | 3 |
-| TP-14.6b | S-16 | U | F-185 offset | none | env `GITHUB_RUN_NUMBER=7`, no offset; with `RELEASE_SEQ_OFFSET=100`; offset `x` | 7; 107; `Error` |
+| TP-14.6 | S-14 | U | F-185 | none | `buildNumber(1)`; `buildNumber(412)`; `buildNumber(0)`; `buildNumber(-3)`; `buildNumber(1.5)`; (I) CLI in a fixture repo with 3 commits and tag `v0.1.0` on the third | 1; 412; `RangeError` ×3; prints `3` |
 | TP-14.7 | S-14 | I | F-183 | no previous tag | Run the upgrade harness | Reports "skipped: baseline", passes |
 | TP-14.8 | S-14 | S | `ci.yml` | `actionlint`; a test parsing `ci.yml` | | `migrations` job conditions per branch type as in §10.1 |
 | TP-14.9 | S-14 | I | F-6b | fixture repos: (a) a hotfix migration that applies and is absent from the pending report; (b) a hotfix whose change still shows as pending; (c) a migration that fails on an empty database; (d) an infra merge-back adding a migration | Run | (a) ok; (b) problem "hotfix change still pending"; (c) "migrations don't apply"; (d) problem |
-| TP-15.1b | S-15a | I | F-170 peer mapping | image started with the stage-0 Compose service definition; MinIO repository | As OS user `postgres` in the container: `psql -U budmon_admin -c 'select 1'`; `pgbackrest --stanza=budmon stanza-create`; `pgbackrest check`; as another OS user, `psql -U budmon_admin` | Succeeds ×3 without a password; the last is rejected |
-| TP-15.1 | S-15a | I | F-170 | built image; empty bind mount | Start without the flag; with the flag; restart with data; without a mounted `/var/lib/postgresql/data` | Exit 70 with the message; initialised, `budmon_migrator` exists, `budmon` owned by it; starts; exit 70 |
-| TP-15.2 | S-15a | I | F-170 config | running image | As `budmon_app`, run an `INSERT` violating a check constraint with a canary value | Container log has an error line without the canary or the statement |
-| TP-15.3 | S-15a | I | `pg_hba.prod-s0` | stage-0 Compose in CI with throwaway secrets | `budmon_capture` from worker-capture over `verify-full`; `budmon_capture` with `sslmode=disable`; `budmon_app` from worker-capture's address; `budmon_admin` over TCP | ok; rejected; rejected; rejected |
-| TP-15.4 | S-15b | U (bats) | F-171 tag | stubs | `deploy v1.2`, `deploy v1.2.0;rm`, `deploy v1.2.0-infra.1` | Exit 10, 10, proceeds |
-| TP-15.5 | S-15b | U (bats) | F-171 sequence | state current seq 5, previous 4; manifests seq 6, 4, 3, 5; state null | | Accept, accept (rollback), exit 11, exit 11, accept |
-| TP-15.6 | S-15b | U (bats) | F-174 | `cosign` stub failing | deploy | Exit 12; nothing extracted; no `docker` calls |
-| TP-15.7 | S-15b | U (bats) | F-171 self-update | bundle with a different bootstrap | deploy | New bootstrap installed, `.previous` kept, re-exec once (`BUDMON_REEXEC=1`), no loop |
-| TP-15.7b | S-15b | U (bats) | F-171 status and deploy log | migrate stub output containing the `migrator_previous_password_used` event; then without it | `deploy`, then `status` | stdout has the `NOTICE … clear-previous` line and `status` prints `migrator_previous_password_used: true` with the reminder; without the event, `false` and no notice |
-| TP-15.8 | S-15b | U (bats) | F-172 | `docker` stub recording calls; (a) `exec api … --ready` stub failing; (b) `queueUpgrade:true` with every stub succeeding and a Caddy stub that would answer 503 | deploy | (a) Order: decrypt, silence, migrate, `up` main, capture `up`, readiness via `docker compose exec -T api node dist/main/healthcheck.js --ready`; then the rollback `up` with the previous bundle; exit 16. (b) Maintenance on before migrate; readiness passes without touching Caddy; maintenance off at the end; exit 0 |
-| TP-15.9 | S-15b | U (bats) | F-172 secrets | `sops` stub output JSON; a file with `__FILL_ME__` | deploy | Files written per key, mode 0400 and owner per service; `capture` keys only under `/run/budmon/secrets/worker-capture`; the placeholder → exit 18 |
-| TP-15.10 | S-15b | U (bats) | F-173 | stubs | `maintenance on`, `status`, `off`, `reboot`, `foo` | Flag created; `on`; removed; compose stop capture, then main, then `systemctl reboot`; exit 64 |
-| TP-15.11 | S-15b | U+I | F-190, F-191, F-92 | fake `SopsCli`; Postgres | rotate `budmon_capture`; rotate `budmon_migrator` twice without `--force`, then `clear-previous` and rotate again; unknown role; missing file; (I) set `scramVerifier("pw")` via `ALTER ROLE` and log in; (I) F-92 with `DB_PASSWORD` new and `DB_PASSWORD_PREVIOUS` current | `DB_PASSWORD` set in the capture file and the verifier in `ROLE_SECRETS`; first migrator rotation copies the old value to `DB_PASSWORD_PREVIOUS`, the second is refused (exit 2), the third (after `clear-previous`) succeeds; nothing printed to stdout; exit 64; exit 2; login succeeds; migrate succeeds via the fallback and afterwards the new password logs in |
-| TP-15.12 | S-15b | U | F-192 | fake `SopsCli`, temp directory | init `dryrun`; init again | Files listed, generated keys present, placeholders where specified, `.sops.yaml` rules appended; second run exit 2 |
-| TP-15.13 | S-15a | I | Caddyfile | the web image + Caddyfile, stub API | maintenance flag; `/api/v1/x?token=CANARY`; `/some/route`; `/version.json` | Exact 503 bodies for `/api/*` and `/health/ready`; access log has no query or canary and no headers; `index.html` served; `Cache-Control: no-store`; CSP header exact |
-| TP-15.14 | S-15a | I | Alloy | Alloy with the main config and file sinks; a container log line with an extra key `payee` | Run | Exported line lacks `payee`; `budmon_alloy_log_fields_dropped_total` 1 |
-| TP-15.15 | S-15c | E | pgBackRest | rehearsal step 11 | backup, restore, verify | `verifyRestore.ok` |
-| TP-15.16 | S-15c | S | infra lint | CI | shellcheck, bats, `docker compose config` for every compose × deployment env, `cloud-init schema`, `tofu validate`, actionlint | All pass |
-| TP-15.17 | S-15c | E (manual) | first restore drill | production stage 0 | `infra/runbooks/restore-drill.md` | `docs/operations/restore-drills.md` entry with date, restore point, duration, `restore:verify` output |
-| TP-15.18 | S-15c | E (manual) | alerts | production stage 0 | Test-fire each stage-0 rule (maintenance for 6 min; stop worker-general 6 min; …) | Email received and resolved for each |
+| TP-14.10 | S-14 | S+I | `tag.yml` (stage 0) | actionlint and a structure test parsing the workflow; (I) the tagging script `tools/ci/tagRelease.sh` against a fixture repo with stub `gh` and `pnpm` | (a) merged `release/v1.2.0` PR, check (i) passes; (b) check (i) fails; (c) PR closed without merge; (d) branch `release/x`; (e) dispatch with a `hotfix/v1.2.1-hotfix.1` PR merged into `hotfix/v1.2.1`; (f) tag already exists | Workflow: triggers `pull_request: closed` on `main` and `workflow_dispatch`, `permissions: contents: write` only, `checkout` with `fetch-depth: 0`, no signing or deploy job. Script: (a) tag `v1.2.0` pushed on the merge commit; (b) no tag, exit 1; (c) no tag, exit 0; (d) exit 1 `branch name invalid`; (e) tag `v1.2.1-hotfix.1` on the hotfix head; (f) exit 1, tag unchanged |
+| TP-15.1b | S-15 | I | F-170 peer mapping | image started with the laptop's Compose service definition | As OS user `postgres` in the container: `psql -U budmon_admin -c 'select 1'`; as another OS user, `psql -U budmon_admin`; `psql -h 127.0.0.1 -U budmon_admin` | Succeeds without a password; rejected; rejected |
+| TP-15.1 | S-15 | I | F-170 | built image; empty bind mount | Start without the flag; with the flag; restart with data; without a mounted `/var/lib/postgresql/data` | Exit 70 with the message; initialised, `budmon_migrator` exists, `budmon` owned by it; starts; exit 70 |
+| TP-15.2 | S-15 | I | F-170 config | running image | As `budmon_app`, run an `INSERT` violating a check constraint with a canary value | Container log has an error line without the canary or the statement |
+| TP-15.3 | S-15 | I | F-175 `pg_hba.conf` | laptop Compose (both projects) in CI with throwaway secrets from F-191 | `budmon_capture` from worker-capture over `verify-full` to `db.budmon.internal`; `budmon_capture` with `sslmode=disable`; `budmon_app` from worker-capture's address; `budmon_admin` over TCP from `api`; `budmon_capture` from `api`'s `data` address | ok; rejected; rejected; rejected; rejected |
+| TP-15.20 | S-15 | U (bats) | F-178 `upgrade` checks | stub `git`, `docker`, `pg_dump`; `BUDMON_HOME` in a temp dir | `upgrade v1.2`; `upgrade 'v1.2.0;rm'`; `upgrade v1.2.0-infra.1`; `upgrade v1.2.0` where `git merge-base --is-ancestor` fails; `upgrade v1.2.0` with a failing `docker build`; `upgrade v1.2.0` with 5 existing dumps; `upgrade v1.2.0 --no-dump`; `frobnicate` | Exit 10, 10, 10; 11; 13 with no `compose up`; dumps reduced to 5 including the new one, the oldest deleted; no `pg_dump` call; 64 with usage text |
+| TP-15.21 | S-15 | U (bats) | F-178 `upgrade` sequence and rollback | stubs recording calls; state `current=v1.1.0`; (a) every stub succeeds; (b) `migrate` exits 1; (c) the readiness `exec` keeps failing; (d) as (c) and the rollback `up` fails too; (e) `QUEUE_UPGRADE` marker present; (f) migrate output contains `migrator_previous_password_used` | `upgrade v1.2.0` | (a) order: fetch, ancestry, build ×3, `pg_dump`, `run --rm migrate`, `up -d` main, `up -d` capture, readiness; state `current=v1.2.0`, `previous=v1.1.0`; exit 0. (b) exit 15, no `up`. (c) `up -d` with `BUDMON_TAG=v1.1.0` for both projects, exit 16, state unchanged. (d) exit 17. (e) maintenance flag created before migrate, workers stopped, flag removed at the end. (f) stdout has the notice line. No secret value appears in any recorded argument or in stdout |
+| TP-15.22 | S-15 | U (bats) + I | F-178 `install`, `maintenance`, `restore` | stubs; then (I) a real Postgres container from the image with a dump of a seeded database | `install v1.0.0` on an empty home; `install` again; `maintenance on`/`status`/`off`; `restore <dump>` with `restore:verify` stub ok; with it failing; (I) `restore` against the real container | Secrets initialised, CA and TLS files mode 0400, network created with `--internal`, first setup run, `upgrade --no-dump` called, `site.env` written, the `tailscale serve` command printed; second install exit 2; flag created, `on`, removed; restore order: maintenance on, workers and api stopped, `pg_restore --clean --if-exists`, schema step, verify, start, maintenance off, exit 0; verify failing → exit 6 with maintenance left on; (I) restored row counts equal the seeded ones |
+| TP-15.23 | S-15 | U | F-191 | fake `randomBytes` (sequential), in-memory `writeFile`/`exists` | `initLocalSecrets({ budmonHome: "/h" })`; again with `/h/secrets` existing | Exactly the files in F-191's table under `/h/secrets/<role>/<service>/`, mode 0400; `main/api/DB_PASSWORD` equals `main/worker-general/DB_PASSWORD`; `ROLE_SECRETS` parses as JSON with a `SCRAM-SHA-256$4096:` verifier per login role and contains no plaintext password; placeholders are exactly `__FILL_ME__`; no capture key under `main/` and no main key under `capture/`; returned file list only; second call → exit 2 and no writes |
+| TP-15.25 | S-15 | U+I | F-11 placeholder rule | (U) file map where `S3_ACCESS_KEY_ID_FILE` contains `__FILL_ME__\n`; (I) spawn `node dist/main/worker.js` with that file | `loadConfig` | (U) `ConfigError` with problem `S3_ACCESS_KEY_ID: placeholder not filled` and the value not in the message; (I) exits non-zero with that line on stderr |
+| TP-15.26 | S-15 | U (bats) | F-179 | stub `gcloud` that reports (a) nothing existing, (b) everything existing | `gcp-bootstrap.sh --project p` | (a) create calls for the key ring, key (purpose and algorithm exact), service account, IAM binding on the key only, topic, subscription, audit config; public key written to the three `CAPTURE_PUBLIC_KEY` files; (b) no create calls; both print the key-creation command and never call `keys create` themselves |
+| TP-15.11 | S-15 | U+I | F-190, F-92 | Postgres | (U) `scramVerifier("pencil", { salt: <RFC 7677 salt>, iterations: 4096 })`; (I) set `scramVerifier("pw")` via `ALTER ROLE` and log in with `pw`; (I) F-92 with `DB_PASSWORD` new, `DB_PASSWORD_PREVIOUS` current and the new verifier in `ROLE_SECRETS` | The RFC 7677 test vector's `StoredKey` and `ServerKey`; login succeeds; migrate succeeds via the fallback, logs `migrator_previous_password_used`, and afterwards the new password logs in |
+| TP-15.13 | S-15 | I | F-175 Caddyfile | the web image with `infra/local/Caddyfile`, stub API, request to `http://127.0.0.1:8080` | maintenance flag present: `/api/v1/x`, `/health/ready`; flag absent: `/api/v1/x?token=CANARY`, `/some/route`, `/version.json`, `/assets/a.js`; `curl -k https://127.0.0.1:8080/` | Exact 503 bodies and `Retry-After: 120` for `/api/*`, `{"status":"maintenance"}` 503; access log has no query string, no canary and no headers; `index.html` served; `Cache-Control: no-store`; immutable cache header; CSP header exact on every response; the TLS request fails (plain HTTP only, `auto_https off`) |
+| TP-15.16 | S-15 | S | infra lint | CI `infra-lint` | shellcheck on `infra/local/**/*.sh` and `budmon-local`; bats (`infra/local/test`); `docker compose -f compose.main.yaml -f compose.capture.yaml --env-file local.env config` and the same with the rehearsal overlay; actionlint; a test that `postgres` has no `ports:` and `caddy` publishes only `127.0.0.1:8080:8080` | All pass; a published Postgres port or a non-loopback Caddy port fails the job |
+| TP-15.17 | S-15 | E (manual) | stage-0 install and access (AC-15.1 to AC-15.3) | the owner's laptop, `infra/runbooks/stage0-laptop.md` | Follow the runbook from a fresh WSL2; open the Tailscale URL on the laptop and on the phone (Wi-Fi, then mobile data); with the laptop asleep, record an Android entry, then wake it | Every runbook step succeeds as written; the app loads with a valid certificate both times; the entry syncs after wake; the owner records the date in `docs/operations/stage0-install.md` |
+| TP-15.18 | S-15 | E (manual) | Sentry e-mail (AC-15.4) | the laptop stack | `budmon-local` project `budmon-main`: `docker compose run --rm worker-general node dist/main/cli.js diagnostics:sentry-test --yes` | An issue e-mail arrives; the event has no request body, query string or user fields |
 | TP-16.1 | S-3 | U | F-198 | none | Text containing a canary raw, base64-encoded and URL-encoded | 3 hits with the source and offset |
 | TP-16.2 | S-16 | I | F-196 | server started | Each control mode, then a token request | Bodies and status per F-196 |
-| TP-16.3 | S-16 | U | F-195 | fake `exec` failing at step 5 | `runRehearsal` (full); mode infra | Steps 1 to 5 recorded, 6+ not run, artifacts collected, `ok:false`; infra skips 2 and 6 and fails if `migrationsApplied ≠ 0` |
+| TP-16.3 | S-16 | U | F-195 | fake `exec` failing at step 5; then a fake where every step succeeds with `previousTag = null` | `runRehearsal` | Steps 1 to 5 recorded, 6+ not run, cleanup and artifact collection run, `ok:false`; with no previous tag, steps 6 and 13 are recorded as skipped and `ok:true` |
 | TP-16.4 | S-16 | E | rehearsal | first release PR | `rehearsal.yml` | All steps `ok` |
 | TP-16.5 | S-16 | E | canary flows | rehearsal stack | Flows: a request whose body fails validation with a canary in a field; malformed JSON containing a canary; an FX backfill failing because fake FX returns 500 with a canary body; a `GET` with a canary in the query string | Scan finds no canary in any source listed in F-195 step 8 (capture-path flows are added by `sources`) |
 | TP-16.6 | S-16 | E | steps 9, 10 | rehearsal with a doctored overlay adding `INFRA_STAGE=0` to `api`; another mounting capture secrets into `api` | Run | Step 9 fails; step 10 fails |
-| TP-16.7 | S-16 | E | F-199 | stage-0 overlay | Run | Ready; worker-capture's connection to `PG_DATA_IP:5432` fails |
-| TP-16.11 | S-16 | U | F-186 | fake GitHub API and git | (a) release merge; (b) dispatch, hotfix PR open, base main, checks green, head descends from the last deployed tag; (c) same but head not descended (branch updated from main); (d) a required check failing; (e) PR closed; (f) head branch `hotfix/x`; (g) infra PR whose diff against the last deployed tag touches `apps/`; (h) no successful production deployment yet; (i) the newest successful `production` deployment was created by user `owner` through the API (ref `v9.9.9`), and an older one by `github-actions[bot]` from a `release.yml` push run with ref `v1.2.0`; (j) a `github-actions[bot]` deployment whose run's path is `.github/workflows/ci.yml` | (a), (b) ok with the SHA; (i) the baseline is `v1.2.0` (the hand-made record is ignored); (j) ignored; (c) problem `not descended from <tag>`; (d) `checks not green`; (e) `pull request not open`; (f) `branch name invalid`; (g) `infra-only diff violated`; (h) ancestry check skipped (first release), others applied |
-| TP-16.8 | S-16 | S | `tag.yml`, `release.yml`, repository settings | actionlint + a structure test; a scheduled and on-demand CI job `repo-guards` using `gh api` with a read-only admin-scoped token stored as the `repo-guards` environment secret | Parse; query `GET /repos/{o}/{r}/rulesets` and the ruleset detail; `GET /repos/{o}/{r}/environments/tagging` | `release.yml` triggers only on `push: tags: v*`; `sign` needs `rehearse`; `verify-signature` needs `sign`; `deploy` needs `verify-signature` and has `environment: production`; `tag.yml` has no `cosign sign`, its `tag` job has `environment: tagging` and `needs: verify`, its dispatch path fails on a non-`main` ref; `checkout` has `fetch-depth: 0`. A ruleset targets `refs/tags/v*` with creation, update and deletion restricted, enforcement `active`, and a bypass list of exactly one actor of type `Integration` (the App). The `tagging` environment's branch policy allows `main` only. The `tag-approval` environment exists with exactly one required reviewer (the owner), `prevent_self_review: false` and a `main`-only branch policy. `tag.yml`'s `approve` job (environment `tag-approval`) runs on every path, and `tag` needs it. `repo-guards` has the hourly schedule. Any deviation fails the job and opens an issue |
-| TP-16.9 | S-16 | E | F-174 with real signatures | rehearsal step 1 (every release PR) and `release.yml` `verify-signature` (every release) | Verify rehearsal-signed digests with the rehearsal anchors; with the production anchors; release-signed digests with the production anchors | Pass; fail (exit 12); pass |
-| TP-16.10 | S-16 | U (bats) | anchor regexes | none | Production regex against SANs `…/release.yml@refs/tags/v1.2.0`, `…@refs/tags/v1.2.0-hotfix.1`, `…@refs/tags/v1.2.0-infra.1`, `…/release.yml@refs/heads/main`, `…/ci.yml@refs/tags/v1.2.0`; rehearsal regex against `…/rehearsal.yml@refs/pull/12/merge` and `…/rehearsal.yml@refs/heads/x` | match ×3, no ×2; match, no |
+| TP-16.7 | S-16 | E | F-195 step 10 | rehearsal stack | Run step 10; then a doctored overlay that attaches worker-capture to `data` | Ready; worker-capture's connection to `PG_DATA_IP:5432` fails and the step passes; with the doctored overlay the step fails |
+| TP-16.12 | S-16 | E | F-195 step 11 | rehearsal stack after step 10 | Run step 11 | `secrets:rewrap-api` exit 0; dump restored through `budmon-local restore` logic and `restore:verify` exit 0; `erasure:replay` exit 0; migrate with the rotated password succeeds through the fallback and a second run doesn't use it |
 
 ## 11. Open questions
 
 | # | Question | Options | Facts | Blocks |
 | - | -------- | ------- | ----- | ------ |
 | Q-1 | **FX before 2024-03-02**, the fallback provider's data floor (`FX_FALLBACK_FIRST_DATE`, F-132). What should conversions on earlier dates do? | (a) Accept "no rate" for earlier dates. (b) Also backfill older dates from Open Exchange Rates' historical endpoint, capped at about 300 requests a month (the room left after the ~31 daily calls). (c) Manual rate entry later. The plan-reviewer recommends (b) if historical data is free, else (a). | OXR's own pages, as quoted in web-search snippets (the site itself is blocked from this environment), say the Forever Free plan includes "historical data" ("daily historical data") with 1,000 requests a month, USD base only, and that each `historical/*.json` call counts as one request. One third-party article claims historical data needs a paid plan. HLD D-15's research table also says "Free plan: daily historical". **Not verified first-hand;** to be confirmed when the account is created. Back-dated entries before 2024-03-02 are rare for a new user, but likely when importing history. | The user's answer is a choice for the planner to record; S-9 can be built with (a) and extended for (b) by an amendment, so this doesn't block S-0 to S-8. |
+| Q-2 | **An owner approval click on every release** (v0.5's `tag-approval` on the release path). | (a) Keep it in the stage-1 chain. (b) Approval for hotfix tags only. | Stage 0 has no signing and no deployment from CI; `tag.yml` tags with `GITHUB_TOKEN` and `budmon-local upgrade` is run by the owner by hand, which is the approval in stage 0. HLD §11 Q-2 records it as deferred. | **Deferred to the stage-1 LLD.** It doesn't block this LLD's approval and is listed here only so it isn't lost. |
