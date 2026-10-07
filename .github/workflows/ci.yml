@@ -33,6 +33,7 @@ jobs:
           pnpm lint
           pnpm typecheck
           pnpm test
+          pnpm test:coverage
 
   migrations:
     name: migrations
