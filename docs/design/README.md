@@ -38,4 +38,4 @@ Templates (including `lld-brief.md`) are in [`_templates/`](./_templates) and [`
 | Module | HLD | LLD |
 | ------ | --- | --- |
 | `platform` | [hld.md](./platform/hld.md) (approved, v1.3) | [lld.md](./platform/lld.md) (approved, v0.13); [brief](./platform/lld-brief.md) |
-| `identity` | [hld.md](./identity/hld.md) (approved, v0.6) | [lld.md](./identity/lld.md) (draft, v0.6); [brief](./identity/lld-brief.md) |
+| `identity` | [hld.md](./identity/hld.md) (approved, v0.6) | [lld.md](./identity/lld.md) (approved, v0.6); [brief](./identity/lld-brief.md) |
