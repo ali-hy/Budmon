@@ -1,0 +1,29 @@
+{
+  "name": "@budmon/config",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./eslint": {
+      "types": "./eslint/index.d.ts",
+      "default": "./eslint/index.js"
+    },
+    "./prettier": {
+      "types": "./prettier/index.d.ts",
+      "default": "./prettier/index.js"
+    },
+    "./tsconfig/*": "./tsconfig/*.json"
+  },
+  "dependencies": {
+    "@eslint-community/eslint-plugin-eslint-comments": "4.8.1",
+    "eslint-config-prettier": "10.1.8",
+    "eslint-plugin-formatjs": "5.4.2",
+    "eslint-plugin-jsx-a11y": "6.10.2",
+    "typescript-eslint": "8.71.0"
+  },
+  "peerDependencies": {
+    "eslint": "10.12.0",
+    "prettier": "^3.0.0",
+    "typescript": "5.9.3"
+  }
+}

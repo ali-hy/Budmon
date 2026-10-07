@@ -1,0 +1,6 @@
+packages:
+  - apps/server
+  - apps/web
+  - packages/*
+  - infra/budmonctl
+  - tools/*
