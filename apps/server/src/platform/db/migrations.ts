@@ -1,6 +1,6 @@
 // F-18: applies the committed migrations (schema step 2, migrate mode).
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
@@ -23,9 +23,12 @@ export class MigrationFailedError extends Error {
 export function readJournal(
   migrationsFolder: string,
 ): { tag: string; when: number; hash: string }[] {
-  const journal = JSON.parse(
-    readFileSync(path.join(migrationsFolder, "meta", "_journal.json"), "utf8"),
-  ) as { entries: { tag: string; when: number }[] };
+  const file = path.join(migrationsFolder, "meta", "_journal.json");
+  // No journal means no migrations: the folder holds only .gitkeep until the first release.
+  if (!existsSync(file)) return [];
+  const journal = JSON.parse(readFileSync(file, "utf8")) as {
+    entries: { tag: string; when: number }[];
+  };
   return journal.entries.map((entry) => ({
     tag: entry.tag,
     when: entry.when,
@@ -55,6 +58,10 @@ export async function applyCommittedMigrations(
       if (!known) throw new UnknownMigrationError();
     }
     recorded = rows.length;
+  }
+  if (journal.length === 0) {
+    // Drizzle's migrator needs a journal; with none, there is nothing to apply (A-80).
+    return { applied: 0, verified: recorded };
   }
   try {
     await migrate(drizzle({ client: database.pool }), { migrationsFolder });

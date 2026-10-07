@@ -5,7 +5,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
 
-const DEVELOPMENT_ONLY = new Set(["dev.ts", "dbReset.ts"]);
+const DEVELOPMENT_ONLY = new Set(["dev.ts", "dbReset.ts", "devMigrate.ts"]);
 
 export async function buildServer(
   opts: { outdir?: string; serverDir?: string } = {},

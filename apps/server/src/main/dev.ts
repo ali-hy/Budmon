@@ -14,6 +14,7 @@ import { parseEnv } from "node:util";
 import { pathToFileURL } from "node:url";
 import pg from "pg";
 import type { DbLoginRole } from "../platform/config/schema.js";
+import { failureLine } from "../platform/observability/describeFailure.js";
 import { resetDevelopmentDatabase } from "../platform/db/reset.js";
 import { runSchemaStep } from "../platform/db/schemaStep.js";
 import { repoRoot, seedAll } from "./dbReset.js";
@@ -65,13 +66,44 @@ function compose(root: string, args: string[]): ReturnType<typeof spawnSync> {
   );
 }
 
-async function waitForPostgres(root: string): Promise<void> {
-  for (let attempt = 0; attempt < 60; attempt += 1) {
-    const result = compose(root, ["exec", "-T", "postgres", "pg_isready", "-U", "postgres"]);
-    if (result.status === 0) return;
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+/**
+ * Polls from the host over TCP, with the URL the tools use, until a query succeeds (A-86). The
+ * image's init server listens only on the socket, so the first TCP success is the real server.
+ */
+export async function waitForPostgres(
+  url: string,
+  deps: {
+    connect(url: string, timeoutMs: number): Promise<void>;
+    sleep(ms: number): Promise<void>;
+    now(): number;
+  },
+  opts: { timeoutMs?: number; intervalMs?: number } = {},
+): Promise<void> {
+  const timeoutMs = opts.timeoutMs ?? 60_000;
+  const intervalMs = opts.intervalMs ?? 500;
+  const deadline = deps.now() + timeoutMs;
+  for (;;) {
+    try {
+      await deps.connect(url, 2000);
+      return;
+    } catch {
+      if (deps.now() >= deadline) {
+        throw new Error("Postgres didn't become ready within 60 s");
+      }
+      await deps.sleep(intervalMs);
+    }
   }
-  throw new Error("Postgres didn't become ready within 60 s");
+}
+
+async function connectOnce(url: string, timeoutMs: number): Promise<void> {
+  const client = new pg.Client({ connectionString: url, connectionTimeoutMillis: timeoutMs });
+  client.on("error", () => undefined);
+  try {
+    await client.connect();
+    await client.query("SELECT 1");
+  } finally {
+    await client.end().catch(() => undefined);
+  }
 }
 
 function randomSecret(bytes: number): string {
@@ -100,6 +132,7 @@ export function ensureDevSecrets(root: string): void {
     DbLoginRole,
     { password: string }
   >;
+  write("migrator_password", () => `${roles.budmon_migrator.password}\n`);
   write("db_password", () => `${roles.budmon_app.password}\n`);
   write("queue_password", () => `${roles.budmon_queue.password}\n`);
   for (const name of ["cursor_key", "rate_limit_key", "mailbox_key", "dev_objects_key"]) {
@@ -167,14 +200,17 @@ async function main(): Promise<number> {
     log(`docker compose up failed:\n${String(up.stderr)}`);
     return 1;
   }
-  await waitForPostgres(root);
-  ensureDevSecrets(root);
-
   const superuserUrl = env["DEV_SUPERUSER_URL"];
   if (superuserUrl === undefined) {
     log("DEV_SUPERUSER_URL is not set");
     return 1;
   }
+  await waitForPostgres(superuserUrl, {
+    connect: connectOnce,
+    sleep: (ms) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
+    now: () => Date.now(),
+  });
+  ensureDevSecrets(root);
   const databaseName = env["DB_NAME"] ?? "budmon";
   if (!(await databaseExists(superuserUrl, databaseName))) {
     const roleSecrets = JSON.parse(
@@ -229,5 +265,10 @@ if (
   process.argv[1] !== undefined &&
   import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href
 ) {
-  process.exitCode = await main();
+  try {
+    process.exitCode = await main();
+  } catch (error) {
+    process.stderr.write(`${failureLine("pnpm dev", error)}\n`);
+    process.exitCode = 1;
+  }
 }

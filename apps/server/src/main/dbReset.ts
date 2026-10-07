@@ -3,6 +3,7 @@ import { readFileSync, realpathSync, existsSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseEnv } from "node:util";
+import { failureLine } from "../platform/observability/describeFailure.js";
 import { loadConfig } from "../platform/config/loadConfig.js";
 import { serverRoot } from "../platform/config/serverRoot.js";
 import type { AppEnv, DbLoginRole } from "../platform/config/schema.js";
@@ -107,7 +108,7 @@ export async function runDbResetCli(
       deps.stderr(error.message);
       return 2;
     }
-    deps.stderr("db reset failed");
+    deps.stderr(failureLine(seedOnly ? "db:seed" : "db:reset", error));
     return 1;
   }
 }

@@ -7,7 +7,7 @@
     "dev": "tsx src/main/dev.ts",
     "db:reset": "tsx src/main/dbReset.ts",
     "db:seed": "tsx src/main/dbReset.ts --seed-only",
-    "db:migrate": "tsx src/main/migrate.ts",
+    "db:migrate": "tsx src/main/devMigrate.ts",
     "build": "tsx scripts/build.ts"
   },
   "dependencies": {

@@ -11,31 +11,51 @@ import path from "node:path";
 import type { AppEnv, DbLoginRole } from "../config/schema.js";
 import type { runSchemaStep } from "./schemaStep.js";
 
+export type ResetRefusedReason =
+  "app_env" | "non_local_host" | "host_parameter" | "host_list" | "socket_path" | "unparseable_url";
+
+const PHRASES: Record<Exclude<ResetRefusedReason, "app_env">, string> = {
+  non_local_host: "the host isn't local",
+  host_parameter: "the URL sets a host parameter",
+  host_list: "the URL lists several hosts",
+  socket_path: "the URL is a socket path",
+  unparseable_url: "the URL can't be parsed",
+};
+
+/** The message names the reason, never the URL, host, user or password (A-84). */
 export class ResetRefusedError extends Error {
-  constructor(command: "db:reset" | "db:seed") {
-    super(`${command} only runs against a local development or test database`);
+  readonly reason: ResetRefusedReason;
+
+  constructor(command: "db:reset" | "db:seed", reason: ResetRefusedReason, appEnv?: AppEnv) {
+    const phrase = reason === "app_env" ? `APP_ENV is ${appEnv ?? "unknown"}` : PHRASES[reason];
+    super(`${command} only runs against a local development or test database: ${phrase}`);
     this.name = "ResetRefusedError";
+    this.reason = reason;
   }
 }
 
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]", "host.docker.internal"]);
 
-/** Whether pg would connect to an acceptable server with this URL. `pg` lets `?host=` and
- * `?hostaddr=` override the URL's host, so those parameters, host lists and socket paths are
- * always refused; the host is the one pg-connection-string reports. `allowNonLocalHost` skips
- * only the allowlist of local hosts. */
-function isAcceptableUrl(superuserUrl: string, allowNonLocalHost: boolean): boolean {
+/** Why pg wouldn't be connecting to an acceptable server with this URL, or `null`. `pg` lets
+ * `?host=` and `?hostaddr=` override the URL's host, so those parameters, host lists and socket
+ * paths are always refused; the host is the one pg-connection-string reports.
+ * `allowNonLocalHost` skips only the allowlist of local hosts. */
+function urlRefusal(
+  superuserUrl: string,
+  allowNonLocalHost: boolean,
+): Exclude<ResetRefusedReason, "app_env"> | null {
+  let host: string | null | undefined;
   try {
     const query = new URL(superuserUrl).searchParams;
-    if (query.has("host") || query.has("hostaddr")) return false;
-    const { host } = parseConnectionString(superuserUrl);
-    if (typeof host !== "string" || host === "" || host.includes(",") || host.startsWith("/")) {
-      return false;
-    }
-    return allowNonLocalHost || LOCAL_HOSTS.has(host);
+    if (query.has("host") || query.has("hostaddr")) return "host_parameter";
+    host = parseConnectionString(superuserUrl).host;
   } catch {
-    return false;
+    return "unparseable_url";
   }
+  if (typeof host !== "string" || host === "") return "unparseable_url";
+  if (host.includes(",")) return "host_list";
+  if (host.startsWith("/")) return "socket_path";
+  return allowNonLocalHost || LOCAL_HOSTS.has(host) ? null : "non_local_host";
 }
 
 function assertLocalDevelopment(
@@ -44,10 +64,11 @@ function assertLocalDevelopment(
   superuserUrl: string,
   allowNonLocalHost: boolean,
 ): void {
-  const allowedEnv = appEnv === "development" || appEnv === "test";
-  if (!allowedEnv || !isAcceptableUrl(superuserUrl, allowNonLocalHost)) {
-    throw new ResetRefusedError(command);
+  if (appEnv !== "development" && appEnv !== "test") {
+    throw new ResetRefusedError(command, "app_env", appEnv);
   }
+  const refusal = urlRefusal(superuserUrl, allowNonLocalHost);
+  if (refusal !== null) throw new ResetRefusedError(command, refusal);
 }
 
 export async function resetDevelopmentDatabase(

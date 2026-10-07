@@ -1,5 +1,6 @@
 // F-92: the migrate process (`pnpm db:migrate`, image entry `node dist/main/migrate.js`).
-import { readFileSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
+import { pathToFileURL } from "node:url";
 import path from "node:path";
 import { EXIT_CONFIG, loadConfigOrReport } from "../platform/config/startup.js";
 import type { Config, DbLoginRole } from "../platform/config/schema.js";
@@ -8,6 +9,7 @@ import { createDatabase } from "../platform/db/client.js";
 import { MigrationFailedError, UnknownMigrationError } from "../platform/db/migrations.js";
 import { runSchemaStep, SchemaStepError } from "../platform/db/schemaStep.js";
 import iso4217 from "../platform/fx/iso4217.json" with { type: "json" };
+import { describeFailure } from "../platform/observability/describeFailure.js";
 import { createStderrLogger, type Logger } from "../platform/observability/logger.js";
 import type { Secret } from "../platform/observability/redaction.js";
 import type { Database } from "../platform/db/types.js";
@@ -38,8 +40,11 @@ async function connect(
   }
 }
 
-async function main(): Promise<number> {
-  const config = loadConfigOrReport("migrate", process.env, readFileSync, stderr);
+/** F-92 as a function: returns the exit code. */
+export async function runMigrate(
+  env: Readonly<Record<string, string | undefined>>,
+): Promise<number> {
+  const config = loadConfigOrReport("migrate", env, readFileSync, stderr);
   if (config?.migrate === undefined) return EXIT_CONFIG;
   const logger = createStderrLogger({ service: "migrate", level: config.logLevel });
   if (config.db.user !== "budmon_migrator") {
@@ -75,23 +80,19 @@ async function main(): Promise<number> {
     process.stdout.write(`${JSON.stringify(report)}\n`);
     return 0;
   } catch (error) {
-    if (error instanceof SchemaStepError) {
-      logger.error("schema_step_failed", { code: error.code });
-      return 3;
-    }
-    if (error instanceof UnknownMigrationError) {
-      logger.error("unknown_migration");
-      return 4;
-    }
-    if (error instanceof MigrationFailedError) {
-      logger.error("migration_failed");
-      return 5;
-    }
-    logger.error("startup_failed");
+    logger.error("startup_failed", describeFailure(error));
+    if (error instanceof SchemaStepError) return 3;
+    if (error instanceof UnknownMigrationError) return 4;
+    if (error instanceof MigrationFailedError) return 5;
     return 1;
   } finally {
     await database.close();
   }
 }
 
-process.exitCode = await main();
+if (
+  process.argv[1] !== undefined &&
+  import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href
+) {
+  process.exitCode = await runMigrate(process.env);
+}

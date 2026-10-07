@@ -600,10 +600,24 @@ function readEmail(r: Reader, publicOriginUrl: URL | undefined): Config["email"]
   let smtpTransport: NonNullable<Config["email"]>["smtpTransport"] | undefined;
   if (raw !== undefined) {
     const url = parseUrl(raw);
-    if (url === null || (url.protocol !== "smtp:" && url.protocol !== "smtps:")) {
+    const explicitPort = /^smtps?:\/\/[^/?#]*:(\d+)(?:[/?#]|$)/i.exec(raw)?.[1];
+    if (
+      explicitPort !== undefined &&
+      (Number.parseInt(explicitPort, 10) < 1 || Number.parseInt(explicitPort, 10) > 65535)
+    ) {
+      r.fail("SMTP_URL", "port must be 1..65535");
+    } else if (url === null || (url.protocol !== "smtp:" && url.protocol !== "smtps:")) {
       r.fail("SMTP_URL", "must be an smtp:// or smtps:// URL");
     } else if (url.password !== "") {
       r.fail("SMTP_URL", "must not contain a password");
+    } else if (url.hostname === "") {
+      r.fail("SMTP_URL", "must have a host");
+    } else if (
+      (url.pathname !== "" && url.pathname !== "/") ||
+      url.search !== "" ||
+      url.hash !== ""
+    ) {
+      r.fail("SMTP_URL", "must not have a path, query or fragment");
     } else if (!decodesCleanly(url.username)) {
       r.fail("SMTP_URL", "must be a valid URL");
     } else {

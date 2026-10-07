@@ -5,6 +5,63 @@ A personal budgeting and money-monitoring application. What it does and for whom
 [the spec summary](docs/product/spec-summary.md). How work is done is in
 [CLAUDE.md](CLAUDE.md) and [docs/design/README.md](docs/design/README.md).
 
+## Prerequisites
+
+- Docker with Compose v2, for the development stack (Postgres and Mailpit) and for the
+  integration tests.
+- Node 24 (see `.nvmrc`).
+- pnpm 10, through Corepack: `corepack enable` picks up the version pinned in `package.json`.
+- JDK and Android Studio, for the Android app (from S-13).
+
+## First run
+
+```sh
+pnpm install
+pnpm dev
+```
+
+`pnpm dev` does everything needed on a fresh clone:
+
+1. creates `.env` from `.env.example` (an existing `.env` is never overwritten);
+2. starts Postgres and Mailpit with Docker Compose (project `budmon-dev`, `infra/compose.yaml`);
+3. creates `.data/dev-secrets/` with random development secrets;
+4. creates and pushes the `budmon` database, the first time only;
+5. starts the api and the worker.
+
+Ctrl-C stops the api and the worker; the containers keep running (`docker compose -p budmon-dev
+-f infra/compose.yaml down` stops them). Mailpit's inbox is at <http://127.0.0.1:8025>, and its
+SMTP port is 1025 (both listen on the loopback address only).
+
+## Configuration
+
+Development configuration lives in `.env` at the repository root, created from `.env.example`
+(which lists every variable). Variables ending in `_FILE` name a file whose content is the value;
+relative paths are resolved from the repository root. Never commit `.env` or `.data/`; both are
+ignored by git. Run the server through `pnpm dev`: running `apps/server/src/main/api.ts` directly
+isn't supported.
+
+## Database commands
+
+| Command                   | What it does                                                               |
+| ------------------------- | -------------------------------------------------------------------------- |
+| `pnpm db:reset`           | Drops and rebuilds the development database from the schema, then seeds it |
+| `pnpm db:reset --no-seed` | The same without seeding (put `--` before the flag if your shell needs it) |
+| `pnpm db:seed`            | Runs the seeders on the existing development database                      |
+| `pnpm db:migrate`         | Applies the committed migrations (there are none until the first release)  |
+
+`db:reset` and `db:seed` refuse to run against anything but a local development or test database.
+Migration files exist only on `release/*` and `hotfix/*` branches; development databases are
+built from the schema directly.
+
+## Tests
+
+| Command              | What it runs                                                   |
+| -------------------- | -------------------------------------------------------------- |
+| `pnpm test`          | Every unit test project                                        |
+| `pnpm test:int`      | Integration tests against Postgres in Docker                   |
+| `pnpm test:coverage` | The shared library's tests with the 100 % branch gate on money |
+| `pnpm check`         | Format check, lint, type-check and all of the above            |
+
 ## Layout
 
 | Path              | Contents                                                         |
@@ -17,12 +74,6 @@ A personal budgeting and money-monitoring application. What it does and for whom
 | `infra/`          | Compose files, the laptop stack and runbooks (later slices)      |
 | `tools/ci`        | CI scripts, such as the migration-file check                     |
 | `docs/`           | Product documents and the design documents (HLD and LLD)         |
-
-## Prerequisites
-
-- Node 24 (see `.nvmrc`) and pnpm 10 (`corepack enable` picks up the pinned version).
-- Docker with Compose v2, for the database used by integration tests (from slice S-2).
-- JDK and Android Studio, for the Android app (from S-13).
 
 ## Commands
 
