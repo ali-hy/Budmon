@@ -162,7 +162,11 @@ async function main(): Promise<number> {
     log("Docker isn't running");
     return 1;
   }
-  compose(root, ["up", "-d"]);
+  const up = compose(root, ["up", "-d"]);
+  if (up.status !== 0) {
+    log(`docker compose up failed:\n${String(up.stderr)}`);
+    return 1;
+  }
   await waitForPostgres(root);
   ensureDevSecrets(root);
 
