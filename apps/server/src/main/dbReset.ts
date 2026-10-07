@@ -117,6 +117,8 @@ if (
 ) {
   // `pnpm db:reset` runs with apps/server as the working directory; the developer's .env is in
   // the repository root.
+  // Relative paths in .env are relative to the repository root (A-73).
+  process.chdir(repoRoot());
   const dotenv = path.join(repoRoot(), ".env");
   if (existsSync(dotenv)) process.loadEnvFile(dotenv);
   process.exitCode = await runDbResetCli(process.argv.slice(2), {

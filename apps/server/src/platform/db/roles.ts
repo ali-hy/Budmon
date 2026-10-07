@@ -33,6 +33,25 @@ export async function applyRolesAndPrivileges(
     }
   }
 
+  // 0. Existing roles must not hold stronger attributes than expected; refuse, don't normalise.
+  const existing = await migrator.executeSql(
+    `SELECT rolname, rolcanlogin, rolsuper, rolcreatedb, rolcreaterole, rolinherit, rolreplication, rolbypassrls
+     FROM pg_roles WHERE rolname = ANY($1::text[])`,
+    [[...LOGIN_ROLES]],
+  );
+  for (const row of existing.rows) {
+    const role = String(row["rolname"]);
+    const expected =
+      row["rolcanlogin"] === true &&
+      row["rolsuper"] === false &&
+      row["rolcreatedb"] === false &&
+      row["rolcreaterole"] === (role === "budmon_migrator") &&
+      row["rolinherit"] === false &&
+      row["rolreplication"] === false &&
+      row["rolbypassrls"] === false;
+    if (!expected) throw new SchemaStepError("role_attributes_unexpected", role);
+  }
+
   // 1. Missing roles (budmon_migrator comes from F-14).
   for (const role of LOGIN_ROLES) {
     await migrator.executeSql(

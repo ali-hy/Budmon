@@ -193,10 +193,12 @@ async function main(): Promise<number> {
     );
   }
 
-  const serverDir = path.join(root, "apps", "server");
+  // Run from the repository root so the relative paths in .env resolve (A-73).
+  const tsx = path.join(root, "apps", "server", "node_modules", ".bin", "tsx");
+  const watch = ["watch", "--tsconfig", "apps/server/tsconfig.json"];
   const children = [
-    startProcess("api", "pnpm", ["exec", "tsx", "watch", "src/main/api.ts"], serverDir, env),
-    startProcess("worker", "pnpm", ["exec", "tsx", "watch", "src/main/worker.ts"], serverDir, {
+    startProcess("api", tsx, [...watch, "apps/server/src/main/api.ts"], root, env),
+    startProcess("worker", tsx, [...watch, "apps/server/src/main/worker.ts"], root, {
       ...env,
       WORKER_ROLES: "capture,general",
     }),

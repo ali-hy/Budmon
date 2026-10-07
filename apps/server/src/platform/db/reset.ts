@@ -28,7 +28,7 @@ function isLocalUrl(superuserUrl: string): boolean {
     const query = new URL(superuserUrl).searchParams;
     if (query.has("host") || query.has("hostaddr")) return false;
     const { host } = parseConnectionString(superuserUrl);
-    return host !== undefined && LOCAL_HOSTS.has(host);
+    return typeof host === "string" && LOCAL_HOSTS.has(host);
   } catch {
     return false;
   }

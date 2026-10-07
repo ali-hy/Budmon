@@ -5,7 +5,8 @@ export type SchemaStepCode =
   | "password_form_in_production"
   | "table_without_grants"
   | "credential_table_granted_to_capture"
-  | "minor_units_changed";
+  | "minor_units_changed"
+  | "role_attributes_unexpected";
 
 export class SchemaStepError extends Error {
   readonly code: SchemaStepCode;

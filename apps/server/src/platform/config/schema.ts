@@ -2,6 +2,7 @@
 // every `*_FILE` already read) and reports one problem per failing variable, never a value.
 import { createPublicKey } from "node:crypto";
 import { isIP } from "node:net";
+import { isAbsolute } from "node:path";
 import { z } from "zod";
 import { Secret } from "../observability/redaction.js";
 
@@ -234,6 +235,10 @@ class Reader {
     const path = this.input.env[variable];
     if (path === undefined || path === "") {
       if (required) this.fail(variable, "required");
+      return undefined;
+    }
+    if (this.prod && !isAbsolute(path)) {
+      this.fail(variable, "must be an absolute path");
       return undefined;
     }
     const content = this.input.files[path];
