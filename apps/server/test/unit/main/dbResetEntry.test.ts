@@ -87,6 +87,19 @@ describe("TP-2.55x: dbReset's entry guard and <repo>/.env (A-64)", () => {
     expect(status, stderr).toBe(0);
   });
 
+  // Code review B-2 (round 2): .env is configuration for the CLI only. If it were loaded into
+  // process.env, a TESTCONTAINERS=1 line in it would switch off F-20's local-host guard.
+  it("TP-2.55x: TESTCONTAINERS=1 in .env doesn't let db:seed reach a non-local host", () => {
+    writeDotEnv(
+      "TESTCONTAINERS=1\nDEV_SUPERUSER_URL=postgres://p:p@db.example.com:5432/postgres\n",
+    );
+
+    const { status, stderr } = runSeedOnly({});
+
+    expect(status, stderr).toBe(2);
+    expect(stderr).toContain("db:seed only runs against a local development or test database");
+  });
+
   it("TP-2.55x: the entry guard never creates .env", () => {
     writeDotEnv(undefined);
 
