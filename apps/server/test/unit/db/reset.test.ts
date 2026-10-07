@@ -1,5 +1,8 @@
 // F-20 guards. TP-2.16 (a) (the refusals; (b) is integration/db/reset.test.ts) and TP-2.24 (a)
-// to (d) for seedDevelopmentDatabase, plus extra cases TP-2.38x for the rest of step 1's guard.
+// to (d) for seedDevelopmentDatabase, plus extra cases TP-2.38x and TP-2.60x for the rest of step
+// 1's guard. IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
+// A-79: F-20 never reads process.env; only the explicit `allowNonLocalHost` input relaxes the host
+// allowlist, and nothing else.
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import {
   ResetRefusedError,
@@ -69,6 +72,68 @@ describe("TP-2.16 (a): resetDevelopmentDatabase refuses before any connection", 
     },
   );
 
+  it("TP-2.16 (a): host db.example.com with TESTCONTAINERS=1 in the environment is still refused (A-79)", async () => {
+    vi.stubEnv("TESTCONTAINERS", "1");
+    const deps = fakeResetDeps();
+
+    const error = await rejection(
+      resetDevelopmentDatabase(resetInput("development", "db.example.com"), deps),
+    );
+
+    expect(error).toBeInstanceOf(ResetRefusedError);
+    expect((error as Error).message).toBe(RESET_MESSAGE);
+    expect(deps.runSchemaStep).not.toHaveBeenCalled();
+    expect(deps.seed).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      'appEnv "production" on localhost',
+      "production",
+      "postgres://postgres:postgres@localhost:5432/postgres",
+    ],
+    [
+      "?host=db.example.com in development",
+      "development",
+      "postgres://u:p@localhost/postgres?host=db.example.com",
+    ],
+  ])(
+    "TP-2.16 (a): %s with allowNonLocalHost: true is still refused (A-79)",
+    async (_label, appEnv, superuserUrl) => {
+      const deps = fakeResetDeps();
+
+      const error = await rejection(
+        resetDevelopmentDatabase(
+          {
+            ...resetInput(appEnv as ResetInput["appEnv"], "localhost"),
+            superuserUrl,
+            allowNonLocalHost: true,
+          },
+          deps,
+        ),
+      );
+
+      expect(error).toBeInstanceOf(ResetRefusedError);
+      expect((error as Error).message).toBe(RESET_MESSAGE);
+      expect(deps.runSchemaStep).not.toHaveBeenCalled();
+      expect(deps.seed).not.toHaveBeenCalled();
+    },
+  );
+
+  it("TP-2.60x: allowNonLocalHost: false, given explicitly, still refuses db.example.com", async () => {
+    const deps = fakeResetDeps();
+
+    const error = await rejection(
+      resetDevelopmentDatabase(
+        { ...resetInput("development", "db.example.com"), allowNonLocalHost: false },
+        deps,
+      ),
+    );
+
+    expect(error).toBeInstanceOf(ResetRefusedError);
+    expect(deps.runSchemaStep).not.toHaveBeenCalled();
+  });
+
   it.each([["rehearsal"]])("TP-2.38x: appEnv %s is refused", async (appEnv) => {
     const deps = fakeResetDeps();
 
@@ -100,15 +165,25 @@ describe("TP-2.24: seedDevelopmentDatabase", () => {
   it.each([
     ["(b) production on localhost", "production", "localhost"],
     ["(c) development on db.example.com", "development", "db.example.com"],
-  ])("TP-2.24 %s throws ResetRefusedError and doesn't seed", async (_label, appEnv, host) => {
-    const seed = vi.fn(() => Promise.resolve());
+    [
+      "(c) development on db.example.com, with TESTCONTAINERS=1 (A-79)",
+      "development",
+      "db.example.com",
+      "1",
+    ],
+  ])(
+    "TP-2.24 %s throws ResetRefusedError and doesn't seed",
+    async (_label, appEnv, host, testcontainers?: string) => {
+      if (testcontainers !== undefined) vi.stubEnv("TESTCONTAINERS", testcontainers);
+      const seed = vi.fn(() => Promise.resolve());
 
-    const error = await rejection(seedDevelopmentDatabase(seedInput(appEnv, host), { seed }));
+      const error = await rejection(seedDevelopmentDatabase(seedInput(appEnv, host), { seed }));
 
-    expect(error).toBeInstanceOf(ResetRefusedError);
-    expect((error as Error).message).toBe(SEED_MESSAGE);
-    expect(seed).not.toHaveBeenCalled();
-  });
+      expect(error).toBeInstanceOf(ResetRefusedError);
+      expect((error as Error).message).toBe(SEED_MESSAGE);
+      expect(seed).not.toHaveBeenCalled();
+    },
+  );
 
   it("TP-2.24 (d): a failing seed rejects with that error", async () => {
     const failure = new Error("x");
@@ -132,24 +207,32 @@ describe("TP-2.24: seedDevelopmentDatabase", () => {
     },
   );
 
-  it("TP-2.38x: TESTCONTAINERS=1 allows another host", async () => {
-    vi.stubEnv("TESTCONTAINERS", "1");
-    const seed = vi.fn(() => Promise.resolve());
+  it.each([["development"], ["test"]])(
+    "TP-2.60x: allowNonLocalHost: true lets %s seed on db.example.com",
+    async (appEnv) => {
+      const seed = vi.fn(() => Promise.resolve());
 
-    await seedDevelopmentDatabase(seedInput("test", "db.example.com"), { seed });
+      await seedDevelopmentDatabase(
+        { ...seedInput(appEnv, "db.example.com"), allowNonLocalHost: true },
+        { seed },
+      );
 
-    expect(seed).toHaveBeenCalledTimes(1);
-  });
+      expect(seed).toHaveBeenCalledTimes(1);
+    },
+  );
 
-  it("TP-2.38x: TESTCONTAINERS=1 doesn't allow production", async () => {
-    vi.stubEnv("TESTCONTAINERS", "1");
+  it("TP-2.60x: allowNonLocalHost: true doesn't allow production", async () => {
     const seed = vi.fn(() => Promise.resolve());
 
     const error = await rejection(
-      seedDevelopmentDatabase(seedInput("production", "db.example.com"), { seed }),
+      seedDevelopmentDatabase(
+        { ...seedInput("production", "db.example.com"), allowNonLocalHost: true },
+        { seed },
+      ),
     );
 
     expect(error).toBeInstanceOf(ResetRefusedError);
+    expect((error as Error).message).toBe(SEED_MESSAGE);
     expect(seed).not.toHaveBeenCalled();
   });
 });

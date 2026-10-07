@@ -1,6 +1,6 @@
 // F-20 resetDevelopmentDatabase on a fresh container. TP-2.16 (b) (A-54), plus extra case
 // TP-2.49x. The refusals, TP-2.16 (a), are unit tests (unit/db/reset.test.ts).
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { resetDevelopmentDatabase } from "../../../src/platform/db/reset.js";
 import { runSchemaStep } from "../../../src/platform/db/schemaStep.js";
 import {
@@ -23,14 +23,6 @@ afterAll(async () => {
   await pg.stop();
 });
 
-beforeEach(() => {
-  // The container's host may not be one of F-20's local names; F-20 allows TESTCONTAINERS=1.
-  vi.stubEnv("TESTCONTAINERS", "1");
-  return () => {
-    vi.unstubAllEnvs();
-  };
-});
-
 function input(seed: boolean): Parameters<typeof resetDevelopmentDatabase>[0] {
   return {
     appEnv: "development",
@@ -39,6 +31,8 @@ function input(seed: boolean): Parameters<typeof resetDevelopmentDatabase>[0] {
     migratorPassword: TEST_ROLE_PASSWORDS.budmon_migrator,
     roleSecrets: testRoleSecrets(),
     seed,
+    // The container's host may not be one of F-20's local names (A-79).
+    allowNonLocalHost: true,
   };
 }
 

@@ -1,4 +1,5 @@
-// F-94 runDbResetCli (A-58). TP-2.24 (e) to (g) and TP-2.29.
+// F-94 runDbResetCli (A-58). TP-2.24 (e) to (g) and TP-2.29, plus extra cases TP-2.52x and TP-2.61x.
+// IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
@@ -134,6 +135,32 @@ describe("TP-2.29: runDbResetCli arguments and environment", () => {
       seed: true,
     });
     expect(h.reset.mock.calls[0]?.[1]).toMatchObject({ seed: h.seedAll });
+  });
+
+  it.each([
+    ["without TESTCONTAINERS", {}],
+    ["with TESTCONTAINERS=1 in env", { TESTCONTAINERS: "1" }],
+  ])(
+    "TP-2.29 (c): the reset input never carries allowNonLocalHost: true, %s (A-79)",
+    async (_label, extra) => {
+      const h = harness({ DEV_SUPERUSER_URL: SUPERUSER_URL, ...extra });
+
+      await runDbResetCli([], h.deps);
+
+      expect(h.reset).toHaveBeenCalledTimes(1);
+      const resetInput = h.reset.mock.calls[0]?.[0] as Record<string, unknown>;
+      expect([undefined, false]).toContain(resetInput.allowNonLocalHost);
+    },
+  );
+
+  it("TP-2.61x: the --seed-only input never carries allowNonLocalHost: true, with TESTCONTAINERS=1 in env (A-79)", async () => {
+    const h = harness({ DEV_SUPERUSER_URL: SUPERUSER_URL, TESTCONTAINERS: "1" });
+
+    await runDbResetCli(["--seed-only"], h.deps);
+
+    expect(h.seed).toHaveBeenCalledTimes(1);
+    const seedInput = h.seed.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect([undefined, false]).toContain(seedInput.allowNonLocalHost);
   });
 
   it("TP-2.29 (d): --no-seed with APP_ENV=test and DB_NAME=x", async () => {
