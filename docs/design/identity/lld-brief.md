@@ -1,7 +1,7 @@
 ---
 module: identity
 doc: lld-brief
-summarises: lld.md v0.3
+summarises: lld.md v0.4
 ---
 
 # Identity: LLD brief
@@ -39,8 +39,8 @@ Deliberately left out: changing your email address, passkeys, other sign-in prov
 | 4 | **The capture worker can read the whole `users` row**, including email and name; it still can't see any password, session or code (DV-4). | The platform only supports table-level grants. Column-level grants would be a platform change. | §3.2 |
 | 5 | **Lifetimes are constants in code**, not settings (DV-1). | Changing "30 days" means a small code change, not an environment variable. | F-1 |
 | 6 | **A few extra error cases** beyond the HLD's list (DV-5): for example "your Budmon account is connected to a different Google account", "the owner can't delete their own account", and "your account is already being deleted" (cancelling is refused once the 7 days are up). | They make edge cases explicit; wording is in §8.1. | §6 |
-| 7 | **Built on the platform LLD v0.12.** Your earlier requests PA-1 to PA-6 are in it as amendments A-1 to A-6, and identity uses their exact names. The `budmon-local bootstrap-owner` command and Android's Google client-ID setting are the platform's, not identity's. | Nothing to align later. | §1 |
-| 8 | **Five new platform requests (PA-7 to PA-11)** the platform planner must apply before the slices that need them: a proper file name for export downloads (PA-7, S-10); a "delete all" for Android's offline queue (PA-8, S-3); Google sign-in in the release rehearsal (PA-9, S-6's rehearsal test); the rehearsal's email privacy check (PA-10, S-1's rehearsal test); and named spots in the platform where modules plug in (PA-11, S-0). | Small and specific, but the build waits for them. | §1.1 |
+| 7 | **Built on the platform LLD v0.13.** Your earlier requests PA-1 to PA-6 are in it as amendments A-1 to A-6, and identity uses their exact names. The `budmon-local bootstrap-owner` command and Android's Google client-ID setting are the platform's, not identity's. | Nothing to align later. | §1 |
+| 8 | **Five platform requests (PA-7 to PA-11) have landed** in the platform LLD v0.13 as A-22 to A-26: a proper file name for export downloads; a "delete all" for Android's offline queue; Google sign-in and the email privacy check in the release rehearsal (with a separate rehearsal owner address); and named spots where modules plug in. Identity uses their final names. Identity's own first slice still adds the `identity` slot to the platform's containers (the platform left that to identity). | Nothing left waiting on the platform. | §1.1 |
 | 9 | **Reset links open in the phone's browser for the MVP** (LD-9). Your delegated decision Q-1 (a); **needs user confirmation**. | The Android app doesn't open reset links itself. | §1 LD-9 |
 | 10 | **Two tabs refreshing at once never sign you out** (DV-9). The reviewer's option (a), taken under your delegation, changes the approved HLD's wording for one case of D-3. Theft detection is unchanged. | The HLD's D-3 text should be updated to match next time it's revised. | §1 DV-9, F-25 |
 | 11 | **Google sign-in errors land on the sign-in page.** When Google returns to Budmon with an unknown or expired request, you land on `/sign-in` with "Google sign-in didn't complete. Try again." (as the HLD says). Errors on a known request return to the page that started it. | What you'll see when something goes wrong mid-way. | F-82 |
@@ -112,17 +112,17 @@ Nothing that grants access is stored in a usable form. Passwords are hashed; tok
 
 | Slice | Delivers | How you'd see it working | Depends on |
 | ----- | -------- | ------------------------ | ---------- |
-| S-0 | Foundations | Tests pass; emails appear in Mailpit in development | Platform v0.12 (A-1 to A-6) + PA-11 |
+| S-0 | Foundations | Tests pass; emails appear in Mailpit in development | Platform v0.13 (A-1 to A-6, A-22 to A-26) |
 | S-1 | Sign-up from an invitation with a password | An emailed invitation creates an account on web and Android | S-0 |
 | S-2 | Owner bootstrap | `budmon-local bootstrap-owner` prints a link that makes you the owner | S-1 |
-| S-3 | Sign-in, sessions, "confirm it's you" | You stay signed in; the devices list works; sign-out works | S-1, PA-8 |
+| S-3 | Sign-in, sessions, "confirm it's you" | You stay signed in; the devices list works; sign-out works | S-1 |
 | S-4 | Two-step verification | Your authenticator app's codes are asked for at sign-in | S-3 |
 | S-5 | Password reset and changes | "Forgot password?" emails a working link | S-4 |
 | S-6 | Google Sign-In | "Continue with Google" works on the laptop's browser and on Android | S-4 |
 | S-7 | Profile and preferences | Language changes instantly; base currency asks first | S-3 |
 | S-8 | Invitations | You invite someone; they receive the email and join | S-3 |
 | S-9 | Finding a user | Exact-email lookup for sharing | S-3 |
-| S-10 | Data export | A ZIP with CSV and JSON downloads, named `budmon-export-<date>.zip` | S-3, PA-7 |
+| S-10 | Data export | A ZIP with CSV and JSON downloads, named `budmon-export-<date>.zip` | S-3 |
 | S-11 | Account deletion | Delete, undo within 7 days, full erasure after | S-8, S-10 |
 | S-12 | Owner services | Ready for the admin portal | S-11 |
 
@@ -151,6 +151,6 @@ Not covered automatically: real Google, real SMTP, Android on a device, Windows 
 
 - **Google on the laptop:** until there's a domain, web Google sign-in works only in a browser on the laptop itself; the phone's browser shows a note. The Android app's Google sign-in isn't affected.
 - **Mailpit in stage 0:** emails stay on the laptop (readable at `http://127.0.0.1:8025`). Fine while you're the only user.
-- **Platform requests PA-7 to PA-11:** the slices that need them wait until the platform planner applies them.
+- **Platform alignment:** identity is aligned with platform v0.13. Any later change to the platform's names would need an identity amendment.
 - **Later modules must join erasure and export:** every module that stores user data registers how it's erased and exported. The guard test catches the ones that forget.
 - **Lost authenticator and lost codes:** only you, as owner, can help (by turning two-step off for that user). The user is emailed when you do.

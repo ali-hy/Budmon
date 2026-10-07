@@ -2,7 +2,7 @@
 module: identity
 doc: lld
 status: draft # draft | in-review | approved
-version: 0.3
+version: 0.4
 hld_version: 0.5
 author: planner
 approved_by:
@@ -13,7 +13,7 @@ approved_on:
 
 Implements [HLD](./hld.md) v0.5 (approved 2026-10-07). Decisions are cited as **D-n**, journeys as **J-n**, screens as **S-n** (HLD screens) from the HLD.
 
-Platform functions are cited as **P-F-n** from the platform LLD **v0.12** (`docs/design/platform/lld.md` on branch `feat/platform`). Its amendments **A-1 to A-6** implement this module's HLD requests PA-1 to PA-6 and are cited by their platform IDs. Requests this LLD adds are **PA-7 to PA-11** (§1.1). This document doesn't restate the HLD's rationale.
+Platform functions are cited as **P-F-n** from the platform LLD **v0.13** (`docs/design/platform/lld.md` on branch `feat/platform`). Its amendments **A-1 to A-6** implement this module's HLD requests PA-1 to PA-6 and are cited by their platform IDs. Identity's later requests PA-7 to PA-11 landed as platform **A-22 to A-26** (§1.1). This document doesn't restate the HLD's rationale.
 
 ## Changelog
 
@@ -22,6 +22,7 @@ Platform functions are cited as **P-F-n** from the platform LLD **v0.12** (`docs
 | 0.1     | 2026-10-07 | Initial draft |
 | 0.2     | 2026-10-07 | Plan review round 1 (REVISE), against platform LLD v0.12. **P-1:** configuration names aligned with v0.12 (`api.googleSignIn?`, `api.recoveryCodeKeys`, `email?.smtpPassword?`, `SealContext.rowId`); citations moved from v0.9 and "PA being applied" to v0.12 and A-1 to A-6. **P-2:** the `budmon-local bootstrap-owner` wrapper (P-F-178, A-6) and the Android `GOOGLE_SERVER_CLIENT_ID` (P-F-265, A-3) are the platform's; F-47 and TP-2.6 removed, references added. **P-3:** new §1.1 with platform amendment requests PA-7 (presigned download file name), PA-8 (`OutboxDao.deleteAll`/`countAll`), PA-9 (rehearsal fake Google for sign-in), PA-10 (rehearsal email canary flows), PA-11 (module wiring points incl. the server router root). **P-4:** TOTP envelopes registered with P-F-115 (F-34) and a re-wrap test (TP-4.16). **P-5:** no `bigint({ mode: "number" })` (`integer` columns); the module is flat under `src/identity/` so A-11's and F-1's globs cover every router, service and repo; one schema file per table (platform HLD layout). **P-6:** F-30 applies `SMTP_URL`'s TLS rule exactly (TP-0.31). **P-7:** links are rendered outside `renderMessage`; every email kind's message IDs and value sources defined (§7.2). **P-8:** concurrent-refresh option (a): R3 re-issues while the current token is unpresented; e2e cases for each response order and the 60.001 s boundary. **P-9:** the web `device` cookie (path `/api/v1`) feeds `presentedDeviceToken` in every session-creating procedure; Android `clear()` keeps the device token. **P-10:** `clear()` never touches `outboxOwnerUserId`; unknown owner with pending entries → `AskDiscard`. **P-11:** unprefixed cookie names are set and accepted only when the request's `Host` is `localhost`/`127.0.0.1`; `Origin` isn't used for cookie naming (null origins don't matter). **P-12:** cancelling is refused once `scheduledFor ≤ now`, and erasure re-checks under a row lock. **P-13:** §5.7 public surface, `requireConfirmed(ctx, maxAgeSeconds = 600)`, privacy notice content and route (§8.3). **P-14:** DV-6 (no `identity.event-fanout` job), DV-7 (cookie spike browsers); aligned with the HLD: F-82's unknown-state redirect, the refresh limit per session, the `invite.user` limit enforced and tested, CSV names `<module>-<entity>`. **P-15:** `invitation-ended` published on ban, owner deletion and `--replace`; a second ban defined. Owner decision Q-1 (reset links open in the browser) recorded (LD-9, brief). |
 | 0.3     | 2026-10-07 | Plan review round 1 suggestions. **S-1:** F-95 locks settings first and reads the inviter without a row lock (same order as F-41), so the two can't deadlock. **S-2:** `completeSignIn` re-checks closure and the ban list under the user row lock → `ACCOUNT_CLOSED`. **S-3:** F-118 treats `requestedBy = ban` as due regardless of `scheduledFor`. **S-4:** every F-125 method takes an optional `h: DbHandle` so `admin` can audit in the same transaction. **S-5:** public Google intents ignore any principal present (no error), stated in F-81/F-84. **S-6:** F-90 stores the canonical zone name. **S-7:** `known_devices_expires_idx`; `sessions_purge_idx` covers `absolute_expires_at`. **S-8:** F-72 lists `VALIDATION_FAILED`; F-97's ban re-check placed at step 3; `remaining` is `z.number().int().nullable()`. **S-9:** tests TP-3.30 (link race `23505`), TP-3.53 (loading and error states per screen), TP-5.8 (`PASSWORD_REQUIRED`), TP-6.8 (banned email on link). **S-10:** TP-M.1 and TP-M.4 extended. **S-11:** `invitation_cap_failed` is one job per recipient (`recipient: inviter \| owner`); the owner is told even without an inviter; retries resend only their own email. **S-12:** file plan adds the test-only emails route and the e2e fake Google. **S-13:** clearing both cookie names is unnecessary under DV-3 (different hosts, different cookie jars); recorded in F-27. **S-14:** brief brought up to date. **S-15:** F-95 records why the switch check precedes the ban and user checks. |
+| 0.4     | 2026-10-07 | Aligned with platform LLD v0.13, where PA-7 to PA-11 landed as A-22 to A-26. §1.1 now records the landed names: `PresignGetOptions`; `OutboxDao.deleteAll`/`countAll`; `startFakeGoogle({ signInClientId, signInKeyPair })`, `FAKE_SIGNIN_KID`, `generateSignInKeyPair`, `fakeSignInCode`, `REHEARSAL_SIGNIN_CLIENT_ID`, `REHEARSAL_OWNER_EMAIL`; rehearsal sub-steps 7a/7b/7c; P-F-59 `appRouter`; `moduleRoutes`; P-F-78b `runGeneralStartHooks`; `BaseContainer.sealedColumns: SealedColumnRegistry`; `rewrapApiSecretsCommand(c)`. The `identity` container member is declared by identity's S-0 (A-26 c): built after `sealedColumns`, with `overrides` winning over its `authHook` and `erasureHandler`. F-34, the file plan, slices and TP-0.32, TP-1.36, TP-2.7, TP-4.16, TP-6.13, TP-10.5 and TP-3.48 updated. |
 
 ## Amendments
 
@@ -82,7 +83,7 @@ Platform functions are cited as **P-F-n** from the platform LLD **v0.12** (`docs
 - **LD-9: reset links open in the browser for the MVP** (owner decision Q-1 (a), recommended default, **needs user confirmation**). Reset links open the web app in the phone's browser. From stage 1, Android App Links handle `/invite` only (D-23). Resetting a password is a web flow, after which the Android app signs in normally.
 - **LD-10: locales.** The server accepts a `locale` only from `SUPPORTED_LOCALES` (`["en"]`). It also accepts `en-XA` and `ar-XB` when `APP_ENV` is `development` or `test`, so pseudo-locale testing works end to end.
 
-**Configuration this LLD consumes** (platform v0.12, P-F-10, A-2 and A-3), exactly as the platform defines it:
+**Configuration this LLD consumes** (platform v0.13, P-F-10, A-2 and A-3), exactly as the platform defines it:
 
 ```ts
 api.publicOrigin: URL;                                   // links printed by the bootstrap command (A-6)
@@ -95,35 +96,15 @@ email?: { smtpUrl: URL; smtpPassword?: Secret<string>; from: string; publicOrigi
 
 `email.publicOrigin` and `api.publicOrigin` come from the same `site.env` value (A-2). Where this LLD writes `googleSignIn`, it means `config.api.googleSignIn`; "Google not configured" means it's `undefined`.
 
-### 1.1 Platform amendment requests (PA-7 to PA-11)
+### 1.1 Platform amendments identity relies on (requested as PA-7 to PA-11, landed as A-22 to A-26 in v0.13)
 
-Identity needs these platform capabilities that LLD v0.12 doesn't provide. Each is written so the platform planner can apply it as an amendment. Identity's slices that depend on one say so; the build doesn't start a dependent slice until the amendment is in the platform LLD.
-
-| ID | Platform function | Exact change | Tests to add (platform's) | Needed by |
-| -- | ----------------- | ------------ | ------------------------- | --------- |
-| PA-7 | P-F-140 `ObjectStore.presignGet` and its three implementations | Signature becomes `presignGet(bucket, key, ttlSeconds?, opts?: { downloadName?: string })`. `downloadName` must match `^[A-Za-z0-9._-]{1,100}$` (else `RangeError`). **S3 (P-F-141):** `ResponseContentDisposition: 'attachment; filename="<downloadName>"'` (unchanged `"attachment"` when absent). **fs (P-F-142):** the token payload gains `n` (the name); P-F-145's route sends `Content-Disposition: attachment; filename="<n>"`. **memory (P-F-143):** records the name and returns it in a test-visible URL query `?n=`. | S3: the presigned URL's `response-content-disposition` parameter; fs: the dev route's header; invalid name → `RangeError` | S-10 (F-110 `exportDownloadUrl` names the file `budmon-export-<YYYY-MM-DD>.zip`) |
-| PA-8 | P-F-254 `OutboxDao` | Adds `@Query("DELETE FROM outbox") suspend fun deleteAll(): Int` and `@Query("SELECT COUNT(*) FROM outbox") suspend fun countAll(): Int` (every status). | Room in-memory: insert 3 with different statuses; `countAll()` = 3; `deleteAll()` = 3; then `countAll()` = 0 | S-3 (F-205) |
-| PA-9 | P-F-196 fake Google and P-F-195 rehearsal | (a) `startFakeGoogle` takes `signInClientId: string` and an RS256 key pair (generated per run, `kid "fake-signin-1"`). (b) `oauth2.googleapis.com POST /token`: when the form's `client_id` equals `signInClientId`, the `code` must be `signin.<base64url(nonce)>`, and the answer is `200 { access_token: canaries.token, id_token: <JWT>, expires_in: 3599, token_type: "Bearer", scope: "openid email profile" }`, where the JWT claims are `iss "https://accounts.google.com"`, `aud` and `azp` = `signInClientId`, `sub "canary-sub-7f3a"`, `email` = `canaries.email`, `email_verified true`, `name "Canary User"`, `iat` = now, `exp` = now + 3600, and `nonce` = the decoded nonce. Any other `client_id` keeps the Gmail behaviour; a malformed sign-in code → `400 { error: "invalid_grant" }`. (c) `www.googleapis.com GET /oauth2/v3/certs` → the public JWKS. (d) The rehearsal maps `www.googleapis.com` (and the existing Google hosts) to the fake for the **`api`** container too, and gives `api` `NODE_EXTRA_CA_CERTS` for the fake's CA. It sets `GOOGLE_SIGNIN_CLIENT_ID=rehearsal-signin.apps.googleusercontent.com`, a throwaway secret, `GOOGLE_SIGNIN_CALLBACK_ORIGIN` and `GOOGLE_SIGNIN_APP_ORIGINS` to the rehearsal's web origin. (e) A sign-in sub-step, after A-6's bootstrap sub-step:
-<br>1. `POST /api/v1/auth/google/start { intent: "sign_in", returnTo: "/" }` with `Origin`.
-<br>2. Read `state` and `nonce` from `authorizationUrl`.
-<br>3. `GET /api/v1/auth/google/callback?code=signin.<b64(nonce)>&state=<state>`.
-<br>4. Take `h` from `Location`, then `POST /api/v1/auth/google/complete` with the binding cookie.
-<br>It expects `GOOGLE_ACCOUNT_UNKNOWN` (the canary account has no user) and adds the hand-off token to the needles. It's skipped (`skipped: identity not built`) while `/auth/google/start` returns 404. | The fake's token responses for both client kinds; JWKS served; the sub-step passes against identity once built | S-6 (TP-6.13) |
-| PA-10 | P-F-195 rehearsal (A-2's email canary path) | After the bootstrap sub-step, using the printed owner link:
-<br>1. `POST /api/v1/invitations/accept` with a password method (`tokenDelivery: "body"`) as the owner.
-<br>2. `POST /api/v1/invitations` (owner bearer, `Idempotency-Key`) for `canaries.email`.
-<br>3. `POST /api/v1/auth/password-reset/request` for the owner's email.
-<br>4. Poll Mailpit's API (`GET http://mailpit:8025/api/v1/messages`, inside the `mail-ui` network) for up to 60 s until both messages exist.
-<br>5. Extract every `#t=` token from their bodies; add the tokens and `canaries.email` to step 8's needles.
-<br>6. Pass when step 8 finds none of them in any scanned source.
-<br>Skipped while `/api/v1/invitations/accept` returns 404. | Sub-step green against identity; skipped before | S-1, S-5, S-8 (TP-1.36) |
-| PA-11 | Module wiring points (P-F-55, P-F-91, P-F-96, P-F-16, P-F-23, P-F-115, P-F-216) | Named extension points that modules (identity first) fill in their own slices:
-<br>(a) **Server router root:** `apps/server/src/platform/http/appRouter.ts` exports `appRouter = { meta: metaRouter }`; modules add their keys; P-F-55's default `opts.router` is `appRouter` and `opts.contract` is `contract`.
-<br>(b) **Module HTTP routes:** `ApiContainer.moduleRoutes: ((app: FastifyInstance) => void)[]`, registered by P-F-55 after the health routes and before the `/api/v1/*` catch-all.
-<br>(c) **Module containers:** `ApiContainer.identity` and `WorkerContainer.identity: IdentityModule`. `createApiContainer` sets `authHook = identity.authHook`; `createWorkerContainer` sets `erasureHandler = identity.erasureHandler`.
-<br>(d) **Worker start hook:** `WorkerContainer.onGeneralStarted: (() => Promise<void>)[]`, called by P-F-91 after `startWorkers` when the `general` role runs.
-<br>(e) **Sealed columns:** the container's `sealedColumns` registry (P-F-115) is created before modules, and P-F-93's `secrets:rewrap-api` uses `container.sealedColumns.all()`.
-<br>(f) **Grants, seeders, handlers:** `grants.ts` merges `<module>Grants`, `seed.ts` appends module seeders, `handlers.ts` merges `<module>Handlers(c)`, as P-F-16, P-F-23 and P-F-91 already say. Listed here only so the files identity edits are named. | Container builds with a fake module; `appRouter` serves `meta.clientConfig`; a test route registered through `moduleRoutes` answers before the catch-all; `onGeneralStarted` hooks run once | S-0 |
+| Request | Landed as | Final names and behaviour identity uses | Identity's use |
+| ------- | --------- | --------------------------------------- | -------------- |
+| PA-7 | **A-22** | `presignGet(bucket, key, ttlSeconds?, opts?: PresignGetOptions)` with `interface PresignGetOptions { downloadName?: string }`. The name must match `^[A-Za-z0-9._-]{1,100}$`, else `RangeError` (checked before any I/O). S3 sets `attachment; filename="<name>"`; fs carries `n` in its token; memory appends `&n=<name>` to the URL. | F-110 `exportDownloadUrl` (`budmon-export-<YYYY-MM-DD>.zip`); TP-10.5 reads `n` from the memory store's URL. |
+| PA-8 | **A-23** | `OutboxDao.deleteAll(): Int` and `countAll(): Int`, across every status. | F-205 (D-23 dialog). |
+| PA-9 | **A-24** | `startFakeGoogle({ …, signInClientId, signInKeyPair })`; `FAKE_SIGNIN_KID = "fake-signin-1"`; `generateSignInKeyPair()`; `fakeSignInCode(nonce)` = `"signin." + base64url(nonce)`; `REHEARSAL_SIGNIN_CLIENT_ID = "rehearsal-signin.apps.googleusercontent.com"`. The token endpoint branches on `client_id`; JWKS on `www.googleapis.com/oauth2/v3/certs`; `api` resolves the Google hosts to the fake and trusts its CA. The rehearsal's `GOOGLE_SIGNIN_CALLBACK_ORIGIN` and `GOOGLE_SIGNIN_APP_ORIGINS` are `http://localhost:8080`, and the harness sends `Host: localhost:8080`, so identity's unprefixed cookie names apply (F-4). **Sub-step 7c `google-sign-in`** runs start, callback, then complete, and expects `404 GOOGLE_ACCOUNT_UNKNOWN` with `data.email = canaries.email`. It's skipped when 7a was skipped or `start` returns `404 NOT_FOUND`. | F-80/F-82/F-83/F-86 must produce exactly that outcome for a verified, unknown email; TP-6.13. Identity's own e2e fake (§10.1) uses the same code format, `fakeSignInCode`. |
+| PA-10 | **A-25** | **Sub-step 7a** bootstraps the owner as `REHEARSAL_OWNER_EMAIL = "rehearsal-owner.7f3a@example.invalid"` (not `canaries.email`). **Sub-step 7b `email-canary`** accepts the bootstrap invitation with a password (`tokenDelivery "body"`), invites `canaries.email` as the owner, requests a password reset for the owner, then polls Mailpit at `http://127.0.0.1:8025/api/v1/` for up to 60 s and extracts every `#t=` token. The owner's password, session tokens and mail tokens become needles (P-F-193 `scanForNeedles`). Skipped when 7a was skipped or accept returns `404 NOT_FOUND`. Order: 7a → 7b → 7c. | F-41, F-95, F-70, F-32 must succeed on that path; TP-1.36. |
+| PA-11 | **A-26** | (a) P-F-59 `appRouter = base.router({ meta: metaRouter })` in `platform/http/appRouter.ts`; F-55 defaults to it. (b) `ApiContainer.moduleRoutes: ((app: FastifyInstance) => void)[]`, registered at F-55 step 4b (after health, before the `/api/v1/*` catch-all). (c) The `identity` member is **identity's to declare**: its S-0 adds `identity: IdentityModule` to `ApiContainer` and `WorkerContainer` in `platform/container.ts`, built after `sealedColumns`. Its `authHook` and `erasureHandler` become the container's, except that `overrides` of either win. The platform declares `WorkerContainer.erasureHandler: ErasureHandler \| null` (default `null`) and `authHook = noAuthHook` by default. (d) `WorkerContainer.onGeneralStarted: (() => Promise<void>)[]`, run by **P-F-78b `runGeneralStartHooks(c)`** (`platform/queue/workers.ts`), which P-F-91 calls after `startWorkers`. It runs only for the general role, in order, each hook once; a rejecting hook is logged as `worker_start_hook_failed` (`step "onGeneralStarted:<index>"`) and the rest still run. (e) `BaseContainer.sealedColumns: SealedColumnRegistry` (P-F-115), created before any module; `secrets:rewrap-api` calls `rewrapApiSecretsCommand(c)` (P-F-117's file) with `c.sealedColumns.all()`. (f) `grants.ts` merges `<module>Grants`; `seed.ts` appends to `seeders`; `buildHandlerMap(c)` merges each module's handler map. | F-34, F-88, F-119, file plan, TP-0.32, TP-4.16. |
 
 ## 2. File plan
 
@@ -135,7 +116,7 @@ Server paths are under `apps/server/src/` (written `identity/…` for `apps/serv
 | `db/schema/index.ts` | Modify | Register identity's tables. |
 | `db/schema/idempotencyRecords.ts` | Modify | Add the `user_id` FK to `users` (`cascade`) (§3.2). |
 | `identity/identityGrants.ts` | Create | `identityGrants` (F-7). |
-| `platform/db/grants.ts` | Modify | Merge `identityGrants` (P-F-16, PA-11 f). |
+| `platform/db/grants.ts` | Modify | Merge `identityGrants` (P-F-16, A-26 f). |
 | `identity/constants.ts`, `identity/tokens.ts`, `identity/emailAddress.ts`, `identity/cookies.ts`, `identity/deviceLabel.ts` | Create | F-1 to F-5. |
 | `identity/passwordPolicy.ts`, `identity/passwordHasher.ts`, `identity/assets/common-100k.txt.gz` | Create | F-38, F-39, LD-5. |
 | `identity/totp.ts`, `identity/base32.ts`, `identity/recoveryCodes.ts` | Create | F-60, F-61. |
@@ -151,10 +132,10 @@ Server paths are under `apps/server/src/` (written `identity/…` for `apps/serv
 | `identity/exportZip.ts`, `identity/identityExportSection.ts` | Create | F-112, F-113. |
 | `identity/identitySeed.ts`, `identity/bootstrapOwnerCli.ts` | Create | F-37, F-46. |
 | `identity/testEmailsRouter.ts` | Create | Test-only `GET /__test/emails` (§10.1): registered through `moduleRoutes` only when `APP_ENV=test`; returns the memory sender's messages as JSON. |
-| `identity/e2eFakeGoogleRouter.ts` | Create | Test-only fake Google for Playwright (§10.1): registered through `moduleRoutes` only when `APP_ENV=test` and `E2E_FAKE_GOOGLE=1`. It serves an authorization page that redirects to the callback with `code=signin.<b64 nonce>`, a token endpoint and a JWKS; `createGoogleOidc`'s `endpoints` point at it. Production configuration refuses `E2E_FAKE_GOOGLE` (it's read only when `APP_ENV=test`). |
-| `platform/http/appRouter.ts` | Modify (PA-11 a) | Add `auth`, `me`, `invitations`, `users`, `exports`, `deletion` from `identityRouter`. |
-| `platform/container.ts` | Modify (PA-11 b to e) | `identity` module, `authHook`, `erasureHandler`, `moduleRoutes` (F-88), `onGeneralStarted` (F-119), sealed columns (F-34). |
-| `platform/queue/handlers.ts`, `platform/db/seed.ts` | Modify (PA-11 f) | `identityHandlers(c)` (F-33); `identityDevSeeder` (F-37). |
+| `identity/e2eFakeGoogleRouter.ts` | Create | Test-only fake Google for Playwright (§10.1): registered through `moduleRoutes` only when `APP_ENV=test` and `E2E_FAKE_GOOGLE=1`. It serves an authorization page that redirects to the callback with `code = fakeSignInCode(nonce)` (the rehearsal's format, A-24), a token endpoint and a JWKS; `createGoogleOidc`'s `endpoints` point at it. Production configuration refuses `E2E_FAKE_GOOGLE` (it's read only when `APP_ENV=test`). |
+| `platform/http/appRouter.ts` | Modify (A-26 a, P-F-59) | Add `auth`, `me`, `invitations`, `users`, `exports`, `deletion` from `identityRouter`. |
+| `platform/container.ts` | Modify (A-26 b to e) | Declares `identity: IdentityModule` on both containers (built after `sealedColumns`); `authHook` and `erasureHandler` from it unless overridden; `moduleRoutes` (F-88, test routes); `onGeneralStarted` (F-119); sealed columns (F-34). |
+| `platform/queue/handlers.ts`, `platform/db/seed.ts` | Modify (A-26 f) | `identityHandlers(c)` (F-33); `identityDevSeeder` (F-37). |
 | `platform/http/procedures.ts` | Modify | Add identity's public procedures to `PUBLIC_PROCEDURES` (§5.1). |
 | `main/cli.ts` | Modify | Fill A-6's `identity:bootstrap-owner` row with F-46's handler. |
 | `i18n/messages/en.json` (server) | Modify | Email strings (§7.2). |
@@ -1069,18 +1050,20 @@ export type ChallengeData =
   - Builds `IdentityDeps`, `createAuthHook` (F-24), `createIdentityEvents` (F-21), the ports (defaults merged with `overrides.ports`, then sorted by `order`), and the reader, directory and owner services.
   - `erasureHandler = (userId) => eraseUser(deps, userId, { replay: true })` (P-F-146).
   - `onGeneralWorkerStarted` enqueues `identity.erasure-sweep` once with `singletonKey "startup"`, for missed cron runs while the laptop was off (HLD §5.5).
-  - **Sealed columns (P-4):** registers with the container's P-F-115 registry:
+  - **Sealed columns (P-4):** registers with `BaseContainer.sealedColumns` (P-F-115's `SealedColumnRegistry`):
     - `{ table: "two_step_credentials", idColumn: "user_id", column: "secret_envelope", purpose: "totp", provider: "api" }`
     - `{ table: "two_step_credentials", idColumn: "user_id", column: "pending_secret_envelope", purpose: "totp", provider: "api" }`
 
-    P-F-117 (`secrets:rewrap-api`) then re-wraps TOTP secrets when the `api-secrets` key rotates. The `SealContext` it uses (`{ table, rowId: user_id, purpose: "totp" }`) is the one F-62/F-63/F-68 use (TP-4.16).
-  - **Platform wiring (PA-11):**
-    - `createApiContainer` and `createWorkerContainer` each create the module and expose it as `identity`.
-    - `ApiContainer.authHook = identity.authHook`.
-    - `WorkerContainer.erasureHandler = identity.erasureHandler`.
-    - `ApiContainer.moduleRoutes` gains F-88's `registerGoogleCallbackRoute`.
-    - `WorkerContainer.onGeneralStarted` gains `onGeneralWorkerStarted`.
-    - `appRouter` gains `identityRouter`'s keys.
+    P-F-117 (`secrets:rewrap-api`, through `rewrapApiSecretsCommand(c)` with `c.sealedColumns.all()`) then re-wraps TOTP secrets when the `api-secrets` key rotates. The `SealContext` it uses (`{ table, rowId: user_id, purpose: "totp" }`) is the one F-62/F-63/F-68 use (TP-4.16).
+  - **Platform wiring (A-26):**
+    - **Identity's S-0 declares the member**: `identity: IdentityModule` on `ApiContainer` and `WorkerContainer` (`platform/container.ts`). `createApiContainer` and `createWorkerContainer` build it **after** `BaseContainer.sealedColumns` (so the sealed-column registration above lands in the shared registry).
+    - `ApiContainer.authHook = overrides.authHook ?? identity.authHook`.
+    - `WorkerContainer.erasureHandler = overrides.erasureHandler ?? identity.erasureHandler`. Test `overrides` always win.
+    - `ApiContainer.moduleRoutes` gains F-88's `registerGoogleCallbackRoute` and, when `APP_ENV=test`, the test-only routes (§2).
+    - `WorkerContainer.onGeneralStarted` gains `onGeneralWorkerStarted`, which P-F-78b `runGeneralStartHooks(c)` runs after `startWorkers`. A failure is logged as `worker_start_hook_failed` and the cron run catches up.
+    - P-F-59's `appRouter` gains `identityRouter`'s keys.
+    - `buildHandlerMap(c)` merges `identityHandlers(c)`.
+    - `secrets:rewrap-api` reaches identity's sealed columns through `rewrapApiSecretsCommand(c)`.
     - Other modules register ports and event subscriptions on `container.identity` before the server or workers start.
   - Without `config.email` (a worker without the `general` role, or the API), `deps.sender` is `null`; only F-32 and F-118 use it, and both run only in worker-general.
 - **Errors:** duplicate port `module` names throw `TypeError`.
@@ -1763,7 +1746,7 @@ Not identity's: the laptop wrapper is P-F-178's `bootstrap-owner` subcommand (A-
   - **`exportDownloadUrl`:**
     1. The row is missing or another user's → `NOT_FOUND`.
     2. `status ≠ ready` or `expiresAt ≤ now` → `EXPORT_NOT_READY`.
-    3. P-F-140 `presignGet("exports", objectKey, 900, { downloadName: "budmon-export-" + <completedAt as YYYY-MM-DD in the user's zone> + ".zip" })` (PA-7).
+    3. P-F-140 `presignGet("exports", objectKey, 900, { downloadName: "budmon-export-" + <completedAt as YYYY-MM-DD in the user's zone> + ".zip" })` (A-22).
 - **Errors:** `CONFIRMATION_REQUIRED`, `EXPORT_IN_PROGRESS`, `EXPORT_LIMIT_REACHED`, `NOT_FOUND`, `EXPORT_NOT_READY`.
 
 #### F-111: `buildExport` (job handler)
@@ -1928,7 +1911,7 @@ Package `com.budmon.app.identity`. Hilt provides every dependency. §8.2 gives s
 | F-202 | `AuthInterceptor` (`net/AuthInterceptor.kt`) | Adds `Authorization: Bearer <access>` to every request except paths under `/api/v1/auth/` other than `/auth/sign-out`. |
 | F-203 | `TokenRefreshAuthenticator` (`net/TokenRefreshAuthenticator.kt`) | OkHttp `Authenticator`. On 401 whose body code is `UNAUTHENTICATED`, inside a process-wide `Mutex`: if the stored access token differs from the one the failed request used, it retries with the stored one. Otherwise it calls `POST /api/v1/auth/refresh { tokenDelivery: "body", refreshToken }` with a plain client (no authenticator). 200 → `save` → retry the request. `REFRESH_INVALID` → `clear()`, emits `SessionEvents.Ended` → returns `null`. It gives up after 1 retry per request (`priorResponse` check). |
 | F-204 | `AuthRepository` (`AuthRepository.kt`) | Suspend wrappers over the generated client for every `auth.*`, `me.*`, `invitations.*`, `exports.*`, `deletion.*` and `users.*` procedure that Android uses, always with `tokenDelivery = "body"`, `deviceModel = Build.MODEL`, and `deviceToken = tokenStore.deviceTokenFor(email)` on sign-in. On `signed_in` it saves the tokens and any new `deviceToken`, sets `lastEmail`, runs F-205, then calls `OutboxRepository.kick()` (P-F-255). Errors → `ApiError` (P-F-252). |
-| F-205 | `OutboxOwnerGuard` (`OutboxOwnerGuard.kt`) | `suspend fun onSignedIn(userId: String): OwnerDecision`, using PA-8's `OutboxDao.countAll()`. No outbox entries (`countAll() == 0`) → sets `outboxOwnerUserId = userId`, `Proceed`. Entries exist and `outboxOwnerUserId == userId` → `Proceed`. Entries exist and `outboxOwnerUserId` is another user **or null** (unknown owner, for example after `resetAll()`) → `AskDiscard(count)`; the UI shows the D-23 dialog. `discardAndProceed()` → PA-8 `OutboxDao.deleteAll()`, then sets the owner, `Proceed`. `cancel()` signs the new user out (`auth.signOut`, `clear()`) and leaves the entries and the owner unchanged. Sign-out never changes `outboxOwnerUserId` (P-10). |
+| F-205 | `OutboxOwnerGuard` (`OutboxOwnerGuard.kt`) | `suspend fun onSignedIn(userId: String): OwnerDecision`, using A-23's `OutboxDao.countAll()`. No outbox entries (`countAll() == 0`) → sets `outboxOwnerUserId = userId`, `Proceed`. Entries exist and `outboxOwnerUserId == userId` → `Proceed`. Entries exist and `outboxOwnerUserId` is another user **or null** (unknown owner, for example after `resetAll()`) → `AskDiscard(count)`; the UI shows the D-23 dialog. `discardAndProceed()` → A-23 `OutboxDao.deleteAll()`, then sets the owner, `Proceed`. `cancel()` signs the new user out (`auth.signOut`, `clear()`) and leaves the entries and the owner unchanged. Sign-out never changes `outboxOwnerUserId` (P-10). |
 | F-206 | `GoogleCredentialClient` (`google/GoogleCredentialClient.kt`) | `suspend fun signIn(activity, nonce: String, oneTap: Boolean): Result<String /* idToken */>`. `oneTap` → `GetGoogleIdOption(filterByAuthorizedAccounts = true, autoSelectEnabled = false, serverClientId = BuildConfig.GOOGLE_SERVER_CLIENT_ID (P-F-265), nonce)`; otherwise `GetSignInWithGoogleOption(serverClientId, nonce)`. `BuildConfig.GOOGLE_SERVER_CLIENT_ID` empty → `isAvailable = false`, and every Google button on Android is hidden. `GetCredentialCancellationException` → `Cancelled`; `NoCredentialException` → `NoAccount`; others → `Failed`. |
 | F-207 | `SessionViewModel` (`SessionViewModel.kt`) | App-scoped `StateFlow<SessionUiState>` (`Loading`, `SignedOut(reason)`, `SignedIn(me)`). On start: no stored session → `SignedOut`; otherwise `me.get` (refreshing through F-203). Collects `SessionEvents.Ended` → `SignedOut(Ended)`. The nav host switches graphs on this state. |
 | F-208 | `SignInScreen` + `SignInViewModel` | S-1 (§8.2). One-tap rule (J-3): on first composition, when `usedGoogleBefore` and Google is configured, it calls F-206 with `oneTap = true` once per process start. |
@@ -2150,7 +2133,7 @@ Every `me.*`, `exports.*`, `deletion.*`, `invitations.list/allowance/create/rese
 | `UserDirectory` (`container.identity.directory`) | service (F-105) | `findByExactEmail(h, email, requesterId)` → `user` / `unavailable` / `none`. |
 | `inviteForAccountShare(deps, h, { inviterId, email })` (`container.identity.invitations`) | service (F-99) | Runs in the caller's transaction; returns `{ invitationId, created }`; F-95's errors. |
 | `IdentityEvents.subscribe(event, jobDefinition)` (`container.identity.events`) | registration (F-21) | Events and payloads in F-21; each subscriber's job is enqueued in the publishing transaction (DV-6). Subscribe at composition, before the first publish. |
-| `DeletionPrecheck`, `ErasureParticipant`, `ExportParticipant`, `InvitePolicy`, `InvitationContextProvider` | port types (F-22) | Registered through `createIdentityModule`'s `overrides.ports` at composition (P-F-96, PA-11 c). Erasure participants must be idempotent and must not delete the `users` row. |
+| `DeletionPrecheck`, `ErasureParticipant`, `ExportParticipant`, `InvitePolicy`, `InvitationContextProvider` | port types (F-22) | Registered through `createIdentityModule`'s `overrides.ports` at composition (P-F-96, A-26 c). Erasure participants must be idempotent and must not delete the `users` row. |
 | `OwnerServices` (`container.identity.owner`) | service (F-125) | For `admin` only; every method also checks `isOwner`. |
 | Error classes in §6 | classes | So other modules can map identity errors they surface (for example F-95's from F-99). |
 
@@ -2223,7 +2206,7 @@ Platform errors used: `VALIDATION_FAILED`, `UNAUTHENTICATED`, `FORBIDDEN`, `NOT_
 | Client | The "Budmon sign-in" Web client (scopes `openid email profile`); its secret is only in the API's secret file (A-3). Android: an Android OAuth client per signing key; its ID is listed in `GOOGLE_SIGNIN_ANDROID_CLIENT_IDS` and arrives as `azp`. |
 | Redirect URI | `<GOOGLE_SIGNIN_CALLBACK_ORIGIN>/api/v1/auth/google/callback`. Stage 0: `http://localhost:8080/...`. Stage 1: `https://budmon.com/...`. |
 | Egress | A-5. In stage 0 the API reaches Google directly; P-F-122's proxy support applies unchanged. |
-| Failures | §4.7 (F-80, F-82). The rehearsal's sign-in path needs PA-9 (fake Google `id_token`, JWKS, sign-in vs Gmail by `client_id`); TP-6.13 runs once PA-9 is applied. |
+| Failures | §4.7 (F-80, F-82). The rehearsal's sign-in path needs A-24 (fake Google `id_token`, JWKS, sign-in vs Gmail by `client_id`); TP-6.13 runs once A-24 is applied. |
 | Idempotency | Codes, nonces, states and hand-offs are single-use (consumed in the same transaction that uses them). |
 
 ### 7.2 SMTP email (S-0)
@@ -2545,24 +2528,24 @@ Each slice is built end to end: server, contract, web and Android. Order and dep
 
 | Slice | Story | Depends on |
 | ----- | ----- | ---------- |
-| S-0 Foundations | (shared) | platform S-0 to S-13 with A-1 to A-6; PA-11 |
-| S-1 Sign-up from an invitation with a password | US-1 | S-0; PA-10 (rehearsal case TP-1.36 only) |
+| S-0 Foundations | (shared) | platform S-0 to S-13 (v0.13) with A-1 to A-6 and A-26 |
+| S-1 Sign-up from an invitation with a password | US-1 | S-0; A-25 (rehearsal case TP-1.36 only) |
 | S-2 Owner bootstrap | US-11 | S-1 |
-| S-3 Sign-in, sessions and step-up | US-2 | S-1; PA-8 (Android outbox guard) |
+| S-3 Sign-in, sessions and step-up | US-2 | S-1; A-23 (Android outbox guard) |
 | S-4 Two-step verification | US-4 | S-3 |
 | S-5 Password reset and password changes | US-5 | S-4 |
-| S-6 Google Sign-In | US-3 | S-4; PA-9 (rehearsal case TP-6.13 only) |
+| S-6 Google Sign-In | US-3 | S-4; A-24 (rehearsal case TP-6.13 only) |
 | S-7 Profile and preferences | US-6 | S-3 |
 | S-8 Invitations | US-7 | S-3 |
 | S-9 Finding a user | US-8 | S-3 |
-| S-10 Data export | US-9 | S-3; PA-7 |
+| S-10 Data export | US-9 | S-3; A-22 |
 | S-11 Account deletion | US-10 | S-8, S-10 |
 | S-12 Owner services for `admin` | (US-7, US-10; ADM dependencies) | S-11, S-4 |
 
 Status for all: not started.
 
 ### S-0: Foundations
-- **Depends on:** the platform build (LLD v0.12) with A-1 to A-6, and PA-11.
+- **Depends on:** the platform build (LLD v0.13) with A-1 to A-6 and A-22 to A-26.
 - **Functions:** F-1 to F-5, F-7 to F-18 (repos; exercised fully by later slices), F-20 to F-24, F-26, F-27, F-29 to F-35 (contract skeleton with shared schemas), F-36 (router skeleton), F-37 to F-39, F-57 (known devices, used by F-23); web F-150 to F-154; Android F-200 to F-203, F-207.
 - **Scenarios:**
 
@@ -2578,7 +2561,7 @@ Status for all: not started.
 | Web session plumbing | happy and unhappy | F-150 to F-154 | TP-0.27, TP-0.28 |
 | Android token storage and refresh | happy and unhappy | F-200 to F-203 | TP-0.29 |
 | Cookie spike on `http://localhost` (LD-2) | happy | Chromium (and Firefox, indicative) store and send `Secure` cookies from `http://localhost` | TP-0.30, TP-M.6 |
-| SMTP TLS rule; PA-11 wiring | happy and unhappy | F-30 table; container wiring | TP-0.31, TP-0.32 |
+| SMTP TLS rule; A-26 wiring | happy and unhappy | F-30 table; container wiring | TP-0.31, TP-0.32 |
 
 - **Acceptance criteria:**
   1. `pnpm check` passes with identity's tables pushed.
@@ -2603,7 +2586,7 @@ Status for all: not started.
 | Sign-up options and defaults | happy | Active currencies; locale and zone defaults | TP-1.12, TP-1.13, TP-1.33 |
 | Web: fragment cleared, full path, problem states, signed in as someone else | happy and unhappy | §8.1 | TP-1.30 to TP-1.32 |
 | Android: pasted link and set-up | happy and unhappy | F-211, F-212 | TP-1.34 |
-| Privacy | unhappy | No canary in telemetry; the rehearsal email path is clean (PA-10) | TP-1.35, TP-1.36 |
+| Privacy | unhappy | No canary in telemetry; the rehearsal email path is clean (A-25) | TP-1.35, TP-1.36 |
 | Privacy notice page | happy | §8.3 | TP-1.37 |
 
 - **Acceptance criteria:** an invitation inserted by a factory and emailed through the email job can be opened from the Mailpit message in development, completed on web and on Android, and lands on the first-run home.
@@ -2870,7 +2853,7 @@ Types: **U** unit, **I** integration (real Postgres, in-process HTTP), **E** end
 | TP-0.29 | S-0 | A | F-200 to F-203 | Robolectric, in-memory key, MockWebServer | Round trip; corrupted value read; interceptor on `/api/v1/me` and `/api/v1/auth/refresh`; two parallel 401s; refresh → `REFRESH_INVALID` | Equal bytes; `clear()` and `null`; header added / not added; one refresh, both retried; tokens cleared and `SessionEvents.Ended` emitted |
 | TP-0.30 | S-0 | E | LD-2 spike (DV-7) | test page on `http://localhost:<port>` setting `budmon_at` with `Secure; HttpOnly; SameSite=Strict` | Chromium (required), Firefox (indicative here; required on release candidates) | Cookie stored and sent; Firefox result recorded in the report |
 | TP-0.31 | S-0 | U | F-30 `SMTP_URL` rule | fake `createTransport` recording options | `smtps://u@smtp.example.com`; `smtps://u@smtp.example.com:2465`; `smtp://u@smtp.example.com`; `smtp://u@smtp.example.com:2525`; `smtp://mailpit:1025` with `APP_ENV` production; `smtp://localhost:1025` with development and with test; `smtp://127.0.0.1:1025` with test; `smtp://localhost:1025` with production and with rehearsal; password empty vs set | `secure: true`, port 465; port 2465; `requireTLS: true`, port 587; port 2525, `requireTLS: true`; `ignoreTLS: true`; `ignoreTLS: true` ×2; `ignoreTLS: true`; `EmailSendError(permanent, "smtp_plaintext_refused")` ×2; no `auth.pass` vs `auth.pass` set |
-| TP-0.32 | S-0 | U | PA-11 wiring | test container with identity | Build the API container; `appRouter` keys; `moduleRoutes`; the sealed-column registry | `authHook` is identity's; `auth`, `me`, `invitations`, `users`, `exports`, `deletion` present; F-88's route registered; the two `two_step_credentials` columns registered with `provider "api"`, `purpose "totp"`, `idColumn "user_id"` |
+| TP-0.32 | S-0 | U | A-26 wiring | test containers with identity | Build the API and worker containers; again with `overrides.authHook` and `overrides.erasureHandler`; inspect `appRouter` keys, `moduleRoutes`, `onGeneralStarted`, `sealedColumns.all()` | `authHook` and `erasureHandler` are identity's, and the overrides win when given; `auth`, `me`, `invitations`, `users`, `exports`, `deletion` present on `appRouter`; F-88's route in `moduleRoutes`; `onGeneralStarted` contains identity's hook; the two `two_step_credentials` columns registered with `provider "api"`, `purpose "totp"`, `idColumn "user_id"` |
 | TP-1.1 | S-1 | I | F-40 | invitation (factory) | `invitations.preview` | Email, inviter name, expiry, origin |
 | TP-1.2 | S-1 | I | F-40 | none | Token `"x"`; well-formed unknown token | `INVITATION_INVALID` ×2 |
 | TP-1.3 | S-1 | I | F-40 | invitation with `expires_at = now`; one with `now + 1 ms` | Preview each | `INVITATION_EXPIRED { expiredAt }`, row stored `expired`, `invitation-ended` job; second previews fine |
@@ -2890,7 +2873,7 @@ Types: **U** unit, **I** integration (real Postgres, in-process HTTP), **E** end
 | TP-1.33 | S-1 | U (web) | F-172 | active list without EGP; with EGP | `defaultCurrencyFor("en-EG")` ×2; `("en")`; `timeZoneOptions` label for Africa/Cairo on 2026-10-07 | "USD"; "EGP"; "USD"; "Africa/Cairo (GMT+3)" |
 | TP-1.34 | S-1 | A | F-211, F-212 | api base `https://budmon.com` | Parse: full link; link with text around; bare token; `https://other.ts.net/invite#t=…`; `https://budmon.com/x`; set-up VM submit | Token; token; token; `OtherServer`; `NotAnInvitation`; accept called with `tokenDelivery: "body"` |
 | TP-1.35 | S-1 | I | privacy | canaries | Accept with canary email (invitation), canary password and name | Scan clean |
-| TP-1.36 | S-1 | E | PA-10 rehearsal email canary flows | stage-0 rehearsal with identity built | Run the sub-step (accept owner invitation, invite `canaries.email`, request a reset), then step 8 | Two messages in Mailpit; their `bmi_`/`bmp_` tokens and `canaries.email` absent from every scanned source |
+| TP-1.36 | S-1 | E | A-25 sub-step 7b `email-canary` | stage-0 rehearsal with identity built | Run 7a (owner `REHEARSAL_OWNER_EMAIL`), 7b, then step 8 | 7b not skipped; two messages read from `http://127.0.0.1:8025/api/v1/`; their `bmi_`/`bmp_` tokens, the owner's password and session tokens, and `canaries.email` absent from every scanned source |
 | TP-1.37 | S-1 | E | F-173 | none | Open `/privacy`; follow the set-up screen's privacy link | `<h1>` "Privacy notice", nine sections with §8.3's titles; the link opens `/privacy` |
 | TP-2.1 | S-2 | I | F-45 | empty database | `bootstrapOwner("Owner@X.com")` | Invitation `bootstrap`, no inviter, token hash matches the link's token, no email job |
 | TP-2.2 | S-2 | I | F-45 | owner exists; pending bootstrap; expired pending; user with the email; `"x"`; a pending direct invitation for the email | Call; call with `replace` | `owner_exists`; `pending_exists` / old revoked with an `invitation-ended { revoked }` job and new created; old expired (with an `invitation-ended { expired }` job) and new created; `email_in_use`; `invalid_email`; the direct invitation revoked with its event |
@@ -2898,7 +2881,7 @@ Types: **U** unit, **I** integration (real Postgres, in-process HTTP), **E** end
 | TP-2.4 | S-2 | I | F-41 | owner exists; a second bootstrap invitation inserted by the repo directly | Accept it | `INVITATION_REVOKED`; no user created |
 | TP-2.5 | S-2 | U | F-46 | memory output, log capture | Success; each refusal; no `--email` | Exact stdout text and exit 0; stderr lines and exit 1; usage and 64; the log capture has no `bmi_` |
 | TP-2.6 | S-2 | S | P-F-178 (platform) | — | — | Covered by the platform's TP-15.29 (exit 25 when the stack isn't running; `exec -T`; never `compose run`). Listed so the slice's coverage is complete; no identity test. |
-| TP-2.7 | S-2 | E | A-6 rehearsal sub-step (platform P-F-195 step 7, TP-16.13) | stage-0 rehearsal with identity built | Run steps 7 and 8 | The bootstrap sub-step is no longer `skipped`; its `bmi_` token is absent from every scanned source |
+| TP-2.7 | S-2 | E | A-6/A-25 sub-step 7a (platform P-F-195, TP-16.13) | stage-0 rehearsal with identity built | Run 7a and step 8 | 7a not skipped; the owner is `REHEARSAL_OWNER_EMAIL`; its `bmi_` token absent from every scanned source |
 | TP-3.1 | S-3 | I | F-50 | user with password | `auth.signIn` cookie (web header) and body | `signed_in`; cookies vs tokens; `deviceToken` issued; event `sign_in_succeeded` |
 | TP-3.2 | S-3 | I | F-50 | users: with password, Google-only; hasher spy | Wrong password; unknown email; Google-only user | `INVALID_CREDENTIALS` ×3; `sign_in_failed` event only for existing users; `verify` called exactly once each |
 | TP-3.3 | S-3 | I | F-50 | owner-pending user; banned email; self-pending user | Correct password ×3; wrong password for the owner-pending one | `ACCOUNT_CLOSED` ×2, `signed_in`; `INVALID_CREDENTIALS` |
@@ -2942,7 +2925,7 @@ Types: **U** unit, **I** integration (real Postgres, in-process HTTP), **E** end
 | TP-3.51 | S-3 | E | F-25, order B-then-A | as TP-3.50 | Release A first, B last (the jar ends with the current token) | The next refresh is R1; signed in; no email |
 | TP-3.52 | S-3 | E | F-25 boundary | as TP-3.50 with the server clock controllable | As TP-3.50, but advance the clock 60.001 s after the discard before the next refresh | Session revoked; `/sign-in?reason=ended`; a `session_reuse_signed_out` email in `/__test/emails` |
 | TP-3.53 | S-3+ | E | HLD §4.4 states | MSW-style route interception per screen (extended by each slice for its screens) | For S-1, S-2, S-3/S-4, S-5 to S-7, S-9, S-10, S-12, S-13, S-14, S-16: delay the screen's first request 2 s, then fail it with `INTERNAL`; for list screens, return 0 items and then 60 items | The loading state (skeleton, spinner or `aria-busy`) and the error state (inline or P-F-209's fallback) per §4.4 and §8.1; the empty-state text; long lists render without overflow |
-| TP-3.48 | S-3 | A | F-201, F-204, F-205, F-208, F-218 | fakes; PA-8 DAO | Sign in; sign out; sign in again with the same email; outbox with 3 entries owned by X then sign in as Y; owner null with 2 entries then sign in as X; no entries and owner null; discard; cancel; one-tap on second launch after a Google sign-in; sign-out with 2 pending | Tokens and device token saved, `kick()` called; after `clear()` the device token, `lastEmail` and `outboxOwnerUserId` remain; the second sign-in sends the stored `deviceToken`; `AskDiscard(3)`; `AskDiscard(2)`; `Proceed` and owner set; `deleteAll()` called and owner Y; entries and owner X unchanged; one-tap requested once; dialog with count 2 and `outboxOwnerUserId` unchanged after sign-out |
+| TP-3.48 | S-3 | A | F-201, F-204, F-205, F-208, F-218 | fakes; A-23 DAO | Sign in; sign out; sign in again with the same email; outbox with 3 entries owned by X then sign in as Y; owner null with 2 entries then sign in as X; no entries and owner null; discard; cancel; one-tap on second launch after a Google sign-in; sign-out with 2 pending | Tokens and device token saved, `kick()` called; after `clear()` the device token, `lastEmail` and `outboxOwnerUserId` remain; the second sign-in sends the stored `deviceToken`; `AskDiscard(3)`; `AskDiscard(2)`; `Proceed` and owner set; `deleteAll()` called and owner Y; entries and owner X unchanged; one-tap requested once; dialog with count 2 and `outboxOwnerUserId` unchanged after sign-out |
 | TP-3.49 | S-3 | A | F-207 | no stored session; stored session with `me` 200; `Ended` event | Start | `SignedOut`; `SignedIn`; `SignedOut(Ended)` |
 | TP-4.1 | S-4 | U | F-60 | secret `12345678901234567890` | `totpAt` at times 59, 1111111109, 1111111111, 1234567890, 2000000000, 20000000000 | 287082, 081804, 050471, 005924, 279037, 353130 |
 | TP-4.2 | S-4 | U | F-60 | secret; now step s | Codes for s−2, s−1, s, s+1, s+2; code for s with `lastUsedStep = s`; `"12345"`; `"123 456"` | null, s−1, s, s+1, null; null; null; parsed |
@@ -2959,7 +2942,7 @@ Types: **U** unit, **I** integration (real Postgres, in-process HTTP), **E** end
 | TP-4.13 | S-4 | I | F-68 | enabled with secret S1 | Start (step-up); confirm with an S1 code; with an S2 code; confirm after 15 min + 1 ms | `TWO_STEP_CODE_INVALID`; swapped (S1 codes now fail, recovery codes unchanged); `TWO_STEP_SETUP_EXPIRED` |
 | TP-4.14 | S-4 | I | key ring | codes created under k1; config ring `{ current: k2, keys: k1, k2 }` | Sign in with a k1 code | Accepted |
 | TP-4.15 | S-4 | I | privacy | canaries | Enable, verify, regenerate | No codes or secrets in telemetry |
-| TP-4.16 | S-4 | I | P-4 key rotation | two-step user enrolled under `api-secrets` key `k1`; a pending replacement secret also sealed under `k1` | Configure the ring `{ current: k2, keys: k1, k2 }`; run P-F-117 `rewrapApiSecrets` with the container's registry; then sign in with a TOTP code for the current secret, and confirm the replacement with a code for the pending one | `rewrapped: 2`; both envelopes now carry key id `k2`; the sign-in code is accepted; the replacement succeeds |
+| TP-4.16 | S-4 | I | P-4 key rotation | two-step user enrolled under `api-secrets` key `k1`; a pending replacement secret also sealed under `k1` | Configure the ring `{ current: k2, keys: k1, k2 }`; run `rewrapApiSecretsCommand(c)` (P-F-117's file, `c.sealedColumns.all()`); then sign in with a TOTP code for the current secret, and confirm the replacement with a code for the pending one | `rewrapped: 2`; both envelopes now carry key id `k2`; the sign-in code is accepted; the replacement succeeds |
 | TP-4.30 | S-4 | E | F-156 | two-step user | Sign in, enter the code (computed from the known secret) | Home |
 | TP-4.31 | S-4 | E | F-166 | two-step user, unconfirmed (clock +11 min) | Click **Create new codes** | Dialog asks for a code; after it, the codes view appears without clicking again |
 | TP-4.32 | S-4 | E | F-165 | enabling | Reload on the codes step | Codes gone; S-10 banner "You may not have saved your recovery codes." |
@@ -2989,7 +2972,7 @@ Types: **U** unit, **I** integration (real Postgres, in-process HTTP), **E** end
 | TP-6.10 | S-6 | I | F-84, F-85 | Android client IDs configured | Nonce → ID token with `azp` = Android client; reuse the nonce; use a `me` nonce on `auth.googleAndroid`; `azp` = web client; no Android IDs configured | Signed in; `GOOGLE_SIGNIN_FAILED` ×3; `GOOGLE_UNAVAILABLE` |
 | TP-6.11 | S-6 | I | F-87 | users: linked with password; linked Google-only; not linked | Disconnect with step-up each | Removed + email; `PASSWORD_REQUIRED`; `NOT_FOUND` |
 | TP-6.12 | S-6 | I | privacy | canary Google email and ID-token string | Full web flow and Android flow | Scan clean; callback request log holds the route template only |
-| TP-6.13 | S-6 | E | rehearsal | fake Google issuing a signed ID token for the canary account | Sign in through the web flow in the rehearsal | Signed in; canary scan clean |
+| TP-6.13 | S-6 | E | A-24 sub-step 7c `google-sign-in` | stage-0 rehearsal with identity built (Host `localhost:8080`, unprefixed cookies) | Run 7a, 7b, 7c and step 8 | 7c not skipped; `complete` answers `404 GOOGLE_ACCOUNT_UNKNOWN` with `data.email = canaries.email`; `state`, nonce, code and hand-off absent from every scanned source |
 | TP-6.30 | S-6 | E | F-160 | test server configs | `auth.methods` returns each value | Button hidden; button with the note; button only |
 | TP-6.31 | S-6 | E | F-164 | linked user with a password | **Disconnect** | Confirmation dialog; "Not connected" |
 | TP-6.32 | S-6 | E | F-159 to F-161 | fake Google (e2e) | Web sign-in; sign-up from an invitation; link from Settings; Google step-up then **Request export** | Each completes; the step-up returns to `/settings/data` with "Confirmed. You can continue now." |
@@ -3020,7 +3003,7 @@ Types: **U** unit, **I** integration (real Postgres, in-process HTTP), **E** end
 | TP-10.2 | S-10 | I | F-111, F-112 | user with sessions, events, invitations; a fake participant with 2 sections | Run the job | ZIP with `README.txt`, `data.json` (all sections), `csv/identity-profile.csv` …; no `$argon2id$`, `bma_`, `bmr_`, `bmi_`, `bmp_`, recovery codes or TOTP secret anywhere; row `ready`, expiry +7 d; `export_ready` email job |
 | TP-10.3 | S-10 | I | F-111 failures | variants | User deleted before running; participant returning > 200 MiB; participant throwing on attempt 4; running the job again on a `ready` export | `failed erased`; `failed too_large`; `failed build_failed`; no-op |
 | TP-10.4 | S-10 | U | F-113 | sections with `a,b`, `"q"`, multi-line text, `=SUM(1)`, `null`, `true` | Build | CSV fields quoted per RFC 4180, BOM present, `'=SUM(1)`, empty field, `true`; duplicate section → `TypeError`; `data.json` keys canonical |
-| TP-10.5 | S-10 | I | F-110 download (PA-7) | U's ready (completed 2026-10-07 in U's zone), U's queued, U's expired, V's | `exports.downloadUrl` | URL whose memory-store `n` is `budmon-export-2026-10-07.zip`; `EXPORT_NOT_READY` ×2; `NOT_FOUND` |
+| TP-10.5 | S-10 | I | F-110 download (A-22) | U's ready (completed 2026-10-07 in U's zone), U's queued, U's expired, V's | `exports.downloadUrl` | URL whose memory-store `n` is `budmon-export-2026-10-07.zip`; `EXPORT_NOT_READY` ×2; `NOT_FOUND` |
 | TP-10.6 | S-10 | I | F-110 list | 12 exports | `exports.list` | 10 newest |
 | TP-10.30 | S-10 | E | F-168 | user | Request export (step-up) → wait for the worker → Download | Status changes to Ready; download navigates to the presigned URL |
 | TP-11.1 | S-11 | I | F-115 | two fake prechecks returning blockers "Zeta", "Alpha" | Precheck | Blockers sorted "Alpha", "Zeta"; `isOwner` |
