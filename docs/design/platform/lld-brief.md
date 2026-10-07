@@ -1,7 +1,7 @@
 ---
 module: platform
 doc: lld-brief
-summarises: lld.md v0.7
+summarises: lld.md v0.8
 ---
 
 # Platform: LLD brief
@@ -53,18 +53,20 @@ The code stage 1 needs is built now (the HLD's rule: moving off the laptop must 
 | 8 | **If Gmail capture stops working, you get a Sentry e-mail.** With no alert rules in stage 0, the `sources` module reports a connection with no successful sync for 24 hours as a Sentry error, so the new-issue e-mail warns you. | Otherwise capture could fail silently for days. A requirement on the `sources` design, not built here. | §7.5, HLD D-25 |
 | 9 | **Android test builds can't reach your real data.** Debug builds on the emulator talk to the development stack (`pnpm dev`, port 5173); port 8080 on the laptop is your real Budmon and a debug build refuses it. Only the `stage0` release build, with your Tailscale address, reaches it. | Stops test entries landing in your real ledger. | F-22, F-264, HLD D-29 |
 | 10 | **Each release runs from its own copy of the setup files.** `budmon-local` copies a release's Compose and configuration files into `~/.budmon/releases/<tag>/` and always uses the running release's copy, never your working clone, so an unfinished branch can't change production. A restore brings back the release the copy was made with. | Rollback and restore always pair the right code with the right files and database. | F-178 |
-| 11 | **Manual checks after the first install:** open Budmon on the laptop and on the phone (Wi-Fi and mobile data); record an entry on the phone while the laptop sleeps and see it sync after; trigger a test error and get the Sentry e-mail. | Proves the setup works end to end before you rely on it. | §9 S-15 AC-15.1 to AC-15.4 |
-| 12 | **DV-1:** "telemetry dropped" alerts (from stage 1, when Alloy and alerts arrive; the app-side counters exist now). The HLD said the log collector (Alloy) counts every field it strips. It can only count that for logs, so stripped trace and metric fields are counted in the app instead. The ones the monitoring libraries always add are labelled "expected" and don't alert. | Same protection, fewer false alarms. Needs your OK because it differs from the HLD wording. | §1 |
-| 13 | **DV-2:** a fourth environment name, `rehearsal`. It has production's rules, except that a local stand-in for Google's key service is allowed. | Lets the rehearsal be strict without real Google keys. | §1 |
-| 14 | **DV-3:** the UI component library is picked now (**Kobalte**). The HLD wanted a trial first; the trial is now a test in the web slice, and switching to Ark UI would be an amendment if it fails. | A design document can't leave a dependency open. | §1, S-11b |
-| 15 | **DV-4:** the "Gmail connections healthy" gauges are built by the `sources` module, not here. | The platform can't count connections before their tables exist. | §1 |
-| 16 | **DV-5:** the rate-limit counter table has no created/updated timestamps. | Short-lived counters; skipping them saves a write per login attempt. | §1 |
-| 17 | **Decision: the web app's build number is the number of commits in the release** (`git rev-list --count <tag>`). It only grows along `main`, and a hotfix gets a higher number than the release it fixes. | Lets the server tell old web versions to reload. Stage 1 may switch to a release-workflow counter. | F-185 |
-| 18 | **Decision: the server considers itself "ready" if the database is at most one migration ahead of the code.** | This is what makes one-step rollbacks possible. | F-57 |
-| 19 | **Decision: on the web, "Try again" after an uncertain save reuses the same idempotency key** while you haven't changed the form. | It can't create a duplicate even if the first attempt actually succeeded. | F-205 |
-| 20 | **Decision: database passwords are stored and set as hashes** (SCRAM "verifiers"), so the migration step never handles a plaintext password for another service. A one-time fallback to the previous password lets the migration account's own password be rotated. The rotation commands themselves come with stage 1. | Keeps the capture worker's password away from everything else. | F-15, F-92, F-190, F-191 |
-| 21 | **Decision: a daily "missing exchange rates" check**, also run whenever the worker starts. | The laptop is off at times, and the job scheduler doesn't catch up on missed runs; this fetches up to 31 missing days. | F-139 |
-| 22 | **Decision: TypeScript is pinned to 5.9.3,** not the new 7.x. | The linter doesn't support 7 yet. | §2.4 |
+| 11 | **Restoring a database copy can't destroy the current data.** `restore` first checks the file is a readable Budmon dump, saves a fresh "pre-restore" copy of today's data (never deleted automatically), restores into a separate database and checks it there while Budmon keeps running, and only then swaps the two. If anything fails, today's database stays in place and the safety copy's path is printed. The previous database is kept until the next successful upgrade. | With no off-site backups, the copies on the laptop are all you have; a damaged or mistyped file must not cost you your data. A first install that fails half-way can also simply be re-run. | F-178 |
+| 12 | **Hotfix merge-backs use "Create a merge commit"** (not squash or rebase), and the repository keeps merge commits allowed. | Keeps every installed hotfix traceable from `main`, so it can always be restored or rebuilt later. | §4.17, runbook |
+| 13 | **Manual checks after the first install:** open Budmon on the laptop and on the phone (Wi-Fi and mobile data); record an entry on the phone while the laptop sleeps and see it sync after; trigger a test error and get the Sentry e-mail. | Proves the setup works end to end before you rely on it. | §9 S-15 AC-15.1 to AC-15.4 |
+| 14 | **DV-1:** "telemetry dropped" alerts (from stage 1, when Alloy and alerts arrive; the app-side counters exist now). The HLD said the log collector (Alloy) counts every field it strips. It can only count that for logs, so stripped trace and metric fields are counted in the app instead. The ones the monitoring libraries always add are labelled "expected" and don't alert. | Same protection, fewer false alarms. Needs your OK because it differs from the HLD wording. | §1 |
+| 15 | **DV-2:** a fourth environment name, `rehearsal`. It has production's rules, except that a local stand-in for Google's key service is allowed. | Lets the rehearsal be strict without real Google keys. | §1 |
+| 16 | **DV-3:** the UI component library is picked now (**Kobalte**). The HLD wanted a trial first; the trial is now a test in the web slice, and switching to Ark UI would be an amendment if it fails. | A design document can't leave a dependency open. | §1, S-11b |
+| 17 | **DV-4:** the "Gmail connections healthy" gauges are built by the `sources` module, not here. | The platform can't count connections before their tables exist. | §1 |
+| 18 | **DV-5:** the rate-limit counter table has no created/updated timestamps. | Short-lived counters; skipping them saves a write per login attempt. | §1 |
+| 19 | **Decision: the web app's build number is the number of commits in the release** (`git rev-list --count <tag>`). It only grows along `main`, and a hotfix gets a higher number than the release it fixes. | Lets the server tell old web versions to reload. Stage 1 may switch to a release-workflow counter. | F-185 |
+| 20 | **Decision: the server considers itself "ready" if the database is at most one migration ahead of the code.** | This is what makes one-step rollbacks possible. | F-57 |
+| 21 | **Decision: on the web, "Try again" after an uncertain save reuses the same idempotency key** while you haven't changed the form. | It can't create a duplicate even if the first attempt actually succeeded. | F-205 |
+| 22 | **Decision: database passwords are stored and set as hashes** (SCRAM "verifiers"), so the migration step never handles a plaintext password for another service. A one-time fallback to the previous password lets the migration account's own password be rotated. The rotation commands themselves come with stage 1. | Keeps the capture worker's password away from everything else. | F-15, F-92, F-190, F-191 |
+| 23 | **Decision: a daily "missing exchange rates" check**, also run whenever the worker starts. | The laptop is off at times, and the job scheduler doesn't catch up on missed runs; this fetches up to 31 missing days. | F-139 |
+| 24 | **Decision: TypeScript is pinned to 5.9.3,** not the new 7.x. | The linter doesn't support 7 yet. | §2.4 |
 
 ## 3. Data
 
@@ -177,7 +179,7 @@ About 240 test cases:
 - "every call needs login";
 - database rights per role;
 - right-to-left layout;
-- `budmon-local`'s install, upgrade, rollback, restore and `secret set`, with stand-ins for Docker and Git, plus a real install on the CI runner;
+- `budmon-local`'s install (including resuming a failed one), upgrade, rollback, restore (including damaged dumps, which must leave the current data readable) and `secret set`, with stand-ins for Docker and Git, plus real runs on the CI runner;
 - that the laptop's settings form a valid production configuration for every container, and that each missing setting is reported;
 - the tagging step and the rehearsal on every release.
 
