@@ -1,5 +1,5 @@
 // F-20 resetDevelopmentDatabase on a fresh container. TP-2.16 (b) (A-54), plus extra case
-// TP-2.49x. The refusals, TP-2.16 (a), are unit tests (unit/db/reset.test.ts).
+// TP-2.54x. The refusals, TP-2.16 (a), are unit tests (unit/db/reset.test.ts).
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { resetDevelopmentDatabase } from "../../../src/platform/db/reset.js";
 import { runSchemaStep } from "../../../src/platform/db/schemaStep.js";
@@ -103,7 +103,7 @@ describe("TP-2.16 (b): resetDevelopmentDatabase on a local development database"
     expect(deps.seedSpy).not.toHaveBeenCalled();
   });
 
-  it("TP-2.49x: an open connection to the database doesn't stop the reset", async () => {
+  it("TP-2.54x: an open connection to the database doesn't stop the reset", async () => {
     const pgModule = await import("pg");
     const holder = new pgModule.default.Client({ connectionString: pg.superuserUrl(DATABASE) });
     await holder.connect();

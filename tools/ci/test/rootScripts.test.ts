@@ -34,7 +34,8 @@ const SERVER_SCRIPTS: Readonly<Record<string, string>> = {
   dev: "tsx src/main/dev.ts",
   "db:reset": "tsx src/main/dbReset.ts",
   "db:seed": "tsx src/main/dbReset.ts --seed-only",
-  "db:migrate": "tsx src/main/migrate.ts",
+  // A-83: the development wrapper.
+  "db:migrate": "tsx src/main/devMigrate.ts",
   build: "tsx scripts/build.ts",
 };
 
@@ -64,10 +65,10 @@ describe("TP-0.21: root scripts (§2.2.2)", () => {
   );
 });
 
-// TP-0.25x (test-architect addition, not an LLD ID): the root scripts that delegate to
+// TP-0.26x (test-architect addition, not an LLD ID): the root scripts that delegate to
 // @budmon/server find the package script §2.2.2 names.
-describe("TP-0.25x: apps/server package scripts (§2.2.2, F-24)", () => {
-  it.each(Object.entries(SERVER_SCRIPTS))("TP-0.25x: %s is %j", (name, command) => {
+describe("TP-0.26x: apps/server package scripts (§2.2.2, F-24)", () => {
+  it.each(Object.entries(SERVER_SCRIPTS))("TP-0.26x: %s is %j", (name, command) => {
     const pkg = JSON.parse(readFileSync(path.join(ROOT, "apps/server/package.json"), "utf8")) as {
       scripts?: Record<string, unknown>;
     };

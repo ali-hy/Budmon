@@ -1,5 +1,5 @@
 // F-10 / F-11 loadConfig. TP-2.1 to TP-2.5, TP-2.21 to TP-2.23, TP-2.30 (config part), TP-2.33,
-// TP-2.35, plus extra cases TP-2.36x and TP-2.57x.
+// TP-2.35, plus extra cases TP-2.41x, TP-2.62x and TP-2.69x.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { describe, expect, it } from "vitest";
 import { ConfigError, loadConfig } from "../../../src/platform/config/loadConfig.js";
@@ -126,14 +126,14 @@ describe("TP-2.1: a valid development configuration per process kind", () => {
     expect(load(devMigrate()).migrate?.previousPassword).toBeUndefined();
   });
 
-  it("TP-2.36x: a *_FILE value has one trailing newline trimmed, no more", () => {
+  it("TP-2.41x: a *_FILE value has one trailing newline trimmed, no more", () => {
     const f = devApi();
     withFile(f, "DB_PASSWORD_FILE", "pw\n\n");
 
     expect(load(f).db.password.reveal()).toBe("pw\n");
   });
 
-  it("TP-2.36x: a Config doesn't reveal secrets when serialised", () => {
+  it("TP-2.41x: a Config doesn't reveal secrets when serialised", () => {
     const text = JSON.stringify(load(devApi()));
 
     expect(text).not.toContain("db-password");
@@ -156,7 +156,7 @@ describe("TP-2.2: missing and invalid variables", () => {
     expect(JSON.stringify(error.problems)).not.toContain("S3NT1NEL");
   });
 
-  it("TP-2.36x: one problem per failing variable", () => {
+  it("TP-2.41x: one problem per failing variable", () => {
     const f = devApi();
     delete f.env["DB_HOST"];
     delete f.env["DB_NAME"];
@@ -168,7 +168,7 @@ describe("TP-2.2: missing and invalid variables", () => {
   });
 
   it.each([["__FILL_ME__\n"], ["__FILL_ME__"]])(
-    'TP-2.36x: a file holding the placeholder %j is "placeholder not filled"',
+    'TP-2.41x: a file holding the placeholder %j is "placeholder not filled"',
     (content) => {
       const f = devApi();
       withFile(f, "CURSOR_KEY_FILE", content);
@@ -180,7 +180,7 @@ describe("TP-2.2: missing and invalid variables", () => {
     },
   );
 
-  it('TP-2.36x: a plain variable set to __FILL_ME__ is "placeholder not filled"', () => {
+  it('TP-2.41x: a plain variable set to __FILL_ME__ is "placeholder not filled"', () => {
     const f = devApi();
     f.env["DB_HOST"] = "__FILL_ME__";
 
@@ -191,7 +191,7 @@ describe("TP-2.2: missing and invalid variables", () => {
 describe("TP-2.3: production-only rules, each separately", () => {
   const RULES = ["not allowed in production", "required"];
 
-  it("TP-2.36x: the production fixtures are valid as they are", () => {
+  it("TP-2.41x: the production fixtures are valid as they are", () => {
     for (const f of [prodApi(), prodWorkerGeneral(), prodWorkerCapture(), prodMigrate()]) {
       expect(problemsOf(f)).toEqual([]);
     }
@@ -304,7 +304,7 @@ describe("TP-2.21: GOOGLE_OAUTH_REDIRECT_ORIGIN (production)", () => {
     expect(load(f).api?.googleOAuthRedirectOrigin.origin).toBe("https://a.ts.net");
   });
 
-  it("TP-2.36x: a capture worker's origin is in capture.oauth.redirectOrigin", () => {
+  it("TP-2.41x: a capture worker's origin is in capture.oauth.redirectOrigin", () => {
     expect(load(prodWorkerCapture()).capture?.oauth?.redirectOrigin.origin).toBe(
       "http://localhost:8080",
     );
@@ -371,7 +371,7 @@ describe("TP-2.22: SMTP_URL, SMTP_PASSWORD_FILE, EMAIL_FROM and the worker's PUB
       "smtps://smtp.example.com:2465",
       { security: "implicit_tls", host: "smtp.example.com", port: 2465 },
     ],
-  ])("TP-2.36x: SMTP_URL %s gives smtpTransport %o", (url, transport) => {
+  ])("TP-2.41x: SMTP_URL %s gives smtpTransport %o", (url, transport) => {
     const f = prodWorkerGeneral();
     f.env["SMTP_URL"] = url;
 
@@ -399,8 +399,8 @@ describe("TP-2.22: SMTP_URL, SMTP_PASSWORD_FILE, EMAIL_FROM and the worker's PUB
     expect(JSON.stringify(error.problems)).not.toContain("Pw7f3aSECRET");
   });
 
-  // TP-2.57x (code review B-5): decoding the user name must not escape as a URIError.
-  it("TP-2.57x: a malformed percent-escape in SMTP_URL's user is a ConfigError naming SMTP_URL, without the value", () => {
+  // TP-2.62x (code review B-5): decoding the user name must not escape as a URIError.
+  it("TP-2.62x: a malformed percent-escape in SMTP_URL's user is a ConfigError naming SMTP_URL, without the value", () => {
     const f = prodWorkerGeneral();
     f.env["SMTP_URL"] = "smtp://%E0%A4%A@smtp.example.com";
 
@@ -409,6 +409,57 @@ describe("TP-2.22: SMTP_URL, SMTP_PASSWORD_FILE, EMAIL_FROM and the worker's PUB
     expect(error.problems.map((p) => p.variable)).toEqual(["SMTP_URL"]);
     expect(error.message).not.toContain("%E0%A4%A");
     expect(JSON.stringify(error.problems)).not.toContain("%E0%A4%A");
+  });
+
+  // A-82: the URL's shape. Each problem names SMTP_URL with a fixed rule and never the value.
+  it.each([
+    ["smtp://", "must have a host"],
+    ["smtps://:465", "must have a host"],
+    ["smtp://h:0", "port must be 1..65535"],
+    ["smtp://h:65536", "port must be 1..65535"],
+    ["smtp://h/path", "must not have a path, query or fragment"],
+    ["smtp://h?x=1", "must not have a path, query or fragment"],
+    ["smtp://h#f", "must not have a path, query or fragment"],
+  ])('TP-2.22: SMTP_URL %s is the problem "%s" (A-82)', (url, rule) => {
+    const f = prodWorkerGeneral();
+    f.env["SMTP_URL"] = url;
+
+    const error = caughtConfigError(f);
+
+    expect(error.problems).toEqual([{ variable: "SMTP_URL", rule }]);
+    expect(error.message).not.toContain(url);
+  });
+
+  it("TP-2.22: SMTP_URL smtp://h/ is accepted (A-82)", () => {
+    const f = prodWorkerGeneral();
+    f.env["SMTP_URL"] = "smtp://h/";
+
+    expect(problemsOf(f)).toEqual([]);
+    expect(load(f).email?.smtpTransport).toEqual({ security: "starttls", host: "h", port: 587 });
+  });
+
+  it.each([
+    ["smtp://h:1", 1],
+    ["smtps://h:65535", 65535],
+  ])("TP-2.69x: SMTP_URL %s, a port at the edge of 1..65535, is accepted (A-82)", (url, port) => {
+    const f = prodWorkerGeneral();
+    f.env["SMTP_URL"] = url;
+
+    expect(problemsOf(f)).toEqual([]);
+    expect(load(f).email?.smtpTransport.port).toBe(port);
+  });
+
+  it("TP-2.69x: a path in SMTP_URL is a problem that doesn't echo it (A-82)", () => {
+    const f = prodWorkerGeneral();
+    f.env["SMTP_URL"] = "smtp://smtp.example.com/Zq9pathSECRET";
+
+    const error = caughtConfigError(f);
+
+    expect(error.problems).toEqual([
+      { variable: "SMTP_URL", rule: "must not have a path, query or fragment" },
+    ]);
+    expect(error.message).not.toContain("Zq9pathSECRET");
+    expect(JSON.stringify(error.problems)).not.toContain("Zq9pathSECRET");
   });
 
   it("TP-2.22: an empty SMTP_PASSWORD_FILE means no authentication", () => {
@@ -425,7 +476,7 @@ describe("TP-2.22: SMTP_URL, SMTP_PASSWORD_FILE, EMAIL_FROM and the worker's PUB
     expect(problemsOf(f)).toEqual([{ variable, rule: "required" }]);
   });
 
-  it("TP-2.36x: plain SMTP to localhost is accepted in development, without TLS", () => {
+  it("TP-2.41x: plain SMTP to localhost is accepted in development, without TLS", () => {
     const f = devWorker();
     f.env["SMTP_URL"] = "smtp://localhost:1025";
 

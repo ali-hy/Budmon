@@ -1,4 +1,4 @@
-// F-94 runDbResetCli (A-58). TP-2.24 (e) to (g) and TP-2.29, plus extra cases TP-2.52x and TP-2.61x.
+// F-94 runDbResetCli (A-58). TP-2.24 (e) to (g) and TP-2.29, plus extra cases TP-2.57x, TP-2.66x and TP-2.74x.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -153,7 +153,7 @@ describe("TP-2.29: runDbResetCli arguments and environment", () => {
     },
   );
 
-  it("TP-2.61x: the --seed-only input never carries allowNonLocalHost: true, with TESTCONTAINERS=1 in env (A-79)", async () => {
+  it("TP-2.66x: the --seed-only input never carries allowNonLocalHost: true, with TESTCONTAINERS=1 in env (A-79)", async () => {
     const h = harness({ DEV_SUPERUSER_URL: SUPERUSER_URL, TESTCONTAINERS: "1" });
 
     await runDbResetCli(["--seed-only"], h.deps);
@@ -197,7 +197,27 @@ describe("TP-2.29: runDbResetCli arguments and environment", () => {
     expect(await runDbResetCli([], h.deps)).toBe(1);
   });
 
-  it("TP-2.52x: ROLE_SECRETS_FILE, when set, is the file read", async () => {
+  // TP-2.74x (A-81): a failure is one stderr line `<command> failed: <errorClass>[ <errorCode>]`,
+  // with no message and no stack trace.
+  it('TP-2.74x: Error("y") from the reset prints exactly "db:reset failed: Error"', async () => {
+    const h = harness(undefined, () => Promise.reject(new Error("y-Qm3SECRET")));
+
+    await runDbResetCli([], h.deps);
+
+    expect(h.stderr).toEqual(["db:reset failed: Error"]);
+  });
+
+  it('TP-2.74x: a system error from the seed prints "db:seed failed: Error ECONNREFUSED" and exits 1', async () => {
+    const h = harness();
+    h.seed.mockRejectedValue(
+      Object.assign(new Error("connect ECONNREFUSED 10.1.2.3:5432"), { code: "ECONNREFUSED" }),
+    );
+
+    expect(await runDbResetCli(["--seed-only"], h.deps)).toBe(1);
+    expect(h.stderr).toEqual(["db:seed failed: Error ECONNREFUSED"]);
+  });
+
+  it("TP-2.57x: ROLE_SECRETS_FILE, when set, is the file read", async () => {
     const h = harness({ DEV_SUPERUSER_URL: SUPERUSER_URL, ROLE_SECRETS_FILE: "/tmp/roles.json" });
 
     await runDbResetCli([], h.deps);

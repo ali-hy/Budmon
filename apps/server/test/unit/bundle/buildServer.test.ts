@@ -9,7 +9,8 @@ import { buildServer } from "../../../scripts/build.js";
 
 const SERVER_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const ENTRY_NAMES = ["api", "worker", "migrate"];
-const DEVELOPMENT_ONLY = ["dev", "dbReset"];
+// A-83: devMigrate is development-only too.
+const DEVELOPMENT_ONLY = ["dev", "dbReset", "devMigrate"];
 
 function dependencyKeys(): string[] {
   const pkg = JSON.parse(readFileSync(path.join(SERVER_DIR, "package.json"), "utf8")) as {
@@ -52,7 +53,7 @@ describe("TP-2.27: buildServer", () => {
     rmSync(outdir, { recursive: true, force: true });
   });
 
-  it("TP-2.27: writes api, worker and migrate with linked source maps, and no dev or dbReset", () => {
+  it("TP-2.27: writes api, worker and migrate with linked source maps, and no dev, dbReset or devMigrate", () => {
     const files = new Set(readdirSync(outdir));
 
     for (const name of ENTRY_NAMES) {
@@ -110,7 +111,7 @@ describe("TP-2.27: buildServer", () => {
     expect([...result.external].sort()).toEqual([...keys, ...keys.map((k) => `${k}/*`)].sort());
   });
 
-  it("TP-2.37x: the entry points are the S-2 main/ files except the development-only ones", () => {
+  it("TP-2.42x: the entry points are the S-2 main/ files except the development-only ones", () => {
     expect([...result.entryPoints].map((e) => e.replaceAll("\\", "/")).sort()).toEqual(
       ENTRY_NAMES.map((n) => `src/main/${n}.ts`).sort(),
     );

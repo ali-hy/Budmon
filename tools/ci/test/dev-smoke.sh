@@ -5,6 +5,8 @@
 # directory: the repository root, A-73) accept their configuration: the output never contains
 # "Configuration invalid", and both report a valid start (S-2: "api: configuration is valid" /
 # "worker: configuration is valid"; from S-4/S-6 their `api_started` / `worker_started` events).
+# Then `pnpm db:migrate` (the development wrapper, A-83) exits 0 and prints the schema step's report
+# with zero migrations applied (A-80: the folder holds no journal until the first release).
 # From S-4, TP-4.23 adds `/health/ready` answering 200 within the same 90 s.
 #
 # Runs in CI's `dev-smoke` job (main only). It clones the committed state of this repository (HEAD,
@@ -77,7 +79,20 @@ for ((elapsed = 0; elapsed < deadline_seconds; elapsed += 2)); do
         echo "TP-2.18: a process reported \"Configuration invalid\"" >&2
         break
       fi
-      echo "TP-2.18: passed after ${elapsed}s (.env and dev secrets created; budmon has the four platform tables; api and worker started)"
+      echo "TP-2.18: running pnpm db:migrate"
+      migrate_status=0
+      (cd "$checkout" && pnpm db:migrate) >"$work_dir/migrate.log" 2>&1 || migrate_status=$?
+      if [[ "$migrate_status" -ne 0 ]]; then
+        echo "TP-2.18: pnpm db:migrate exited ${migrate_status}" >&2
+        tail -n 40 "$work_dir/migrate.log" >&2 || true
+        exit 1
+      fi
+      if ! grep -qE '"migrationsApplied":0[,}]' "$work_dir/migrate.log"; then
+        echo "TP-2.18: pnpm db:migrate printed no report with zero migrations applied" >&2
+        tail -n 40 "$work_dir/migrate.log" >&2 || true
+        exit 1
+      fi
+      echo "TP-2.18: passed after ${elapsed}s (.env and dev secrets created; budmon has the four platform tables; api and worker started; db:migrate applied zero migrations)"
       exit 0
     fi
   fi

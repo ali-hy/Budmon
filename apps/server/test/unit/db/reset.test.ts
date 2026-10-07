@@ -1,8 +1,9 @@
 // F-20 guards. TP-2.16 (a) (the refusals; (b) is integration/db/reset.test.ts) and TP-2.24 (a)
-// to (d) for seedDevelopmentDatabase, plus extra cases TP-2.38x and TP-2.60x for the rest of step
-// 1's guard. IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
+// to (d) for seedDevelopmentDatabase, plus extra cases TP-2.43x, TP-2.65x and TP-2.67x for the
+// rest of step 1's guard. IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 // A-79: F-20 never reads process.env; only the explicit `allowNonLocalHost` input relaxes the host
-// allowlist, and nothing else.
+// allowlist, and nothing else. A-84: each refusal carries a `reason`, and its message is
+// `<base>: <phrase>`, the phrase fixed per reason, never any part of the URL.
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import {
   ResetRefusedError,
@@ -11,11 +12,29 @@ import {
 } from "../../../src/platform/db/reset.js";
 import { testRoleSecrets } from "../../support/postgres.js";
 
-const RESET_MESSAGE = "db:reset only runs against a local development or test database";
-const SEED_MESSAGE = "db:seed only runs against a local development or test database";
+const RESET_BASE = "db:reset only runs against a local development or test database";
+const SEED_BASE = "db:seed only runs against a local development or test database";
+
+type Reason =
+  "app_env" | "non_local_host" | "host_parameter" | "host_list" | "socket_path" | "unparseable_url";
+
+const PHRASES: Record<Exclude<Reason, "app_env">, string> = {
+  non_local_host: "the host isn't local",
+  host_parameter: "the URL sets a host parameter",
+  host_list: "the URL lists several hosts",
+  socket_path: "the URL is a socket path",
+  unparseable_url: "the URL can't be parsed",
+};
+
+function phrase(reason: Reason, appEnv: string): string {
+  return reason === "app_env" ? `APP_ENV is ${appEnv}` : PHRASES[reason];
+}
 
 type ResetInput = Parameters<typeof resetDevelopmentDatabase>[0];
 type ResetDeps = Parameters<typeof resetDevelopmentDatabase>[1];
+
+const LOCAL_URL = "postgres://postgres:postgres@localhost:5432/postgres";
+const REMOTE_URL = "postgres://postgres:postgres@db.example.com:5432/postgres";
 
 function resetInput(appEnv: ResetInput["appEnv"], host: string): ResetInput {
   return {
@@ -44,6 +63,19 @@ async function rejection(promise: Promise<unknown>): Promise<unknown> {
   throw new Error("expected a rejection");
 }
 
+/** Narrows to ResetRefusedError, failing the test otherwise. */
+function refused(error: unknown): ResetRefusedError {
+  expect(error).toBeInstanceOf(ResetRefusedError);
+  if (!(error instanceof ResetRefusedError)) throw new Error("not a ResetRefusedError");
+  return error;
+}
+
+/** The parts of a URL a refusal must never repeat (A-84). */
+function urlSecrets(superuserUrl: string): string[] {
+  const parts = ["db.example.com", "10.0.0.5", "/var/run/postgresql", "%2Fvar%2Frun"];
+  return parts.filter((part) => superuserUrl.includes(part));
+}
+
 beforeEach(() => {
   vi.stubEnv("TESTCONTAINERS", undefined);
 });
@@ -52,96 +84,179 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
+interface RefusalCase {
+  label: string;
+  appEnv: ResetInput["appEnv"];
+  superuserUrl: string;
+  allowNonLocalHost?: boolean;
+  testcontainers?: boolean;
+  reason: Reason;
+}
+
+// TP-2.16 (a): the nine inputs in the LLD's order, each with its A-84 reason.
+const TP_2_16_A: RefusalCase[] = [
+  {
+    label: 'appEnv "production" on localhost',
+    appEnv: "production",
+    superuserUrl: LOCAL_URL,
+    reason: "app_env",
+  },
+  {
+    label: "host db.example.com with TESTCONTAINERS=1 in the environment (A-79)",
+    appEnv: "development",
+    superuserUrl: REMOTE_URL,
+    testcontainers: true,
+    reason: "non_local_host",
+  },
+  {
+    label: 'appEnv "production" with allowNonLocalHost: true (A-79)',
+    appEnv: "production",
+    superuserUrl: LOCAL_URL,
+    allowNonLocalHost: true,
+    reason: "app_env",
+  },
+  {
+    label: "?host=db.example.com with allowNonLocalHost: true (A-79)",
+    appEnv: "development",
+    superuserUrl: "postgres://u:p@localhost/postgres?host=db.example.com",
+    allowNonLocalHost: true,
+    reason: "host_parameter",
+  },
+  {
+    label: "host db.example.com in development",
+    appEnv: "development",
+    superuserUrl: REMOTE_URL,
+    reason: "non_local_host",
+  },
+  {
+    label: "?host=db.example.com (A-74)",
+    appEnv: "development",
+    superuserUrl: "postgres://u:p@localhost/postgres?host=db.example.com",
+    reason: "host_parameter",
+  },
+  {
+    label: "?hostaddr=10.0.0.5 (A-74)",
+    appEnv: "development",
+    superuserUrl: "postgres://u:p@localhost/postgres?hostaddr=10.0.0.5",
+    reason: "host_parameter",
+  },
+  {
+    label: "a host list (A-74)",
+    appEnv: "development",
+    superuserUrl: "postgres://u:p@localhost,db.example.com/postgres",
+    reason: "host_list",
+  },
+  {
+    label: "a socket path (A-74)",
+    appEnv: "development",
+    superuserUrl: "postgres://u:p@%2Fvar%2Frun%2Fpostgresql/postgres",
+    reason: "socket_path",
+  },
+];
+
+// TP-2.67x: the sixth reason, which TP-2.16 has no input for. pg-connection-string's parse
+// throws "Invalid URL" on an unclosed IPv6 bracket.
+const UNPARSEABLE: RefusalCase = {
+  label: "an unparseable URL",
+  appEnv: "development",
+  superuserUrl: "postgres://u:p@[bad/postgres",
+  reason: "unparseable_url",
+};
+
+function arrange(c: RefusalCase): void {
+  if (c.testcontainers === true) vi.stubEnv("TESTCONTAINERS", "1");
+}
+
+function resetCall(c: RefusalCase): ResetInput {
+  return {
+    ...resetInput(c.appEnv, "localhost"),
+    superuserUrl: c.superuserUrl,
+    ...(c.allowNonLocalHost === undefined ? {} : { allowNonLocalHost: c.allowNonLocalHost }),
+  };
+}
+
 describe("TP-2.16 (a): resetDevelopmentDatabase refuses before any connection", () => {
-  it.each([
-    ['appEnv "production" on localhost', "production", "localhost"],
-    ["host db.example.com in development", "development", "db.example.com"],
-  ])(
-    "TP-2.16 (a): %s throws ResetRefusedError and calls no dependency",
-    async (_label, appEnv, host) => {
+  it("TP-2.16 (a): has nine refusal inputs", () => {
+    expect(TP_2_16_A).toHaveLength(9);
+  });
+
+  it.each(TP_2_16_A.map((c) => [c.label, c] as const))(
+    "TP-2.16 (a): %s throws ResetRefusedError with its reason and calls no dependency",
+    async (_label, c) => {
+      arrange(c);
       const deps = fakeResetDeps();
 
-      const error = await rejection(
-        resetDevelopmentDatabase(resetInput(appEnv as ResetInput["appEnv"], host), deps),
-      );
+      const error = refused(await rejection(resetDevelopmentDatabase(resetCall(c), deps)));
 
-      expect(error).toBeInstanceOf(ResetRefusedError);
-      expect((error as Error).message).toBe(RESET_MESSAGE);
+      expect(error.reason).toBe(c.reason);
+      expect(error.message).toBe(`${RESET_BASE}: ${phrase(c.reason, c.appEnv)}`);
+      for (const part of urlSecrets(c.superuserUrl)) expect(error.message).not.toContain(part);
       expect(deps.runSchemaStep).not.toHaveBeenCalled();
       expect(deps.seed).not.toHaveBeenCalled();
     },
   );
 
-  it("TP-2.16 (a): host db.example.com with TESTCONTAINERS=1 in the environment is still refused (A-79)", async () => {
-    vi.stubEnv("TESTCONTAINERS", "1");
+  it("TP-2.16 (a): the reasons come out in the LLD's input order", async () => {
+    const reasons: unknown[] = [];
+    for (const c of TP_2_16_A) {
+      arrange(c);
+      const error = refused(
+        await rejection(resetDevelopmentDatabase(resetCall(c), fakeResetDeps())),
+      );
+      reasons.push(error.reason);
+      vi.unstubAllEnvs();
+    }
+
+    expect(reasons).toEqual([
+      "app_env",
+      "non_local_host",
+      "app_env",
+      "host_parameter",
+      "non_local_host",
+      "host_parameter",
+      "host_parameter",
+      "host_list",
+      "socket_path",
+    ]);
+  });
+
+  it("TP-2.67x: an unparseable URL is refused with reason unparseable_url", async () => {
     const deps = fakeResetDeps();
 
-    const error = await rejection(
-      resetDevelopmentDatabase(resetInput("development", "db.example.com"), deps),
-    );
+    const error = refused(await rejection(resetDevelopmentDatabase(resetCall(UNPARSEABLE), deps)));
 
-    expect(error).toBeInstanceOf(ResetRefusedError);
-    expect((error as Error).message).toBe(RESET_MESSAGE);
+    expect(error.reason).toBe("unparseable_url");
+    expect(error.message).toBe(`${RESET_BASE}: the URL can't be parsed`);
+    expect(error.message).not.toContain("[bad");
     expect(deps.runSchemaStep).not.toHaveBeenCalled();
     expect(deps.seed).not.toHaveBeenCalled();
   });
 
-  it.each([
-    [
-      'appEnv "production" on localhost',
-      "production",
-      "postgres://postgres:postgres@localhost:5432/postgres",
-    ],
-    [
-      "?host=db.example.com in development",
-      "development",
-      "postgres://u:p@localhost/postgres?host=db.example.com",
-    ],
-  ])(
-    "TP-2.16 (a): %s with allowNonLocalHost: true is still refused (A-79)",
-    async (_label, appEnv, superuserUrl) => {
-      const deps = fakeResetDeps();
-
-      const error = await rejection(
-        resetDevelopmentDatabase(
-          {
-            ...resetInput(appEnv as ResetInput["appEnv"], "localhost"),
-            superuserUrl,
-            allowNonLocalHost: true,
-          },
-          deps,
-        ),
-      );
-
-      expect(error).toBeInstanceOf(ResetRefusedError);
-      expect((error as Error).message).toBe(RESET_MESSAGE);
-      expect(deps.runSchemaStep).not.toHaveBeenCalled();
-      expect(deps.seed).not.toHaveBeenCalled();
-    },
-  );
-
-  it("TP-2.60x: allowNonLocalHost: false, given explicitly, still refuses db.example.com", async () => {
+  it("TP-2.65x: allowNonLocalHost: false, given explicitly, still refuses db.example.com", async () => {
     const deps = fakeResetDeps();
 
-    const error = await rejection(
-      resetDevelopmentDatabase(
-        { ...resetInput("development", "db.example.com"), allowNonLocalHost: false },
-        deps,
+    const error = refused(
+      await rejection(
+        resetDevelopmentDatabase(
+          { ...resetInput("development", "db.example.com"), allowNonLocalHost: false },
+          deps,
+        ),
       ),
     );
 
-    expect(error).toBeInstanceOf(ResetRefusedError);
+    expect(error.reason).toBe("non_local_host");
     expect(deps.runSchemaStep).not.toHaveBeenCalled();
   });
 
-  it.each([["rehearsal"]])("TP-2.38x: appEnv %s is refused", async (appEnv) => {
+  it("TP-2.43x: appEnv rehearsal is refused with reason app_env", async () => {
     const deps = fakeResetDeps();
 
-    const error = await rejection(
-      resetDevelopmentDatabase(resetInput(appEnv as ResetInput["appEnv"], "localhost"), deps),
+    const error = refused(
+      await rejection(resetDevelopmentDatabase(resetInput("rehearsal", "localhost"), deps)),
     );
 
-    expect(error).toBeInstanceOf(ResetRefusedError);
+    expect(error.reason).toBe("app_env");
+    expect(error.message).toBe(`${RESET_BASE}: APP_ENV is rehearsal`);
     expect(deps.runSchemaStep).not.toHaveBeenCalled();
   });
 });
@@ -163,24 +278,29 @@ describe("TP-2.24: seedDevelopmentDatabase", () => {
   });
 
   it.each([
-    ["(b) production on localhost", "production", "localhost"],
-    ["(c) development on db.example.com", "development", "db.example.com"],
+    ["(b) production on localhost", "production", "localhost", false, "app_env"],
+    ["(c) development on db.example.com", "development", "db.example.com", false, "non_local_host"],
     [
       "(c) development on db.example.com, with TESTCONTAINERS=1 (A-79)",
       "development",
       "db.example.com",
-      "1",
+      true,
+      "non_local_host",
     ],
-  ])(
-    "TP-2.24 %s throws ResetRefusedError and doesn't seed",
-    async (_label, appEnv, host, testcontainers?: string) => {
-      if (testcontainers !== undefined) vi.stubEnv("TESTCONTAINERS", testcontainers);
+  ] as const)(
+    "TP-2.24 %s throws ResetRefusedError with the db:seed message and doesn't seed",
+    async (_label, appEnv, host, testcontainers, reason) => {
+      if (testcontainers) vi.stubEnv("TESTCONTAINERS", "1");
       const seed = vi.fn(() => Promise.resolve());
 
-      const error = await rejection(seedDevelopmentDatabase(seedInput(appEnv, host), { seed }));
+      const error = refused(
+        await rejection(seedDevelopmentDatabase(seedInput(appEnv, host), { seed })),
+      );
 
-      expect(error).toBeInstanceOf(ResetRefusedError);
-      expect((error as Error).message).toBe(SEED_MESSAGE);
+      expect(error.message.startsWith(`${SEED_BASE}: `)).toBe(true);
+      expect(error.reason).toBe(reason);
+      expect(error.message).toBe(`${SEED_BASE}: ${phrase(reason, appEnv)}`);
+      expect(error.message).not.toContain("db.example.com");
       expect(seed).not.toHaveBeenCalled();
     },
   );
@@ -197,7 +317,7 @@ describe("TP-2.24: seedDevelopmentDatabase", () => {
   });
 
   it.each([["127.0.0.1"], ["[::1]"], ["host.docker.internal"]])(
-    "TP-2.38x: the local host %s is allowed in test",
+    "TP-2.43x: the local host %s is allowed in test",
     async (host) => {
       const seed = vi.fn(() => Promise.resolve());
 
@@ -208,7 +328,7 @@ describe("TP-2.24: seedDevelopmentDatabase", () => {
   );
 
   it.each([["development"], ["test"]])(
-    "TP-2.60x: allowNonLocalHost: true lets %s seed on db.example.com",
+    "TP-2.65x: allowNonLocalHost: true lets %s seed on db.example.com",
     async (appEnv) => {
       const seed = vi.fn(() => Promise.resolve());
 
@@ -221,58 +341,37 @@ describe("TP-2.24: seedDevelopmentDatabase", () => {
     },
   );
 
-  it("TP-2.60x: allowNonLocalHost: true doesn't allow production", async () => {
+  it("TP-2.65x: allowNonLocalHost: true doesn't allow production", async () => {
     const seed = vi.fn(() => Promise.resolve());
 
-    const error = await rejection(
-      seedDevelopmentDatabase(
-        { ...seedInput("production", "db.example.com"), allowNonLocalHost: true },
-        { seed },
+    const error = refused(
+      await rejection(
+        seedDevelopmentDatabase(
+          { ...seedInput("production", "db.example.com"), allowNonLocalHost: true },
+          { seed },
+        ),
       ),
     );
 
-    expect(error).toBeInstanceOf(ResetRefusedError);
-    expect((error as Error).message).toBe(SEED_MESSAGE);
+    expect(error.reason).toBe("app_env");
+    expect(error.message).toBe(`${SEED_BASE}: APP_ENV is production`);
     expect(seed).not.toHaveBeenCalled();
   });
-});
 
-// TP-2.16 (a), A-74: pg lets `?host=` override the URL's host and `?hostaddr=` set the address,
-// and accepts host lists and socket paths, so the guard refuses all of them before any
-// connection, on both the reset and the seed path.
-describe("TP-2.16 (a): host overrides are refused (A-74)", () => {
-  const OVERRIDES = [
-    ["?host=", "postgres://u:p@localhost/postgres?host=db.example.com"],
-    ["?hostaddr=", "postgres://u:p@localhost/postgres?hostaddr=10.0.0.5"],
-    ["a host list", "postgres://u:p@localhost,db.example.com/postgres"],
-    ["a socket path", "postgres://u:p@%2Fvar%2Frun%2Fpostgresql/postgres"],
-  ];
-
-  it.each(OVERRIDES)(
-    "TP-2.16 (a): resetDevelopmentDatabase with %s throws ResetRefusedError and calls no dependency",
-    async (_label, superuserUrl) => {
-      const deps = fakeResetDeps();
-
-      const error = await rejection(
-        resetDevelopmentDatabase({ ...resetInput("development", "localhost"), superuserUrl }, deps),
-      );
-
-      expect(error).toBeInstanceOf(ResetRefusedError);
-      expect(deps.runSchemaStep).not.toHaveBeenCalled();
-      expect(deps.seed).not.toHaveBeenCalled();
-    },
-  );
-
-  it.each(OVERRIDES)(
-    "TP-2.16 (a): seedDevelopmentDatabase with %s throws ResetRefusedError and doesn't seed",
-    async (_label, superuserUrl) => {
+  // TP-2.67x: the seed path refuses the A-74 inputs and an unparseable URL with the same reasons.
+  it.each([...TP_2_16_A.slice(5), UNPARSEABLE].map((c) => [c.label, c] as const))(
+    "TP-2.67x: seedDevelopmentDatabase with %s throws ResetRefusedError with its reason and doesn't seed",
+    async (_label, c) => {
       const seed = vi.fn(() => Promise.resolve());
 
-      const error = await rejection(
-        seedDevelopmentDatabase({ appEnv: "development", superuserUrl }, { seed }),
+      const error = refused(
+        await rejection(
+          seedDevelopmentDatabase({ appEnv: c.appEnv, superuserUrl: c.superuserUrl }, { seed }),
+        ),
       );
 
-      expect(error).toBeInstanceOf(ResetRefusedError);
+      expect(error.reason).toBe(c.reason);
+      expect(error.message).toBe(`${SEED_BASE}: ${phrase(c.reason, c.appEnv)}`);
       expect(seed).not.toHaveBeenCalled();
     },
   );
