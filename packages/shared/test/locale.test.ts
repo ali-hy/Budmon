@@ -1,0 +1,58 @@
+// F-312 locales and bidi. TP-1.13, plus the extra cases TP-1.23x.
+// IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
+import { describe, expect, it } from "vitest";
+import { isolate } from "../src/i18n/bidi.js";
+import { directionOf, resolveLocale } from "../src/i18n/locale.js";
+
+describe("F-312 resolveLocale", () => {
+  it('TP-1.13: "ar-EG" against ["en", "ar"] resolves to the language subtag "ar"', () => {
+    expect(resolveLocale("ar-EG", ["en", "ar"])).toBe("ar");
+  });
+
+  it('TP-1.13: "fr" against ["en"] falls back to "en"', () => {
+    expect(resolveLocale("fr", ["en"])).toBe("en");
+  });
+
+  it("TP-1.23x: an exact match wins over the language subtag, case-insensitively, in the supported spelling", () => {
+    expect(resolveLocale("EN-us", ["en", "en-US"])).toBe("en-US");
+  });
+
+  it("TP-1.23x: null resolves to the fallback, which defaults to en", () => {
+    expect(resolveLocale(null, ["en", "ar"])).toBe("en");
+    expect(resolveLocale(null, ["en", "ar"], "ar")).toBe("ar");
+  });
+
+  it("TP-1.23x: a given fallback is used when nothing matches", () => {
+    expect(resolveLocale("fr-FR", ["en", "ar"], "ar")).toBe("ar");
+  });
+});
+
+describe("F-312 directionOf", () => {
+  it.each([
+    ["ar-XB", "rtl"],
+    ["he", "rtl"],
+    ["en", "ltr"],
+  ])("TP-1.13: directionOf(%j) is %s", (locale, direction) => {
+    expect(directionOf(locale)).toBe(direction);
+  });
+
+  it.each([["ar"], ["ar-EG"], ["fa-IR"], ["ur"], ["ps"], ["sd"], ["yi"], ["dv"], ["he-IL"]])(
+    "TP-1.23x: directionOf(%j) is rtl",
+    (locale) => {
+      expect(directionOf(locale)).toBe("rtl");
+    },
+  );
+
+  it.each([["en-US"], ["de-DE"], ["en-XA"], ["fr"], ["tr"]])(
+    "TP-1.23x: directionOf(%j) is ltr",
+    (locale) => {
+      expect(directionOf(locale)).toBe("ltr");
+    },
+  );
+});
+
+describe("F-312 isolate", () => {
+  it("TP-1.13: isolate wraps the text in FIRST STRONG ISOLATE and POP DIRECTIONAL ISOLATE", () => {
+    expect(isolate("x")).toBe("⁨x⁩");
+  });
+});

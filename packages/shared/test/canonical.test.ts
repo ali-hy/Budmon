@@ -1,0 +1,59 @@
+// F-306 canonicalJson. TP-1.9, plus the extra cases TP-1.20x.
+// IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
+import { describe, expect, it } from "vitest";
+import { canonicalJson } from "../src/json/canonical.js";
+
+class Point {
+  constructor(
+    readonly x: number,
+    readonly y: number,
+  ) {}
+}
+
+describe("F-306 canonicalJson", () => {
+  it("TP-1.9: keys are sorted at every depth, arrays keep order, undefined properties are omitted", () => {
+    expect(canonicalJson({ b: 1, a: { d: 2, c: [3, { f: 1, e: 0 }] }, u: undefined })).toBe(
+      '{"a":{"c":[3,{"e":0,"f":1}],"d":2},"b":1}',
+    );
+  });
+
+  it.each([
+    ["1n", 1n],
+    ["NaN", Number.NaN],
+    ["new Date()", new Date(0)],
+  ])("TP-1.9: %s throws TypeError", (_label, value) => {
+    expect(() => canonicalJson(value)).toThrow(TypeError);
+  });
+
+  it.each([
+    ["Infinity", Number.POSITIVE_INFINITY],
+    ["-Infinity", Number.NEGATIVE_INFINITY],
+    ["a function", () => 1],
+    ["a symbol", Symbol("s")],
+    ["a Map", new Map([["a", 1]])],
+    ["a Set", new Set([1])],
+    ["a class instance", new Point(1, 2)],
+    ["a bigint nested in an object", { a: { b: 1n } }],
+    ["a Date nested in an array", [new Date(0)]],
+  ])("TP-1.20x: %s throws TypeError", (_label, value) => {
+    expect(() => canonicalJson(value)).toThrow(TypeError);
+  });
+
+  it("TP-1.20x: keys are sorted by UTF-16 code unit, not by locale", () => {
+    expect(canonicalJson({ b: 1, a: 2, B: 3, Z: 4, é: 5, "\u{1F600}": 6, Ａ: 7 })).toBe(
+      '{"B":3,"Z":4,"a":2,"b":1,"é":5,"\u{1F600}":6,"Ａ":7}',
+    );
+  });
+
+  it.each([
+    ["null", null, "null"],
+    ["a string with escapes", 'a"b\\c\n', '"a\\"b\\\\c\\n"'],
+    ["true", true, "true"],
+    ["an empty object", {}, "{}"],
+    ["an empty array", [], "[]"],
+    ["a nested empty structure", { a: [], b: {} }, '{"a":[],"b":{}}'],
+    ["a negative decimal", -1.5, "-1.5"],
+  ])("TP-1.20x: %s serialises like JSON without whitespace", (_label, value, expected) => {
+    expect(canonicalJson(value)).toBe(expected);
+  });
+});
