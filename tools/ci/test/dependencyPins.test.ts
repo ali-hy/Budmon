@@ -1,4 +1,4 @@
-// TP-0.20: ESLint 10 dependency pins and the single declared peer exception (A-13).
+// TP-0.20: ESLint 10 dependency pins and the single declared peer exception (A-13, A-19).
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -29,7 +29,7 @@ function declaredVersions(name: string): string[] {
     .filter((version): version is string => version !== undefined);
 }
 
-/** Clones the committed tree into a temporary directory, runs `pnpm install <args>` there and
+/** Clones HEAD (the committed tree, no node_modules) into a temporary directory, runs `pnpm install <args>` there and
  * returns the exit status and combined output. */
 function installInCleanClone(args: readonly string[]): { status: number | null; output: string } {
   const dir = mkdtempSync(path.join(tmpdir(), "budmon-install-"));
@@ -49,8 +49,6 @@ function installInCleanClone(args: readonly string[]): { status: number | null; 
     rmSync(dir, { recursive: true, force: true });
   }
 }
-
-const PEER_WARNING = /peer dep|unmet peer|issues with peer/i;
 
 describe("TP-0.20: ESLint 10 dependency pins (A-13)", () => {
   it("TP-0.20 (a): peerDependencyRules has exactly allowedVersions { eslint-plugin-jsx-a11y>eslint: 10 }", () => {
@@ -74,20 +72,17 @@ describe("TP-0.20: ESLint 10 dependency pins (A-13)", () => {
     expect(versions.every((v) => v === version)).toBe(true);
   });
 
-  it("TP-0.20 (b): pnpm install --frozen-lockfile in a clean checkout exits 0 with no peer-dependency warning", () => {
-    const { status, output } = installInCleanClone(["--frozen-lockfile"]);
-
-    expect(status, output).toBe(0);
-    expect(output).not.toMatch(PEER_WARNING);
-  }, 300_000);
-
-  // TP-0.20x (test-architect addition, not an LLD ID): a frozen-lockfile install skips resolution
-  // and never prints pnpm's peer report, so (b) alone can't see a peer mismatch. A resolving
-  // install does, which is what "any other peer problem still shows" (A-13) needs.
-  it("TP-0.20x: a resolving install (pnpm install --fix-lockfile) reports no peer-dependency issue", () => {
+  it("TP-0.20 (b): a resolving install (pnpm install --fix-lockfile) in a fresh clone exits 0 and reports no peer issue", () => {
     const { status, output } = installInCleanClone(["--fix-lockfile"]);
 
     expect(status, output).toBe(0);
-    expect(output).not.toMatch(PEER_WARNING);
+    expect(output).not.toContain("Issues with peer dependencies found");
+    expect(output).not.toContain("unmet peer");
+  }, 300_000);
+
+  it("TP-0.20 (c): pnpm install --frozen-lockfile in a fresh clone exits 0", () => {
+    const { status, output } = installInCleanClone(["--frozen-lockfile"]);
+
+    expect(status, output).toBe(0);
   }, 300_000);
 });
