@@ -5,6 +5,7 @@ import formatjs from "eslint-plugin-formatjs";
 import jsxA11y from "eslint-plugin-jsx-a11y";
 import tseslint from "typescript-eslint";
 import iconFromRegistry from "./rules/icon-from-registry.js";
+import messageId from "./rules/message-id.js";
 import noPhysicalTailwind from "./rules/no-physical-tailwind.js";
 
 const SERVER_SRC = "apps/server/src";
@@ -73,7 +74,7 @@ export function createBudmonEslintConfig({ tsconfigRootDir }) {
       rules: { "no-restricted-imports": restricted({ paths: ["pg"], patterns: ROUTER_PATTERNS }) },
     },
     {
-      files: ["**/*Service.ts"],
+      files: [`${SERVER_SRC}/*/*Service.ts`, `${SERVER_SRC}/platform/*/*Service.ts`],
       rules: { "no-restricted-imports": restricted({ paths: ["pg"], patterns: SERVICE_PATTERNS }) },
     },
     {
@@ -98,8 +99,21 @@ export function createBudmonEslintConfig({ tsconfigRootDir }) {
       files: MONEY_FILES,
       rules: {
         "no-restricted-globals": ["error", "parseFloat"],
+        "no-restricted-properties": [
+          "error",
+          ...["Number", "globalThis", "window"].map((object) => ({
+            object,
+            property: "parseFloat",
+            message: "parseFloat is forbidden; use the money helpers.",
+          })),
+        ],
         "no-restricted-syntax": [
           "error",
+          {
+            selector: "UnaryExpression[operator='+']",
+            message:
+              "Unary + conversion is forbidden; use the money helpers or Number.parseInt with a reason.",
+          },
           {
             selector: "CallExpression[callee.name='Number']",
             message:
@@ -117,6 +131,7 @@ export function createBudmonEslintConfig({ tsconfigRootDir }) {
     // 4. Web.
     {
       files: ["apps/web/src/**/*.{ts,tsx}"],
+      settings: { formatjs: { additionalFunctionNames: ["t"] } },
       plugins: {
         formatjs,
         "jsx-a11y": jsxA11y,
@@ -124,15 +139,14 @@ export function createBudmonEslintConfig({ tsconfigRootDir }) {
           rules: {
             "no-physical-tailwind": noPhysicalTailwind,
             "icon-from-registry": iconFromRegistry,
+            "message-id": messageId,
           },
         },
       },
       rules: {
         "formatjs/enforce-default-message": "error",
-        "formatjs/enforce-id": [
-          "error",
-          { idInterpolationPattern: "[sha512:contenthash:base64:6]" },
-        ],
+        "formatjs/no-invalid-icu": "error",
+        "budmon/message-id": "error",
         "formatjs/no-literal-string-in-jsx": "error",
         "budmon/no-physical-tailwind": "error",
         "budmon/icon-from-registry": "error",

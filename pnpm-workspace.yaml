@@ -4,3 +4,6 @@ packages:
   - packages/*
   - infra/budmonctl
   - tools/*
+peerDependencyRules:
+  allowedVersions:
+    "eslint-plugin-jsx-a11y>eslint": "10"
