@@ -2,7 +2,7 @@
 module: identity
 doc: lld
 status: draft # draft | in-review | approved
-version: 0.2
+version: 0.3
 hld_version: 0.5
 author: planner
 approved_by:
@@ -21,6 +21,7 @@ Platform functions are cited as **P-F-n** from the platform LLD **v0.12** (`docs
 | ------- | ---- | ------ |
 | 0.1     | 2026-10-07 | Initial draft |
 | 0.2     | 2026-10-07 | Plan review round 1 (REVISE), against platform LLD v0.12. **P-1:** configuration names aligned with v0.12 (`api.googleSignIn?`, `api.recoveryCodeKeys`, `email?.smtpPassword?`, `SealContext.rowId`); citations moved from v0.9 and "PA being applied" to v0.12 and A-1 to A-6. **P-2:** the `budmon-local bootstrap-owner` wrapper (P-F-178, A-6) and the Android `GOOGLE_SERVER_CLIENT_ID` (P-F-265, A-3) are the platform's; F-47 and TP-2.6 removed, references added. **P-3:** new §1.1 with platform amendment requests PA-7 (presigned download file name), PA-8 (`OutboxDao.deleteAll`/`countAll`), PA-9 (rehearsal fake Google for sign-in), PA-10 (rehearsal email canary flows), PA-11 (module wiring points incl. the server router root). **P-4:** TOTP envelopes registered with P-F-115 (F-34) and a re-wrap test (TP-4.16). **P-5:** no `bigint({ mode: "number" })` (`integer` columns); the module is flat under `src/identity/` so A-11's and F-1's globs cover every router, service and repo; one schema file per table (platform HLD layout). **P-6:** F-30 applies `SMTP_URL`'s TLS rule exactly (TP-0.31). **P-7:** links are rendered outside `renderMessage`; every email kind's message IDs and value sources defined (§7.2). **P-8:** concurrent-refresh option (a): R3 re-issues while the current token is unpresented; e2e cases for each response order and the 60.001 s boundary. **P-9:** the web `device` cookie (path `/api/v1`) feeds `presentedDeviceToken` in every session-creating procedure; Android `clear()` keeps the device token. **P-10:** `clear()` never touches `outboxOwnerUserId`; unknown owner with pending entries → `AskDiscard`. **P-11:** unprefixed cookie names are set and accepted only when the request's `Host` is `localhost`/`127.0.0.1`; `Origin` isn't used for cookie naming (null origins don't matter). **P-12:** cancelling is refused once `scheduledFor ≤ now`, and erasure re-checks under a row lock. **P-13:** §5.7 public surface, `requireConfirmed(ctx, maxAgeSeconds = 600)`, privacy notice content and route (§8.3). **P-14:** DV-6 (no `identity.event-fanout` job), DV-7 (cookie spike browsers); aligned with the HLD: F-82's unknown-state redirect, the refresh limit per session, the `invite.user` limit enforced and tested, CSV names `<module>-<entity>`. **P-15:** `invitation-ended` published on ban, owner deletion and `--replace`; a second ban defined. Owner decision Q-1 (reset links open in the browser) recorded (LD-9, brief). |
+| 0.3     | 2026-10-07 | Plan review round 1 suggestions. **S-1:** F-95 locks settings first and reads the inviter without a row lock (same order as F-41), so the two can't deadlock. **S-2:** `completeSignIn` re-checks closure and the ban list under the user row lock → `ACCOUNT_CLOSED`. **S-3:** F-118 treats `requestedBy = ban` as due regardless of `scheduledFor`. **S-4:** every F-125 method takes an optional `h: DbHandle` so `admin` can audit in the same transaction. **S-5:** public Google intents ignore any principal present (no error), stated in F-81/F-84. **S-6:** F-90 stores the canonical zone name. **S-7:** `known_devices_expires_idx`; `sessions_purge_idx` covers `absolute_expires_at`. **S-8:** F-72 lists `VALIDATION_FAILED`; F-97's ban re-check placed at step 3; `remaining` is `z.number().int().nullable()`. **S-9:** tests TP-3.30 (link race `23505`), TP-3.53 (loading and error states per screen), TP-5.8 (`PASSWORD_REQUIRED`), TP-6.8 (banned email on link). **S-10:** TP-M.1 and TP-M.4 extended. **S-11:** `invitation_cap_failed` is one job per recipient (`recipient: inviter \| owner`); the owner is told even without an inviter; retries resend only their own email. **S-12:** file plan adds the test-only emails route and the e2e fake Google. **S-13:** clearing both cookie names is unnecessary under DV-3 (different hosts, different cookie jars); recorded in F-27. **S-14:** brief brought up to date. **S-15:** F-95 records why the switch check precedes the ban and user checks. |
 
 ## Amendments
 
@@ -149,6 +150,8 @@ Server paths are under `apps/server/src/` (written `identity/…` for `apps/serv
 | `identity/googleOidc.ts` | Create | F-80. |
 | `identity/exportZip.ts`, `identity/identityExportSection.ts` | Create | F-112, F-113. |
 | `identity/identitySeed.ts`, `identity/bootstrapOwnerCli.ts` | Create | F-37, F-46. |
+| `identity/testEmailsRouter.ts` | Create | Test-only `GET /__test/emails` (§10.1): registered through `moduleRoutes` only when `APP_ENV=test`; returns the memory sender's messages as JSON. |
+| `identity/e2eFakeGoogleRouter.ts` | Create | Test-only fake Google for Playwright (§10.1): registered through `moduleRoutes` only when `APP_ENV=test` and `E2E_FAKE_GOOGLE=1`. It serves an authorization page that redirects to the callback with `code=signin.<b64 nonce>`, a token endpoint and a JWKS; `createGoogleOidc`'s `endpoints` point at it. Production configuration refuses `E2E_FAKE_GOOGLE` (it's read only when `APP_ENV=test`). |
 | `platform/http/appRouter.ts` | Modify (PA-11 a) | Add `auth`, `me`, `invitations`, `users`, `exports`, `deletion` from `identityRouter`. |
 | `platform/container.ts` | Modify (PA-11 b to e) | `identity` module, `authHook`, `erasureHandler`, `moduleRoutes` (F-88), `onGeneralStarted` (F-119), sealed columns (F-34). |
 | `platform/queue/handlers.ts`, `platform/db/seed.ts` | Modify (PA-11 f) | `identityHandlers(c)` (F-33); `identityDevSeeder` (F-37). |
@@ -286,7 +289,7 @@ export const sessionsTable = pgTable("sessions", {
 }, (t) => [
   uniqueIndex("sessions_access_hash_key").on(t.accessTokenHash),
   index("sessions_user_live_idx").on(t.userId, t.lastUsedAt).where(sql`${t.revokedAt} IS NULL`),
-  index("sessions_purge_idx").on(t.revokedAt, t.idleExpiresAt),
+  index("sessions_purge_idx").on(t.revokedAt, t.idleExpiresAt, t.absoluteExpiresAt),
   check("sessions_delivery", sql`${t.delivery} IN ('cookie', 'bearer')`),
   check("sessions_client_kind", sql`${t.clientKind} IN ('web', 'android', 'other')`),
   check("sessions_auth_method", sql`${t.authMethod} IN ('password', 'google', 'reset', 'sign_up')`),
@@ -325,6 +328,7 @@ export const knownDevicesTable = pgTable("known_devices", {
 }, (t) => [
   uniqueIndex("known_devices_hash_key").on(t.tokenHash),
   index("known_devices_user_idx").on(t.userId, t.lastUsedAt),
+  index("known_devices_expires_idx").on(t.expiresAt),
   check("known_devices_hash_len", sql`octet_length(${t.tokenHash}) = 32`),
 ]);
 
@@ -481,7 +485,7 @@ export type ChallengeData =
 | Owner's invitation list, user list | `invitations_created_idx`, `users_created_id_idx` |
 | Cap count (pending, unexpired) | `invitations_pending_expiry_idx` |
 | Due deletions (sweep) | `users_deletion_due_idx` |
-| Purge scans | `auth_challenges_expires_idx`, `sessions_purge_idx`, `invitations_ended_idx`, `security_events_created_idx` |
+| Purge scans | `auth_challenges_expires_idx`, `sessions_purge_idx` (revoked, idle and absolute expiry), `known_devices_expires_idx`, `invitations_ended_idx`, `security_events_created_idx` |
 | Recovery-code check | `recovery_codes_lookup_key` |
 | Exports of a user; one active export | `data_exports_user_idx`, `data_exports_one_active_key` |
 | Known device by hash; per user | `known_devices_hash_key`, `known_devices_user_idx` |
@@ -916,7 +920,7 @@ export type ChallengeData =
     - `cookie` delivery (cookie names from `ctx.headers.host`): appends `Set-Cookie` for `access` (max age `ACCESS_TTL`) and `refresh` (max age = `refreshExpiresAt − now`, in whole seconds). When `deviceToken` isn't null it also sets `device` (max age `KNOWN_DEVICE_TTL`). It clears `challenge`. Returns `null`.
     - `bearer` delivery: returns the tokens with instants as RFC 3339 `Z` strings.
   - **`deliverChallenge`:** for `cookie`, sets `challenge` (max age `TWO_STEP_CHALLENGE_TTL`) and returns `null`; for `bearer`, returns the token.
-  - **`clearSessionCookies`:** clears `access`, `refresh` and `challenge`, never `device`.
+  - **`clearSessionCookies`:** clears `access`, `refresh` and `challenge` under the one name valid for the request's host, never `device`. (S-13) Clearing the other name too isn't needed: `localhost` and the tailnet name are different hosts with separate cookie jars, and each host only ever receives the name F-4 assigns to it.
 
 #### F-28: step-up helpers
 - **File:** `identity/requireConfirmed.ts` · **Layer:** service helper
@@ -1021,7 +1025,7 @@ export type ChallengeData =
   | ---- | ------------------ | ------------------------------------- | ----- | ---- | ----------------- |
   | `invitation` | invitation, inviter (may be null) | the invitation isn't `pending` or has expired | in a short transaction: `generateToken("invitation")`; F-13 `setToken(hash, now, null)`. The plain token exists only in memory | `<origin>/invite#t=<token>` | invited email; inviter's locale, else `en` |
   | `password_reset` / `password_set` | reset row + user | the reset is used, invalidated or expired, or the user is closed (`pending_deletion` not `self`) | `generateToken("reset")`; F-14 `setToken` | `<origin>/reset-password#t=<token>` | user; user's locale. `password_set` when the user has no password |
-  | `invitation_cap_failed` | invitation + inviter | there's no inviter | none | none | inviter (and, as a second send, the owner if different); recipient's locale |
+  | `invitation_cap_failed` | invitation; the inviter or the owner per `recipient` | that recipient doesn't exist (an erased inviter; no owner yet) | none | none | the one recipient named in the payload; their locale. F-41 enqueues **one job per recipient** (S-11): `recipient: "inviter"` when the invitation has an inviter, and `recipient: "owner"` when an owner exists and isn't the inviter. A retry resends only its own email. |
   | `export_ready` | export + user | the export isn't `ready` | none | `<origin>/settings/data` | user |
   | `session_reuse_signed_out` | session + user | the user doesn't exist | none | `<origin>/settings/security` | user; `{device}` = device label |
   | every other kind (incl. `account_closed_owner`) | user | the user doesn't exist | none | per §7.2 | user |
@@ -1043,7 +1047,7 @@ export type ChallengeData =
 
   | Name | Payload (zod) | Policy | Retry | Cron |
   | ---- | ------------- | ------ | ----- | ---- |
-  | `identity.email-send` | `{ kind: z.enum(EMAIL_KINDS), refId: UuidSchema }` | standard | limit 5, delay 60 s, backoff | — |
+  | `identity.email-send` | `{ kind: z.enum(EMAIL_KINDS), refId: UuidSchema, recipient: z.enum(["inviter", "owner"]).optional() }` (`recipient` only for `invitation_cap_failed`) | standard | limit 5, delay 60 s, backoff | — |
   | `identity.export-build` | `{ exportId: UuidSchema }` | standard | limit 3, delay 60 s, backoff; `expireInSeconds 1800` | — |
   | `identity.erasure-sweep` | `{}` | singleton | limit 2 | `*/15 * * * *` |
   | `identity.erase-user` | `{ userId: UuidSchema, replay: z.boolean() }` | stately (`singletonKey` = user ID) | limit 10, delay 60 s, backoff | — |
@@ -1160,7 +1164,7 @@ export type ChallengeData =
      1. Lock the invitation by token hash; apply F-40's checks 3 to 6 (same errors). An expiry flip commits in its own transaction before throwing.
      2. Lock settings (F-15 `getForUpdate`).
      3. A user with that email exists (any status) → `INVITATION_USED { recent: false }`.
-     4. **Cap:** `countAll(users) + 1 > userCap` → roll back. Then, in a **separate** transaction, enqueue `email-send { kind: "invitation_cap_failed", refId: invitationId }`. Then throw `USER_CAP_REACHED`.
+     4. **Cap:** `countAll(users) + 1 > userCap` → roll back. Then, in a **separate** transaction, enqueue one `email-send { kind: "invitation_cap_failed", refId: invitationId, recipient }` per recipient as F-32 defines (the owner is told even when the inviter is gone). Then throw `USER_CAP_REACHED`.
      5. **Google method:** F-12 `findByTokenHashForUpdate("google_signup", hashToken(ticket))`. It must exist, be unconsumed and unexpired, and have `invitationId` equal to this invitation; otherwise → `SIGNUP_TICKET_INVALID`. The claims' email is banned → `GOOGLE_ACCOUNT_NOT_ALLOWED`. F-9 `findGoogleBySub(claims.sub)` exists → `GOOGLE_ACCOUNT_IN_USE`.
      6. Insert the user:
         - new UUIDv7, `email` = the invited email, `emailVerifiedAt = now`;
@@ -1251,13 +1255,14 @@ Not identity's: the laptop wrapper is P-F-178's `bootstrap-owner` subcommand (A-
 
     Apply `rehash` if given. Returns `two_step_required`. The pending Google link is **not** committed (D-7 rule 2).
   - **Otherwise:** call F-52's commit step `completeSignIn(h, { user, method, pendingLink, delivery, deviceToken, req })`:
+    0. Re-read the user `FOR UPDATE`. The user is gone, or `pending_deletion` with `requestedBy ≠ self`, or the email is now banned → `ACCOUNT_CLOSED`, and no session is issued (S-2). This covers a ban or owner deletion landing between the first and second factor.
     1. If `pendingLink`: F-9 `insertGoogle`, then F-20 `google_linked_auto` with email `google_linked`.
     2. Apply `rehash`.
     3. F-23 `createSession(authMethod = method)`.
     4. F-20 `sign_in_succeeded`.
     5. Returns `signed_in` with `recoveryCodesLeft: null`.
   - Metric `auth_sign_in_total{method, error_key: "none"}` once signed in.
-- **Errors:** database errors. A `23505` on `google_identities_sub_key` or `_user_key` while committing a pending link → `GOOGLE_ACCOUNT_IN_USE` (a race).
+- **Errors:** `ACCOUNT_CLOSED` (step 0). A `23505` on `google_identities_sub_key` or `_user_key` while committing a pending link → `GOOGLE_ACCOUNT_IN_USE` (a race).
 
 #### F-52: `verifyTwoStepAtSignIn` and `completeSignIn`
 - **File:** `identity/signInService.ts` · **Layer:** service
@@ -1465,7 +1470,7 @@ Not identity's: the laptop wrapper is P-F-178's `bootstrap-owner` subcommand (A-
        3. `revokeAllSessionsTx(…, "password_reset")`.
        4. F-23 `createSession(authMethod "reset")`.
        5. F-20 `password_reset` with email `password_changed` (or `password_added` when there was none).
-- **Errors:** `RESET_LINK_INVALID`, `PASSWORD_TOO_WEAK`, `TWO_STEP_CODE_INVALID`, `RATE_LIMITED`.
+- **Errors:** `RESET_LINK_INVALID`, `PASSWORD_TOO_WEAK`, `TWO_STEP_CODE_INVALID`, `VALIDATION_FAILED` (both or neither factor), `RATE_LIMITED`.
 
 #### F-73: `changePassword`
 - **Signature:** `export async function changePassword(deps, principal, input: { newPassword: string; signOutOthers: boolean }): Promise<{ revokedOthers: number }>`
@@ -1527,7 +1532,7 @@ Not identity's: the laptop wrapper is P-F-178's `bootstrap-owner` subcommand (A-
 
      | Intent | Requirements |
      | ------ | ------------ |
-     | `sign_in` | `principal` must be null (the public procedure). |
+     | `sign_in` | Any principal present (F-24 also runs on public procedures) is ignored: a successful flow creates a new session and leaves the old one alone. No error (S-5). |
      | `sign_up` | F-40's checks on `invitationToken` (same errors); the challenge's `invitationId` = that invitation. |
      | `link` | `principal` is required (the `me.*` procedure); `requireConfirmed`. |
      | `confirm` | `principal` is required. `login_hint` = the linked Google email. The user has no linked Google → `GOOGLE_ACCOUNT_MISMATCH`. |
@@ -1653,7 +1658,7 @@ Not identity's: the laptop wrapper is P-F-178's `bootstrap-owner` subcommand (A-
     | ----- | ---- | ---------- |
     | `displayName` | NFC, trimmed; 1 to 80 characters; no `\p{Cc}` | `too_small`, `too_big` or `invalid_format` |
     | `locale` | In `SUPPORTED_LOCALES` (plus `PSEUDO_LOCALES` when `APP_ENV` is `development` or `test`) | `unsupported_locale` |
-    | `timeZone` | `new Intl.DateTimeFormat("en", { timeZone })` doesn't throw, and the name isn't `"Etc/Unknown"` | `invalid_time_zone` |
+    | `timeZone` | `new Intl.DateTimeFormat("en", { timeZone })` doesn't throw, and the name isn't `"Etc/Unknown"`; the value stored is the canonical name `resolvedOptions().timeZone` (for example `"Asia/Calcutta"` → `"Asia/Kolkata"` where the runtime canonicalises) (S-6) | `invalid_time_zone` |
     | `baseCurrency` | Exists in `currencies` with `is_active` | `unknown_currency` |
 
   - **`updateProfile`:**
@@ -1673,9 +1678,9 @@ Not identity's: the laptop wrapper is P-F-178's `bootstrap-owner` subcommand (A-
 - **Behaviour** (inside the caller's transaction). Checks run in this exact order and the first failure throws:
   0. Hit `invite.user` (20 a day per inviter, HLD D-18; F-29), before any other check, also for owners and for F-99. Over the limit → `RATE_LIMITED`.
   1. `email = normaliseEmail`; `!isValidEmail` → `VALIDATION_FAILED` (path `email`, code `invalid_email`).
-  2. Lock the inviter (F-8). Missing, or `pending_deletion` → `INVITATIONS_DISABLED`.
-  3. The inviter isn't the owner and `ports.invitePolicy.canSendInvitations` is false → `INVITATIONS_DISABLED`.
-  4. F-15 `getForUpdate` (lock settings).
+  2. F-15 `getForUpdate` (lock settings). **Lock order** (S-1): settings first, then nothing on `users`. The inviter is read without a row lock, so the order matches F-41, which holds settings and then takes the `KEY SHARE` lock on the inviter through the `invited_by_user_id` FK; the two can't deadlock.
+  3. Read the inviter (F-8, no lock). Missing, or `pending_deletion` → `INVITATIONS_DISABLED`.
+  4. The inviter isn't the owner and `ports.invitePolicy.canSendInvitations` is false → `INVITATIONS_DISABLED`. (S-15) The switch is checked before the ban and existing-user checks, although the HLD lists it after them. An inviter who isn't allowed to invite then learns nothing about whether an address is banned or already a user, and the cheaper check runs first. The order of the remaining checks is the HLD's.
   5. F-13 `expireDueForEmail(email, now)`; publish `invitation-ended` for each.
   6. Banned → `EMAIL_NOT_INVITABLE`. A user with that email: `pending_deletion` → `EMAIL_NOT_INVITABLE`; `active` → `ALREADY_A_USER`.
   7. F-13 `findPendingByEmail` → `INVITATION_PENDING { ownInvitationId: row.inviterUserId === inviterId ? row.id : null }`.
@@ -1701,9 +1706,9 @@ Not identity's: the laptop wrapper is P-F-178's `bootstrap-owner` subcommand (A-
 - **Behaviour:**
   1. Lock the invitation. Missing, or the inviter isn't the caller → `NOT_FOUND`.
   2. `expireIfDue` (publish if it flips) → then: `expired` → `INVITATION_EXPIRED`; not `pending` → `CONFLICT { reason: "not_pending" }`.
-  3. Hit `invite.resend` (subject: invitation ID) → `RESEND_LIMIT_REACHED` when over (the router maps the limiter's error to this key).
-  4. Set `expiresAt = now + INVITATION_TTL` and `send_failed_at = null`; enqueue `email-send { invitation }`, whose handler issues the new token (the old one is replaced). Returns the new expiry.
-  - The ban list is re-checked: banned → revoke, then `EMAIL_NOT_INVITABLE`.
+  3. The email is banned → revoke the invitation (publish `invitation-ended { revoked }`), commit, then throw `EMAIL_NOT_INVITABLE`.
+  4. Hit `invite.resend` (subject: invitation ID) → `RESEND_LIMIT_REACHED` when over (the router maps the limiter's error to this key).
+  5. Set `expiresAt = now + INVITATION_TTL` and `send_failed_at = null`; enqueue `email-send { invitation }`, whose handler issues the new token (the old one is replaced). Returns the new expiry.
 
 #### F-98: `revokeInvitation`
 - **Signature:** `export async function revokeInvitation(deps, principal, invitationId: string): Promise<void>`
@@ -1830,7 +1835,7 @@ Not identity's: the laptop wrapper is P-F-178's `bootstrap-owner` subcommand (A-
 - **Behaviour:**
   1. In a short transaction, read the user `FOR UPDATE` (the lock F-117 and F-125's cancel take).
      - Absent: delete the export prefix (P-F-140 `deletePrefix("exports", "users/<id>/")`) and return `absent`.
-     - Not replay, and not (`pending_deletion` ∧ `scheduledFor ≤ now`) → `skipped` (cancelled before it was due).
+     - Not replay, and not (`pending_deletion` ∧ (`requestedBy = ban` ∨ `scheduledFor ≤ now`)) → `skipped` (cancelled before it was due). A ban is always due, whatever the clocks of the API and the worker say (S-3).
      - Because cancels are refused once `scheduledFor ≤ now` (F-117, F-125), a user that passes this check can't be reactivated during the remaining steps.
   2. Not replay: P-F-146 `erasureLog.append({ userId, erasedAt: now })`. A failure propagates (retry; nothing deleted).
   3. For each `ErasureParticipant` in order: `withTransaction(erase(h, userId, { requestedBy: user.deletionRequestedBy, replay }))`.
@@ -1853,20 +1858,20 @@ Not identity's: the laptop wrapper is P-F-178's `bootstrap-owner` subcommand (A-
 - **Signature:**
   ```ts
   export interface OwnerServices {
-    listUsers(owner: Principal, q: { cursor: string | null; limit: number; status?: "active" | "pending_deletion" }): Promise<{ items: OwnerUserItem[]; nextCursor: string | null }>;
-    listInvitations(owner: Principal, q: { cursor: string | null; limit: number; status?: InvitationRow["status"]; inviterUserId?: string }): Promise<{ items: OwnerInvitationItem[]; nextCursor: string | null }>;
-    revokeInvitation(owner: Principal, invitationId: string): Promise<void>;
-    setUserCap(owner: Principal, cap: number): Promise<void>;
-    setInviteAllowance(owner: Principal, userId: string, allowance: number | null): Promise<void>;
-    requestDeletionByOwner(owner: Principal, userId: string): Promise<{ deletionScheduledFor: Temporal.Instant }>;
-    cancelDeletionByOwner(owner: Principal, userId: string): Promise<void>;
-    banEmail(owner: Principal, email: string): Promise<{ userId: string | null; alreadyBanned: boolean }>;
-    liftBan(owner: Principal, email: string): Promise<void>;
-    resetTwoStepByOwner(owner: Principal, userId: string): Promise<void>;
+    listUsers(owner: Principal, h: DbHandle | undefined, q: { cursor: string | null; limit: number; status?: "active" | "pending_deletion" }): Promise<{ items: OwnerUserItem[]; nextCursor: string | null }>;
+    listInvitations(owner: Principal, h: DbHandle | undefined, q: { cursor: string | null; limit: number; status?: InvitationRow["status"]; inviterUserId?: string }): Promise<{ items: OwnerInvitationItem[]; nextCursor: string | null }>;
+    revokeInvitation(owner: Principal, h: DbHandle | undefined, invitationId: string): Promise<void>;
+    setUserCap(owner: Principal, h: DbHandle | undefined, cap: number): Promise<void>;
+    setInviteAllowance(owner: Principal, h: DbHandle | undefined, userId: string, allowance: number | null): Promise<void>;
+    requestDeletionByOwner(owner: Principal, h: DbHandle | undefined, userId: string): Promise<{ deletionScheduledFor: Temporal.Instant }>;
+    cancelDeletionByOwner(owner: Principal, h: DbHandle | undefined, userId: string): Promise<void>;
+    banEmail(owner: Principal, h: DbHandle | undefined, email: string): Promise<{ userId: string | null; alreadyBanned: boolean }>;
+    liftBan(owner: Principal, h: DbHandle | undefined, email: string): Promise<void>;
+    resetTwoStepByOwner(owner: Principal, h: DbHandle | undefined, userId: string): Promise<void>;
   }
   export function createOwnerServices(deps: IdentityDeps): OwnerServices;
   ```
-- **Behaviour:** every method first checks `owner.isOwner`, else `FORBIDDEN`. `admin`'s `ownerProcedure` already guarantees it; this is defence in depth. Each is one transaction:
+- **Behaviour:** every method first checks `owner.isOwner`, else `FORBIDDEN`. `admin`'s `ownerProcedure` already guarantees it; this is defence in depth. With `h` given (it must be in a transaction, else `Error("owner service requires a transaction")`), the method runs inside the caller's transaction, so `admin` can write its audit record atomically (S-4). With `h` undefined, it opens its own. Each method's work is one transaction:
 
   | Method | Effects | Errors |
   | ------ | ------- | ------ |
@@ -2110,7 +2115,7 @@ flowchart TD
 | Procedure | Route | Auth | Handler | Input | Output | Errors |
 | --------- | ----- | ---- | ------- | ----- | ------ | ------ |
 | `invitations.list` | `GET /invitations?cursor&limit` | authed | F-96 | `listInput({})` (P-F-344; query parameters) | `listOutput(InvitationItem)`: `{ id, email, status: "pending" \| "accepted" \| "revoked" \| "expired", expiresAt, createdAt, acceptedAt: nullable, sendState: "sending" \| "sent" \| "failed" }` | `VALIDATION_FAILED` (cursor) |
-| `invitations.allowance` | `GET /invitations/allowance` | authed | F-96 | — | `{ enabled: boolean, remaining: number \| null, userCapReached: boolean }` | — |
+| `invitations.allowance` | `GET /invitations/allowance` | authed | F-96 | — | `{ enabled: boolean, remaining: z.number().int().min(0).nullable(), userCapReached: boolean }` | — |
 | `invitations.create` | `POST /invitations` (P-F-343 create, `Idempotency-Key`) | authed | F-95 via P-F-102 | `{ email: EmailInput }` | `201 { id, createdAt }` | `VALIDATION_FAILED` (`invalid_email`), `INVITATIONS_DISABLED`, `EMAIL_NOT_INVITABLE`, `ALREADY_A_USER`, `INVITATION_PENDING { ownInvitationId: uuid \| null }`, `INVITE_ALLOWANCE_EXHAUSTED`, `USER_CAP_REACHED`, `IDEMPOTENCY_KEY_REUSED`, `RATE_LIMITED` (`invite.user`) |
 | `invitations.resend` | `POST /invitations/{id}/resend` | authed | F-97 | `{ id: UuidSchema }` (path) | `{ expiresAt }` | `NOT_FOUND`, `INVITATION_EXPIRED`, `CONFLICT { reason: "not_pending" }`, `EMAIL_NOT_INVITABLE`, `RESEND_LIMIT_REACHED` |
 | `invitations.revoke` | `POST /invitations/{id}/revoke` | authed | F-98 | `{ id }` (path) | `{ ok: true }` | `NOT_FOUND`, `CONFLICT { reason: "not_pending" }` |
@@ -2633,7 +2638,8 @@ Status for all: not started.
 | Rehash on parameter change | happy | Stored hash upgraded | TP-3.5 |
 | Two-step required hands back a challenge | happy | Challenge row and cookie or token | TP-3.6 |
 | Refresh R1 to R4 including both 60 s windows, the active-device case, and option (a) races in each response order | happy and unhappy | F-25 table | TP-3.8 to TP-3.18, TP-3.50 to TP-3.52 |
-| Web device cookie (P-9); `requireConfirmed(ctx, maxAgeSeconds)` | happy and unhappy | F-36, F-28 | TP-3.28, TP-3.29 |
+| Web device cookie (P-9); `requireConfirmed(ctx, maxAgeSeconds)`; link race; closure between factors | happy and unhappy | F-36, F-28, F-51 | TP-3.28 to TP-3.31 |
+| Loading, error, empty and long-list states per screen | unhappy | HLD §4.4 | TP-3.53 |
 | Sign-out; sessions list and revocation; step-up with a password | happy and unhappy | F-53 to F-55 | TP-3.19 to TP-3.22 |
 | `me.get`; `auth.methods`; purge | happy | F-56, F-58, F-130 | TP-3.23 to TP-3.25 |
 | Login CSRF | unhappy | `FORBIDDEN` | TP-3.26 |
@@ -2922,6 +2928,8 @@ Types: **U** unit, **I** integration (real Postgres, in-process HTTP), **E** end
 | TP-3.27 | S-3 | I | privacy | canaries | Sign in with a canary email and password (wrong and right); refresh | Scan clean |
 | TP-3.28 | S-3 | I + E | P-9 web device cookie | user U signed in once on a browser (device cookie set, `Path=/api/v1`) | (I) 30 wrong attempts for U's email from IPs without the cookie, then U's correct password with the cookie; with a cookie belonging to another user; (E) the same from the browser after signing out | (I) unknown-device bucket exhausted; with U's cookie → `signed_in` (counted on `signin.email-device`); another user's cookie → `RATE_LIMITED`; (E) sign-out keeps the device cookie and the next sign-in succeeds |
 | TP-3.29 | S-3 | U | F-28 `requireConfirmed(ctx, maxAgeSeconds)` | session confirmed 5 min ago | `maxAgeSeconds` 600; 240; 0; 601 | passes; `CONFIRMATION_REQUIRED`; `RangeError`; `RangeError` |
+| TP-3.30 | S-3 | I | F-51 `23505` race | U with verified email e, no Google; two concurrent Google sign-in completions for the same sub (via F-86) | Run both | One `signed_in` with the link; the other `GOOGLE_ACCOUNT_IN_USE`; one `google_identities` row |
+| TP-3.31 | S-3 | I | S-2 | user with two-step; a pending challenge | Ban the email (F-125), then verify the right code | `ACCOUNT_CLOSED`; no session |
 | TP-3.40 | S-3 | E | F-152 | signed-out browser | Open `/settings` | Wordmark screen, then `/sign-in?next=/settings` |
 | TP-3.41 | S-3 | E | F-150 | signed in; server clock advanced past idle expiry | Click a settings link | `/sign-in?reason=ended…` with "Your session ended. Sign in again." |
 | TP-3.42 | S-3 | E | §8.1 | none | Open `/sign-in?reason=reuse` | "For your security, you've been signed out. Sign in again." |
@@ -2933,6 +2941,7 @@ Types: **U** unit, **I** integration (real Postgres, in-process HTTP), **E** end
 | TP-3.50 | S-3 | E | F-25 R3, order A-then-B | signed-in page; Playwright routes on `/api/v1/auth/refresh` | From `page.evaluate`, send two refreshes with the same cookie (bypassing F-150's lock); release response B first and A last, so the cookie jar ends with A's token, which the server discarded | The next `me.get` → 401 → F-150 refreshes with A's token within 60 s → 200 (R3); the user stays signed in; no reuse email |
 | TP-3.51 | S-3 | E | F-25, order B-then-A | as TP-3.50 | Release A first, B last (the jar ends with the current token) | The next refresh is R1; signed in; no email |
 | TP-3.52 | S-3 | E | F-25 boundary | as TP-3.50 with the server clock controllable | As TP-3.50, but advance the clock 60.001 s after the discard before the next refresh | Session revoked; `/sign-in?reason=ended`; a `session_reuse_signed_out` email in `/__test/emails` |
+| TP-3.53 | S-3+ | E | HLD §4.4 states | MSW-style route interception per screen (extended by each slice for its screens) | For S-1, S-2, S-3/S-4, S-5 to S-7, S-9, S-10, S-12, S-13, S-14, S-16: delay the screen's first request 2 s, then fail it with `INTERNAL`; for list screens, return 0 items and then 60 items | The loading state (skeleton, spinner or `aria-busy`) and the error state (inline or P-F-209's fallback) per §4.4 and §8.1; the empty-state text; long lists render without overflow |
 | TP-3.48 | S-3 | A | F-201, F-204, F-205, F-208, F-218 | fakes; PA-8 DAO | Sign in; sign out; sign in again with the same email; outbox with 3 entries owned by X then sign in as Y; owner null with 2 entries then sign in as X; no entries and owner null; discard; cancel; one-tap on second launch after a Google sign-in; sign-out with 2 pending | Tokens and device token saved, `kick()` called; after `clear()` the device token, `lastEmail` and `outboxOwnerUserId` remain; the second sign-in sends the stored `deviceToken`; `AskDiscard(3)`; `AskDiscard(2)`; `Proceed` and owner set; `deleteAll()` called and owner Y; entries and owner X unchanged; one-tap requested once; dialog with count 2 and `outboxOwnerUserId` unchanged after sign-out |
 | TP-3.49 | S-3 | A | F-207 | no stored session; stored session with `me` 200; `Ended` event | Start | `SignedOut`; `SignedIn`; `SignedOut(Ended)` |
 | TP-4.1 | S-4 | U | F-60 | secret `12345678901234567890` | `totpAt` at times 59, 1111111109, 1111111111, 1234567890, 2000000000, 20000000000 | 287082, 081804, 050471, 005924, 279037, 353130 |
@@ -2963,7 +2972,7 @@ Types: **U** unit, **I** integration (real Postgres, in-process HTTP), **E** end
 | TP-5.5 | S-5 | I | F-72 two-step | two-step user | No factor; 5 wrong codes; a fresh link with the right code | `VALIDATION_FAILED`; `attemptsLeft` 4…1 then `RESET_LINK_INVALID { too_many_codes }`; success |
 | TP-5.6 | S-5 | I | F-72 + D-8 | two-step user with the TOTP limiter exhausted | Reset with a recovery code | Success |
 | TP-5.7 | S-5 | I | F-72 | valid link | Weak new password; then a good one | `PASSWORD_TOO_WEAK`; the link still works |
-| TP-5.8 | S-5 | I | F-73 | user with a password, 2 sessions, an outstanding link | Without step-up; same password; with `signOutOthers` false; true | `CONFIRMATION_REQUIRED`; `PASSWORD_REUSED`; 0 revoked; 2 revoked; link invalidated; email |
+| TP-5.8 | S-5 | I | F-73 | user with a password, 2 sessions, an outstanding link; a Google-only user | Without step-up; same password; with `signOutOthers` false; true; the Google-only user (with step-up) | `CONFIRMATION_REQUIRED`; `PASSWORD_REUSED`; 0 revoked; 2 revoked; link invalidated; email; `PASSWORD_REQUIRED` |
 | TP-5.9 | S-5 | I | F-74 | Google-only user; user with a password | Add with step-up; add for the other | Added, no revocation, email; `PASSWORD_ALREADY_SET` |
 | TP-5.10 | S-5 | E | F-157, F-158 | user | Forgot → open the emailed link (from `/__test/emails`) → new password | Signed in; toast; "Send it again" disabled for 60 s |
 | TP-5.11 | S-5 | E | F-164 | signed in | Change password (step-up dialog with password) | Toast "Password changed." |
@@ -2975,7 +2984,7 @@ Types: **U** unit, **I** integration (real Postgres, in-process HTTP), **E** end
 | TP-6.5 | S-6 | I | F-86 sign_in | users: linked; linked but owner-closed; U with email e (no Google); U2 with another Google | Claims: linked sub; closed sub; unverified e; unverified unknown address; verified unknown; verified e; verified U2's email; banned email | Signed in; `ACCOUNT_CLOSED`; `GOOGLE_EMAIL_UNVERIFIED` with **byte-identical** bodies for the two unverified cases; `GOOGLE_ACCOUNT_UNKNOWN { email }`; linked + signed in + event + email; `GOOGLE_OTHER_ACCOUNT_LINKED`; `GOOGLE_ACCOUNT_NOT_ALLOWED` |
 | TP-6.6 | S-6 | I | D-7 rule 2 | U with two-step, email e, no Google | Google sign-in with verified e; then 5 wrong codes; then a new flow with the right code | `two_step_required` and no `google_identities` row; still none after the failures; row created on success with event `google_linked_auto` and email |
 | TP-6.7 | S-6 | I | F-86 sign_up, F-41 | invitations I1, I2 | Sign-up flow for I1 → ticket; accept I1 with it; accept I2 with an I1 ticket; ticket after 30 min + 1 ms; reuse after success; sub linked meanwhile; Google email banned meanwhile; Google email ≠ invited email | User with the invited email, a Google identity, no password; `SIGNUP_TICKET_INVALID` ×3; `GOOGLE_ACCOUNT_IN_USE`; `GOOGLE_ACCOUNT_NOT_ALLOWED`; user email = invited email |
-| TP-6.8 | S-6 | I | link | user U signed in on sessions A and B | `me.googleStart(link)` without step-up; with it; complete from session B; complete from A; link again (same sub); a sub linked to someone else; U already linked to another | `CONFIRMATION_REQUIRED`; URL; `GOOGLE_SIGNIN_FAILED`; linked + email; `linked` no-op; `GOOGLE_ACCOUNT_IN_USE`; `GOOGLE_OTHER_ACCOUNT_LINKED` |
+| TP-6.8 | S-6 | I | link | user U signed in on sessions A and B | `me.googleStart(link)` without step-up; with it; complete from session B; complete from A; link again (same sub); a sub linked to someone else; U already linked to another; link a Google account whose email is banned | `CONFIRMATION_REQUIRED`; URL; `GOOGLE_SIGNIN_FAILED`; linked + email; `linked` no-op; `GOOGLE_ACCOUNT_IN_USE`; `GOOGLE_OTHER_ACCOUNT_LINKED`; `GOOGLE_ACCOUNT_NOT_ALLOWED` |
 | TP-6.9 | S-6 | I | confirm | Google-only U | Start `confirm` with no linked Google (other user); claims with another sub; `iat` 6 min old; valid | `GOOGLE_ACCOUNT_MISMATCH`; `GOOGLE_ACCOUNT_MISMATCH { email }`; `GOOGLE_SIGNIN_FAILED`; `confirmed`, `confirmedAt = now` |
 | TP-6.10 | S-6 | I | F-84, F-85 | Android client IDs configured | Nonce → ID token with `azp` = Android client; reuse the nonce; use a `me` nonce on `auth.googleAndroid`; `azp` = web client; no Android IDs configured | Signed in; `GOOGLE_SIGNIN_FAILED` ×3; `GOOGLE_UNAVAILABLE` |
 | TP-6.11 | S-6 | I | F-87 | users: linked with password; linked Google-only; not linked | Disconnect with step-up each | Removed + email; `PASSWORD_REQUIRED`; `NOT_FOUND` |
@@ -3040,10 +3049,10 @@ Types: **U** unit, **I** integration (real Postgres, in-process HTTP), **E** end
 | TP-12.6 | S-12 | I | liftBan | banned email; unknown email | Lift | Removed; `NOT_FOUND` |
 | TP-12.7 | S-12 | I | resetTwoStepByOwner | two-step user with sessions; user without | Reset | Two-step removed, sessions revoked, email; `CONFLICT { two_step_off }` |
 | TP-12.8 | S-12 | I | revokeInvitation | V's pending invitation; accepted one | Revoke as owner | Revoked + event; `CONFLICT` |
-| TP-M.1 | S-3 | M | laptop | stage-0 stack | Sign in on the laptop's browser (tailnet origin) and on the phone (stage-0 build) | Works; sessions listed with device labels |
+| TP-M.1 | S-3 | M | laptop and phone | stage-0 stack | Sign in on the laptop's browser (tailnet origin) and on the phone (stage-0 build); force-stop and reopen the app; open the two-step setup screen and try a screenshot; sign in with a password and accept Credential Manager's offer to save it; sign out and reopen after a Google sign-in | Works; still signed in after the restart; the screenshot is blocked (`FLAG_SECURE`); the password is saved; one-tap offers the Google account; sessions listed with device labels |
 | TP-M.2 | S-6 | M | laptop, real Google | sign-in client configured | Web Google sign-in from the tailnet origin on the laptop; Android Google sign-in | Both work; the phone's browser shows the note |
 | TP-M.3 | S-4 | M | phone | real authenticator | Enrol via QR (web) and via **Open in authenticator app** (Android) | Codes accepted |
-| TP-M.4 | S-2 | M | laptop | fresh install | `budmon-local bootstrap-owner --email …` | Link printed; owner created |
+| TP-M.4 | S-2 | M | laptop | fresh install | `budmon-local bootstrap-owner --email …`, then `docker logs budmon-main-api-1 2>&1 \| grep -c bmi_` (and the same for every container) | Link printed; owner created; the count is 0 for every container |
 | TP-M.5 | S-0 | M | laptop | Mailpit | Trigger an invitation and a reset | Emails visible at `http://127.0.0.1:8025`; links work |
 | TP-M.6 | S-0 | M | DV-7 | the laptop's Edge | Sign in on `http://localhost:8080` and on the tailnet origin | Signed in on both; devices listed |
 

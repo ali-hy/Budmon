@@ -1,7 +1,7 @@
 ---
 module: identity
 doc: lld-brief
-summarises: lld.md v0.2
+summarises: lld.md v0.3
 ---
 
 # Identity: LLD brief
@@ -43,9 +43,11 @@ Deliberately left out: changing your email address, passkeys, other sign-in prov
 | 8 | **Five new platform requests (PA-7 to PA-11)** the platform planner must apply before the slices that need them: a proper file name for export downloads (PA-7, S-10); a "delete all" for Android's offline queue (PA-8, S-3); Google sign-in in the release rehearsal (PA-9, S-6's rehearsal test); the rehearsal's email privacy check (PA-10, S-1's rehearsal test); and named spots in the platform where modules plug in (PA-11, S-0). | Small and specific, but the build waits for them. | §1.1 |
 | 9 | **Reset links open in the phone's browser for the MVP** (LD-9). Your delegated decision Q-1 (a); **needs user confirmation**. | The Android app doesn't open reset links itself. | §1 LD-9 |
 | 10 | **Two tabs refreshing at once never sign you out** (DV-9). The reviewer's option (a), taken under your delegation, changes the approved HLD's wording for one case of D-3. Theft detection is unchanged. | The HLD's D-3 text should be updated to match next time it's revised. | §1 DV-9, F-25 |
-| 11 | **Other recorded deviations:** no separate "event fan-out" job (DV-6); Edge checked by you rather than automatically (DV-7); the module's files are flat in one folder so the platform's checks cover them (DV-8). | Low impact; listed for completeness. | §1 |
-| 12 | **Manual checks only you can do** (TP-M.1 to TP-M.6): signing in on the laptop and phone, real Google sign-in (web from the laptop; Android), a real authenticator app, the bootstrap command on Windows, Mailpit emails, and sign-in in Edge. | The build environment has no Windows, Android SDK, real Google or real SMTP. | §10.1 |
-| 13 | **Before the first invitation (stage-1 gate):** register the Google sign-in client and Android client IDs, choose the email provider, and set the `budmon.com` redirect. | Configuration only; no code change. | §7.1, §7.2 |
+| 11 | **Google sign-in errors land on the sign-in page.** When Google returns to Budmon with an unknown or expired request, you land on `/sign-in` with "Google sign-in didn't complete. Try again." (as the HLD says). Errors on a known request return to the page that started it. | What you'll see when something goes wrong mid-way. | F-82 |
+| 12 | **Admin can record its audit entry in the same step** as each owner action (delete, ban, reset two-step, and so on), and the user-cap email reaches you even when the inviter's account is gone. | Fits the admin portal built next. | F-125, F-32 |
+| 13 | **Other recorded deviations:** no separate "event fan-out" job (DV-6); Edge checked by you rather than automatically (DV-7); the module's files are flat in one folder so the platform's checks cover them (DV-8). | Low impact; listed for completeness. | §1 |
+| 14 | **Manual checks only you can do** (TP-M.1 to TP-M.6): signing in on the laptop and phone, real Google sign-in (web from the laptop; Android), a real authenticator app, the bootstrap command on Windows, Mailpit emails, and sign-in in Edge. | The build environment has no Windows, Android SDK, real Google or real SMTP. | §10.1 |
+| 15 | **Before the first invitation (stage-1 gate):** register the Google sign-in client and Android client IDs, choose the email provider, and set the `budmon.com` redirect. | Configuration only; no code change. | §7.1, §7.2 |
 
 ## 3. Data
 
@@ -126,13 +128,13 @@ Nothing that grants access is stored in a usable form. Passwords are hashed; tok
 
 ## 7. Testing
 
-About 215 test cases:
+About 216 test cases:
 
 | Type | Count | What |
 | ---- | ----- | ---- |
-| Integration | ~130 | Real Postgres, in-process HTTP, the jobs, a fake Google with real signed tokens, and an in-memory mailbox |
+| Integration | ~135 | Real Postgres, in-process HTTP, the jobs, a fake Google with real signed tokens, and an in-memory mailbox |
 | Unit | ~30 | Server, web and Android |
-| End-to-end | ~25 | Playwright in Chromium, with a fake Google and a test mailbox; the stage-0 rehearsal |
+| End-to-end | ~30 | Playwright in Chromium, with a fake Google and a test mailbox; the stage-0 rehearsal |
 | Manual | 6 | The owner, on the laptop and phone |
 
 What the tests cover:
