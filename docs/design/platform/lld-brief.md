@@ -1,7 +1,7 @@
 ---
 module: platform
 doc: lld-brief
-summarises: lld.md v0.19
+summarises: lld.md v0.20
 ---
 
 # Platform: LLD brief
@@ -55,6 +55,7 @@ The code stage 1 needs is built now (the HLD's rule: moving off the laptop must 
 | 3g | **How the server is packaged for running (planner decision A-43), plus two safety checks (A-44, A-45).** The server is shipped as one bundled program built by `esbuild` in S-2: Budmon's own shared code is built into it, and outside libraries are installed alongside. Nothing else changes for development or tests, and Android has nothing to build. Money maths now cleans up or refuses malformed fractions (a zero bottom number is refused; a negative one is flipped to an equal value) (A-44). The canonical JSON writer refuses a structure that contains itself instead of crashing (A-45). | Without A-43 the server image couldn't start. | §Amendments A-43 to A-45 |
 | 3h | **Tightening after S-1 QA (planner decisions A-46 to A-48).** Conversions refuse impossible decimal counts and allocation refuses non-integer weights with clear errors (A-46). Money values hide their amount even from generic object inspection, and reject malformed currency codes (A-47). The canonical JSON writer refuses absurdly deep input instead of crashing (A-48). Left as they are, on purpose: locale tags must use the standard hyphenated form (callers convert `ar_EG` or browser headers first), and the script part of a tag (`zh-Hant`) is ignored while Budmon offers no such languages; formatting trusts the currency's decimals from Budmon's own currency table rather than the browser's opinion. | No product change. | §Amendments A-46 to A-48 |
 | 3i | **Answers to the S-2 test questions (planner decisions A-49 to A-63).** Mostly sequencing and precision: what the database set-up step does in S-2 and what S-6 adds (A-49); the "push" set-up only works on an empty database, as designed (A-50); logging and trace checks land in the slices that build them (A-51, A-55: the "server answers healthy" check moves to S-4); exact error fields (A-52); the test rule on administrator database access reworded to match reality (A-53); the reset tool's inputs and test entry point defined (A-54, A-58, A-59); the server bundle builds whichever entry points exist yet (A-56, A-62); configuration gains explicit fields for Gmail's return address and the e-mail encryption mode (A-57); the test database image and the production database image are pinned to the same exact version, with a check (A-61). On a fresh clone, `pnpm dev` creates your `.env` from the example file the first time, so it works with no manual setup (A-63). | No product change. | §Amendments A-49 to A-63 |
+| 3j | **The engineer's S-2 choices, confirmed or settled (planner decisions A-64 to A-72).** The database reset tool reads your `.env` itself (A-64). Build-script exceptions for test tools sit in one settings file (A-65). Two small configuration-file fixes are confirmed (A-66, A-67). The server bundle never includes the development-only schema tool (A-68). The currency list's sources are named: ISO 4217 for codes and decimals, Unicode's English names for display (A-69). The mail catcher's image is pinned to the same exact version in development and on the laptop, and a test checks it (A-70). Smaller confirmations: the previous-password setting (A-71); seeding skips work while there's nothing to seed (A-72). | No product change. | §Amendments A-64 to A-72 |
 | 4 | **Q-1, decided: exchange rates before 2 March 2024 show "no rate".** The free backup rate source has no data before that date, so conversions dated earlier say "no rate" instead of guessing. This was the recommended default and went ahead with your go-ahead. | Matters only if you import old history. It can be extended later by an amendment, for example fetching older rates from Open Exchange Rates if its free plan includes them (not confirmed). | §11, F-132 |
 | 5 | **Q-2, deferred: an approval click on every release.** It belonged to the release-signing chain, which now starts at stage 1. In stage 0 nothing deploys from CI: a merged release PR only gets a tag, and you run `budmon-local upgrade` yourself, which is the approval. | Nothing to decide now; it comes back with the stage-1 design. | §11 Q-2 |
 | 6 | **One-time laptop setup by hand**, following `infra/runbooks/stage0-laptop.md`: WSL2 with Ubuntu (your user needs `sudo`), Docker Desktop (WSL2 backend, start at login), Tailscale on the laptop and phone (MagicDNS and HTTPS certificates switched on), two Backblaze B2 buckets for exports and the erasure log (free tier), a Sentry project and a Google OAuth client. Then `budmon-local install <tag>`: it creates the secret files, asks for a few settings (Tailscale name, bucket names, Sentry address, OAuth client id) and stops with a list of what's still missing. You run the Google Cloud script, paste each missing secret with `budmon-local secret set …`, and run `install` again; it finishes and prints the `tailscale serve` command. | No agent can or should do these. The install is resumable, and it refuses to start Budmon while anything is missing, so a skipped step shows up at once. `secret set` gives each file to the one container that reads it. | §2.2 runbook, F-175, F-178, F-179, F-191 |
@@ -174,14 +175,14 @@ The LLD's catalog has about 180 functions. They're grouped by area here; the rig
 
 ## 7. Testing
 
-About 266 test cases:
+About 268 test cases:
 
 | Type | Count | Notes |
 | ---- | ----- | ----- |
 | Unit | ~140 | Including 5 for the `budmon-local` and Google Cloud scripts. |
 | Integration | ~94 | Against a real Postgres database. |
 | End-to-end | 17 | Browser, Android emulator, and the rehearsal. |
-| Static checks | 22 | Configuration, workflow (including action pinning), dependency pins, root commands, line-ending and Android build checks. |
+| Static checks | 24 | Configuration, workflow (including action pinning), dependency pins, root commands, line-ending and Android build checks. |
 | Manual | 2 | First install and phone access; the Sentry test e-mail. |
 
 **What's covered:**
