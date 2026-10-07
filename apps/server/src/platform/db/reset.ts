@@ -1,5 +1,6 @@
 // F-20: the guarded development database reset, and the guarded seeding.
 import pg from "pg";
+import { parse as parseConnectionString } from "pg-connection-string";
 import { createDatabase } from "./client.js";
 import { bootstrapCluster } from "./clusterBootstrap.js";
 import { createStderrLogger } from "../observability/logger.js";
@@ -19,14 +20,27 @@ export class ResetRefusedError extends Error {
 
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]", "host.docker.internal"]);
 
+/** Whether pg would connect to a local server with this URL. `pg` lets `?host=` and
+ * `?hostaddr=` override the URL's host, so those parameters are refused outright, and the host
+ * is the one pg-connection-string reports. */
+function isLocalUrl(superuserUrl: string): boolean {
+  try {
+    const query = new URL(superuserUrl).searchParams;
+    if (query.has("host") || query.has("hostaddr")) return false;
+    const { host } = parseConnectionString(superuserUrl);
+    return host !== undefined && LOCAL_HOSTS.has(host);
+  } catch {
+    return false;
+  }
+}
+
 function assertLocalDevelopment(
   command: "db:reset" | "db:seed",
   appEnv: AppEnv,
   superuserUrl: string,
 ): void {
   const allowedEnv = appEnv === "development" || appEnv === "test";
-  const host = new URL(superuserUrl).hostname;
-  const allowedHost = LOCAL_HOSTS.has(host) || process.env["TESTCONTAINERS"] === "1";
+  const allowedHost = isLocalUrl(superuserUrl) || process.env["TESTCONTAINERS"] === "1";
   if (!allowedEnv || !allowedHost) throw new ResetRefusedError(command);
 }
 

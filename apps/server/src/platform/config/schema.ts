@@ -366,6 +366,15 @@ class Reader {
   }
 }
 
+function decodesCleanly(text: string): boolean {
+  try {
+    decodeURIComponent(text);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function parseUrl(value: string): URL | null {
   try {
     return new URL(value);
@@ -590,6 +599,8 @@ function readEmail(r: Reader, publicOriginUrl: URL | undefined): Config["email"]
       r.fail("SMTP_URL", "must be an smtp:// or smtps:// URL");
     } else if (url.password !== "") {
       r.fail("SMTP_URL", "must not contain a password");
+    } else if (!decodesCleanly(url.username)) {
+      r.fail("SMTP_URL", "must be a valid URL");
     } else {
       const host = url.hostname;
       const implicit = url.protocol === "smtps:";
