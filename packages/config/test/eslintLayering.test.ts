@@ -1,4 +1,5 @@
-// F-1 rule 1, layering (`no-restricted-imports`). TP-0.2 and the added TP-0.8x.
+// F-1 rule 1, layering (`no-restricted-imports`). TP-0.2, plus the extra cases TP-0.8x.
+// IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { describe, expect, it } from "vitest";
 import { errorRuleIds, lintFixture } from "./support/lintFixture.js";
 

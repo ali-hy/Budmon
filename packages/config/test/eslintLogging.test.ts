@@ -1,4 +1,5 @@
-// F-1 rule 2, logging. TP-0.3 and the added TP-0.9x.
+// F-1 rule 2, logging. TP-0.3, plus the extra cases TP-0.9x.
+// IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { describe, expect, it } from "vitest";
 import { errorRuleIds, errorsIn, lintFixture } from "./support/lintFixture.js";
 

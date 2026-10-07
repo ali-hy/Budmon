@@ -1,5 +1,6 @@
-// S-0 repository checks: TP-0.1 (§2.1 removals) and the added TP-0.13x to TP-0.16x for the
-// S-0 deliverables and acceptance criteria (§2.2, §9 S-0 AC-2 to AC-4).
+// S-0 repository checks: TP-0.1 (§2.1 removals), plus the extra cases TP-0.13x to TP-0.16x for
+// the S-0 deliverables and acceptance criteria (§2.2, §9 S-0 AC-2 to AC-4).
+// IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
@@ -57,6 +58,10 @@ describe("TP-0.1: the §2.1 removals", () => {
 });
 
 describe("TP-0.13x: root workspace files (§2.2)", () => {
+  it("TP-0.13x: no vitest.workspace.* file exists (A-8)", () => {
+    expect(repositoryFiles().filter((file) => /^vitest\.workspace\./.test(file))).toEqual([]);
+  });
+
   interface RootPackageJson {
     private?: unknown;
     packageManager?: unknown;

@@ -1,4 +1,5 @@
-// F-5 TypeScript and Prettier bases. TP-0.7 and the added TP-0.12x.
+// F-5 TypeScript and Prettier bases. TP-0.7, plus the extra cases TP-0.12x.
+// IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { spawnSync } from "node:child_process";
 import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";

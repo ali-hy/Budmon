@@ -1,7 +1,6 @@
-// F-6 checkMigrationFiles. TP-0.5 and the added TP-0.11x.
-//
-// Imported from F-6's catalog file, `tools/ci/checkMigrationFiles.ts` (also §2.2). F-6's CLI line
-// says `src/checkMigrationFiles.ts`; that contradiction is with the planner.
+// F-6 checkMigrationFiles. TP-0.5, plus the extra cases TP-0.11x.
+// IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
+// F-6 lives at `tools/ci/checkMigrationFiles.ts` (A-7).
 import { describe, expect, it } from "vitest";
 import { checkMigrationFiles } from "../checkMigrationFiles.js";
 
@@ -110,7 +109,7 @@ describe("F-6 checkMigrationFiles", () => {
       ).toEqual({ ok: true });
     });
 
-    it("TP-0.11x: with several migration files changed, the message lists each of them", () => {
+    it('TP-0.11x: with several migration files changed, the message lists them in input order joined with ", "', () => {
       const second = "apps/server/drizzle/0002.sql";
 
       const result = checkMigrationFiles({
@@ -119,11 +118,7 @@ describe("F-6 checkMigrationFiles", () => {
         isHotfixMergeBack: false,
       });
 
-      expect(result.ok).toBe(false);
-      if (result.ok) return;
-      expect(result.message.startsWith(MESSAGE_PREFIX)).toBe(true);
-      expect(result.message).toContain(MIGRATION);
-      expect(result.message).toContain(second);
+      expect(result).toEqual({ ok: false, message: `${MESSAGE_PREFIX}${MIGRATION}, ${second}` });
     });
 
     it("TP-0.11x: an empty change list passes", () => {

@@ -1,4 +1,5 @@
-// F-1 rule 3, money. TP-0.4 and the added TP-0.10x.
+// F-1 rule 3, money. TP-0.4, plus the extra cases TP-0.10x.
+// IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { describe, expect, it } from "vitest";
 import { errorRuleIds, lintFixture } from "./support/lintFixture.js";
 
