@@ -26,6 +26,18 @@ describe("F-306 canonicalJson", () => {
   });
 
   it.each([
+    ["[1, undefined]", [1, undefined]],
+    ["{ a: [[undefined]] }", { a: [[undefined]] }],
+    ["undefined", undefined],
+  ])("TP-1.9 (A-38): %s throws TypeError", (_label, value) => {
+    expect(() => canonicalJson(value)).toThrow(TypeError);
+  });
+
+  it("TP-1.9 (A-38): a property set to undefined is dropped: { a: undefined } is {}", () => {
+    expect(canonicalJson({ a: undefined })).toBe("{}");
+  });
+
+  it.each([
     ["Infinity", Number.POSITIVE_INFINITY],
     ["-Infinity", Number.NEGATIVE_INFINITY],
     ["a function", () => 1],

@@ -24,15 +24,26 @@ describe("F-311 isUuid", () => {
   it.each([
     ["a v4", "f47ac10b-58cc-4372-a567-0e02b2c3d479"],
     ["a v7", "01927f3a-6b1c-7d2e-8f00-123456789abc"],
-  ])("TP-1.24x: accepts %s in lower case", (_label, value) => {
+  ])("TP-1.12 (A-41): accepts %s", (_label, value) => {
     expect(isUuid(value)).toBe(true);
   });
 
   it.each([
-    ["upper case", "F47AC10B-58CC-4372-A567-0E02B2C3D479"],
-    ["no dashes", "f47ac10b58cc4372a5670e02b2c3d479"],
+    ["a v7 in upper case", "01927F3A-6B1C-7D2E-8F00-123456789ABC"],
+    ["nil", "00000000-0000-0000-0000-000000000000"],
+    ["max", "ffffffff-ffff-ffff-ffff-ffffffffffff"],
+    ["version 0", "01927f3a-6b1c-0d2e-8f00-123456789abc"],
+    ["version 9", "01927f3a-6b1c-9d2e-8f00-123456789abc"],
+    ["variant c", "01927f3a-6b1c-7d2e-cf00-123456789abc"],
+    ["braces", "{01927f3a-6b1c-7d2e-8f00-123456789abc}"],
+    ["a urn:uuid: prefix", "urn:uuid:01927f3a-6b1c-7d2e-8f00-123456789abc"],
+    ["no dashes", "01927f3a6b1c7d2e8f00123456789abc"],
+  ])("TP-1.12 (A-41): rejects %s", (_label, value) => {
+    expect(isUuid(value)).toBe(false);
+  });
+
+  it.each([
     ["too short", "f47ac10b-58cc-4372-a567-0e02b2c3d47"],
-    ["braces", "{f47ac10b-58cc-4372-a567-0e02b2c3d479}"],
     ["non-hex", "g47ac10b-58cc-4372-a567-0e02b2c3d479"],
     ["empty", ""],
   ])("TP-1.24x: rejects %s", (_label, value) => {

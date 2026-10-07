@@ -13,6 +13,19 @@ describe("F-312 resolveLocale", () => {
     expect(resolveLocale("fr", ["en"])).toBe("en");
   });
 
+  it.each([
+    ["en", ["en-US"], undefined, "en-US"],
+    ["en-GB", ["en-US", "en"], undefined, "en"],
+    ["pt", ["pt-BR", "pt-PT"], undefined, "pt-BR"],
+    ["EN-us", ["en-US"], undefined, "en-US"],
+    [null, ["en"], "ar", "ar"],
+  ])(
+    "TP-1.13 (A-39): resolveLocale(%j, %j, %j) is %j",
+    (requested, supported, fallback, expected) => {
+      expect(resolveLocale(requested, supported, fallback)).toBe(expected);
+    },
+  );
+
   it("TP-1.25x: an exact match wins over the language subtag, case-insensitively, in the supported spelling", () => {
     expect(resolveLocale("EN-us", ["en", "en-US"])).toBe("en-US");
   });
@@ -36,6 +49,13 @@ describe("F-312 directionOf", () => {
     expect(directionOf(locale)).toBe(direction);
   });
 
+  it.each([
+    ["en-XA", "ltr"],
+    ["AR-eg", "rtl"],
+  ])("TP-1.13 (A-40): directionOf(%j) is %s", (locale, direction) => {
+    expect(directionOf(locale)).toBe(direction);
+  });
+
   it.each([["ar"], ["ar-EG"], ["fa-IR"], ["ur"], ["ps"], ["sd"], ["yi"], ["dv"], ["he-IL"]])(
     "TP-1.25x: directionOf(%j) is rtl",
     (locale) => {
@@ -43,12 +63,9 @@ describe("F-312 directionOf", () => {
     },
   );
 
-  it.each([["en-US"], ["de-DE"], ["en-XA"], ["fr"], ["tr"]])(
-    "TP-1.25x: directionOf(%j) is ltr",
-    (locale) => {
-      expect(directionOf(locale)).toBe("ltr");
-    },
-  );
+  it.each([["en-US"], ["de-DE"], ["fr"], ["tr"]])("TP-1.25x: directionOf(%j) is ltr", (locale) => {
+    expect(directionOf(locale)).toBe("ltr");
+  });
 });
 
 describe("F-312 isolate", () => {

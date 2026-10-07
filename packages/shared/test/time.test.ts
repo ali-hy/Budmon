@@ -88,17 +88,31 @@ describe("F-310 clocks", () => {
 });
 
 describe("F-310 isValidTimeZone", () => {
-  it.each([["Africa/Cairo"], ["UTC"], ["America/New_York"], ["Asia/Kuwait"]])(
-    "TP-1.23x: %s is valid",
+  it.each([["Africa/Cairo"], ["africa/cairo"], ["UTC"]])(
+    "TP-1.11 (A-42): isValidTimeZone(%j) is true",
     (zone) => {
       expect(isValidTimeZone(zone)).toBe(true);
     },
   );
 
-  it.each([["Mars/Base"], ["Etc/Unknown"], [""], ["Not A Zone"]])(
-    "TP-1.23x: %j is not valid",
+  it.each([["Etc/Unknown"], ["+02:00"], ["-05:00"], [""], ["Mars/Base"]])(
+    "TP-1.11 (A-42): isValidTimeZone(%j) is false",
     (zone) => {
       expect(isValidTimeZone(zone)).toBe(false);
     },
   );
+
+  it('TP-1.11 (A-42): todayIn with the offset "+02:00" throws RangeError("Invalid time zone")', () => {
+    expect(() => todayIn(fixedClock("2026-10-05T22:30:00Z"), "+02:00")).toThrow(
+      new RangeError("Invalid time zone"),
+    );
+  });
+
+  it.each([["America/New_York"], ["Asia/Kuwait"]])("TP-1.23x: %s is valid", (zone) => {
+    expect(isValidTimeZone(zone)).toBe(true);
+  });
+
+  it("TP-1.23x: a name with spaces is not valid", () => {
+    expect(isValidTimeZone("Not A Zone")).toBe(false);
+  });
 });
