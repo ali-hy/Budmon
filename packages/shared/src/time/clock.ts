@@ -32,7 +32,7 @@ export function fixedClock(at: Temporal.Instant | string): MutableClock {
 }
 
 export function isValidTimeZone(zone: string): boolean {
-  if (zone === "Etc/Unknown") return false;
+  if (zone === "Etc/Unknown" || zone.startsWith("+") || zone.startsWith("-")) return false;
   try {
     new Intl.DateTimeFormat("en", { timeZone: zone });
     return true;

@@ -10,10 +10,18 @@ export function resolveLocale(
   supported: readonly string[],
   fallback?: string,
 ): string {
-  const wanted = (requested ?? "").toLowerCase();
+  if (requested === null || requested === "") {
+    return fallback ?? "en";
+  }
+  const wanted = requested.toLowerCase();
   const exact = supported.find((tag) => tag.toLowerCase() === wanted);
-  const byLanguage = supported.find((tag) => tag.toLowerCase() === languageOf(wanted));
-  return exact ?? byLanguage ?? fallback ?? "en";
+  if (exact !== undefined) {
+    return exact;
+  }
+  const language = languageOf(wanted);
+  const sameLanguage = supported.filter((tag) => languageOf(tag) === language);
+  const bare = sameLanguage.find((tag) => tag.toLowerCase() === language);
+  return bare ?? sameLanguage[0] ?? fallback ?? "en";
 }
 
 export function directionOf(locale: string): "ltr" | "rtl" {
