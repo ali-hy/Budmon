@@ -4,7 +4,7 @@
 // workspace files and 5.0.3 throws on them (A-8).
 //
 // Projects are added as their slices create them: `web-unit` (jsdom, @solidjs/testing-library,
-// MSW) in S-11a, and `server-int`'s `globalSetup` (Testcontainers Postgres) in S-2.
+// MSW) in S-11a; `server-int`'s `globalSetup` (Testcontainers Postgres) came with S-2.
 //
 // Root scripts (§2.2.2): `pnpm test` = `vitest run --project=!server-int`;
 // `pnpm test:int` = `vitest run --project=server-int`;
@@ -44,6 +44,8 @@ export default defineConfig({
           name: "server-unit",
           environment: "node",
           include: ["apps/server/test/unit/**/*.test.ts"],
+          // TP-2.27 runs esbuild over the server, and the config tests generate RSA keys.
+          testTimeout: 60_000,
         },
       },
       {
@@ -51,6 +53,11 @@ export default defineConfig({
           name: "server-int",
           environment: "node",
           include: ["apps/server/test/integration/**/*.test.ts"],
+          // §10.1: one Postgres (Testcontainers, or TEST_DATABASE_URL) with budmon_template built
+          // by bootstrapCluster + runSchemaStep; each test file copies it (createTestDatabase).
+          globalSetup: ["apps/server/test/setup/globalSetup.ts"],
+          testTimeout: 60_000,
+          hookTimeout: 180_000,
         },
       },
       {

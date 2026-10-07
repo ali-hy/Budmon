@@ -14,13 +14,28 @@ const ROWS: Readonly<Record<string, string>> = {
   format: "prettier --write .",
   "format:check": "prettier --check .",
   lint: "eslint .",
-  typecheck: "tsc -p tsconfig.json",
+  // S-2 (A-30): typecheck also checks apps/server.
+  typecheck: "tsc -p tsconfig.json && tsc -p apps/server/tsconfig.json",
   test: "vitest run --project=!server-int",
   "test:int": "vitest run --project=server-int",
   // S-1 (A-35): test:coverage added; check runs it after test.
   "test:coverage": "vitest run --project=shared --coverage",
   check:
     "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm test:coverage && pnpm test:int",
+  // S-2 (A-14)
+  dev: "pnpm --filter @budmon/server dev",
+  "db:reset": "pnpm --filter @budmon/server db:reset",
+  "db:seed": "pnpm --filter @budmon/server db:seed",
+  "db:migrate": "pnpm --filter @budmon/server db:migrate",
+};
+
+/** §2.2.2's package-script column for apps/server, plus F-24's build (A-43). */
+const SERVER_SCRIPTS: Readonly<Record<string, string>> = {
+  dev: "tsx src/main/dev.ts",
+  "db:reset": "tsx src/main/dbReset.ts",
+  "db:seed": "tsx src/main/dbReset.ts --seed-only",
+  "db:migrate": "tsx src/main/migrate.ts",
+  build: "tsx scripts/build.ts",
 };
 
 function rootScripts(): Record<string, unknown> {
@@ -47,4 +62,16 @@ describe("TP-0.21: root scripts (§2.2.2)", () => {
       expect(Object.keys(rootScripts())).toContain(name);
     },
   );
+});
+
+// TP-0.25x (test-architect addition, not an LLD ID): the root scripts that delegate to
+// @budmon/server find the package script §2.2.2 names.
+describe("TP-0.25x: apps/server package scripts (§2.2.2, F-24)", () => {
+  it.each(Object.entries(SERVER_SCRIPTS))("TP-0.25x: %s is %j", (name, command) => {
+    const pkg = JSON.parse(readFileSync(path.join(ROOT, "apps/server/package.json"), "utf8")) as {
+      scripts?: Record<string, unknown>;
+    };
+
+    expect(pkg.scripts?.[name]).toBe(command);
+  });
 });
