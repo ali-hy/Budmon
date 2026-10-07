@@ -1,42 +1,61 @@
-// F-1 rule 3, money. TP-0.4, plus the extra cases TP-0.10x.
+// F-1 rule 3, money (A-15). TP-0.4, plus the extra cases TP-0.10x.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { describe, expect, it } from "vitest";
 import { errorRuleIds, lintFixture } from "./support/lintFixture.js";
 
 const SERVER_FILE = "apps/server/src/x/money.ts";
 const REQUIRE_DESCRIPTION = /(^|\/)eslint-comments\/require-description$/;
+const MONEY_RULES = ["no-restricted-globals", "no-restricted-properties", "no-restricted-syntax"];
 
-const PARSE_FLOAT = "declare const a: string;\n\nexport const n = parseFloat(a);\n";
-const NUMBER_CALL = "declare const a: string;\n\nexport const n = Number(a);\n";
+const A = "declare const a: string;\n\n";
+const PARSE_FLOAT = `${A}export const n = parseFloat(a);\n`;
+const NUMBER_CALL = `${A}export const n = Number(a);\n`;
 const BIGINT_NUMBER_MODE =
   'declare function bigint(config: { mode: string }): unknown;\n\nexport const c = bigint({ mode: "number" });\n';
 
 describe("F-1 money", () => {
   describe("TP-0.4", () => {
-    it("TP-0.4: parseFloat is a no-restricted-globals error", async () => {
-      const messages = await lintFixture({ [SERVER_FILE]: PARSE_FLOAT });
+    it.each([
+      ["parseFloat(a)", "no-restricted-globals", PARSE_FLOAT],
+      ["Number(a)", "no-restricted-syntax", NUMBER_CALL],
+      ['bigint({ mode: "number" })', "no-restricted-syntax", BIGINT_NUMBER_MODE],
+      [
+        "Number.parseFloat(a)",
+        "no-restricted-properties",
+        `${A}export const n = Number.parseFloat(a);\n`,
+      ],
+      [
+        "globalThis.parseFloat(a)",
+        "no-restricted-properties",
+        `${A}export const n = globalThis.parseFloat(a);\n`,
+      ],
+      [
+        "window.parseFloat(a)",
+        "no-restricted-properties",
+        `${A}export const n = window.parseFloat(a);\n`,
+      ],
+      ["+a", "no-restricted-syntax", `${A}export const n = +a;\n`],
+    ])("TP-0.4: %s is a %s error", async (_label, ruleId, source) => {
+      const messages = await lintFixture({ [SERVER_FILE]: source });
 
-      expect(errorRuleIds(messages, SERVER_FILE)).toContain("no-restricted-globals");
+      expect(errorRuleIds(messages, SERVER_FILE)).toContain(ruleId);
     });
 
-    it("TP-0.4: Number() is a no-restricted-syntax error", async () => {
-      const messages = await lintFixture({ [SERVER_FILE]: NUMBER_CALL });
+    it.each([
+      ["-a", "declare const a: number;\n\nexport const n = -a;\n"],
+      ["Number.parseInt(a, 10)", `${A}export const n = Number.parseInt(a, 10);\n`],
+    ])("TP-0.4: %s is not a money-rule error", async (_label, source) => {
+      const messages = await lintFixture({ [SERVER_FILE]: source });
 
-      expect(errorRuleIds(messages, SERVER_FILE)).toContain("no-restricted-syntax");
-    });
-
-    it('TP-0.4: bigint({ mode: "number" }) is a no-restricted-syntax error', async () => {
-      const messages = await lintFixture({ [SERVER_FILE]: BIGINT_NUMBER_MODE });
-
-      expect(errorRuleIds(messages, SERVER_FILE)).toContain("no-restricted-syntax");
+      const ruleIds = errorRuleIds(messages, SERVER_FILE);
+      for (const rule of MONEY_RULES) {
+        expect(ruleIds).not.toContain(rule);
+      }
     });
 
     it("TP-0.4: a disable comment with a described reason before Number() passes", async () => {
       const messages = await lintFixture({
-        [SERVER_FILE]:
-          "declare const a: string;\n\n" +
-          "// eslint-disable-next-line no-restricted-syntax -- reason\n" +
-          "export const n = Number(a);\n",
+        [SERVER_FILE]: `${A}// eslint-disable-next-line no-restricted-syntax -- reason\nexport const n = Number(a);\n`,
       });
 
       const ruleIds = errorRuleIds(messages, SERVER_FILE);
@@ -46,10 +65,7 @@ describe("F-1 money", () => {
 
     it("TP-0.4: the same disable comment without a reason is a require-description error", async () => {
       const messages = await lintFixture({
-        [SERVER_FILE]:
-          "declare const a: string;\n\n" +
-          "// eslint-disable-next-line no-restricted-syntax\n" +
-          "export const n = Number(a);\n",
+        [SERVER_FILE]: `${A}// eslint-disable-next-line no-restricted-syntax\nexport const n = Number(a);\n`,
       });
 
       const ruleIds = errorRuleIds(messages, SERVER_FILE);
@@ -57,36 +73,27 @@ describe("F-1 money", () => {
     });
   });
 
-  // TP-0.10x (added): F-1 rule 3 applies in all three source trees it names, and doesn't catch
-  // what it recommends instead.
+  // TP-0.10x (added): F-1 rule 3 applies in all three source trees it names.
   describe("TP-0.10x: where the money rules apply", () => {
     it.each([["packages/shared/src/money.ts"], ["apps/web/src/money.ts"]])(
-      "TP-0.10x: parseFloat, Number() and bigint number mode are errors in %s",
+      "TP-0.10x: parseFloat, Number(), bigint number mode, Number.parseFloat and unary + are errors in %s",
       async (file) => {
-        const parseFloatFile = file.replace("money.ts", "a.ts");
-        const numberFile = file.replace("money.ts", "b.ts");
-        const bigintFile = file.replace("money.ts", "c.ts");
+        const at = (name: string): string => file.replace("money.ts", name);
         const messages = await lintFixture({
-          [parseFloatFile]: PARSE_FLOAT,
-          [numberFile]: NUMBER_CALL,
-          [bigintFile]: BIGINT_NUMBER_MODE,
+          [at("a.ts")]: PARSE_FLOAT,
+          [at("b.ts")]: NUMBER_CALL,
+          [at("c.ts")]: BIGINT_NUMBER_MODE,
+          [at("d.ts")]: `${A}export const n = Number.parseFloat(a);\n`,
+          [at("e.ts")]: `${A}export const n = +a;\n`,
         });
 
-        expect(errorRuleIds(messages, parseFloatFile)).toContain("no-restricted-globals");
-        expect(errorRuleIds(messages, numberFile)).toContain("no-restricted-syntax");
-        expect(errorRuleIds(messages, bigintFile)).toContain("no-restricted-syntax");
+        expect(errorRuleIds(messages, at("a.ts"))).toContain("no-restricted-globals");
+        expect(errorRuleIds(messages, at("b.ts"))).toContain("no-restricted-syntax");
+        expect(errorRuleIds(messages, at("c.ts"))).toContain("no-restricted-syntax");
+        expect(errorRuleIds(messages, at("d.ts"))).toContain("no-restricted-properties");
+        expect(errorRuleIds(messages, at("e.ts"))).toContain("no-restricted-syntax");
       },
     );
-
-    it("TP-0.10x: Number.parseInt with a radix is not a money-rule error", async () => {
-      const messages = await lintFixture({
-        [SERVER_FILE]: "declare const a: string;\n\nexport const n = Number.parseInt(a, 10);\n",
-      });
-
-      const ruleIds = errorRuleIds(messages, SERVER_FILE);
-      expect(ruleIds).not.toContain("no-restricted-syntax");
-      expect(ruleIds).not.toContain("no-restricted-globals");
-    });
 
     it('TP-0.10x: bigint({ mode: "bigint" }) is not a money-rule error', async () => {
       const messages = await lintFixture({

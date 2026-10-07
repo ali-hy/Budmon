@@ -1,11 +1,13 @@
 // S-0 repository checks: TP-0.1 (§2.1 removals), plus the extra cases TP-0.13x to TP-0.16x for
-// the S-0 deliverables and acceptance criteria (§2.2, §9 S-0 AC-2 to AC-4).
+// the S-0 deliverables and acceptance criteria (§2.2, §9 S-0 AC-2 to AC-4). Root scripts are
+// TP-0.21 (rootScripts.test.ts).
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { parse } from "yaml";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 
@@ -66,17 +68,10 @@ describe("TP-0.13x: root workspace files (§2.2)", () => {
     private?: unknown;
     packageManager?: unknown;
     engines?: { node?: unknown };
-    scripts?: Record<string, string>;
   }
 
   function rootPackageJson(): RootPackageJson {
     return JSON.parse(readRootFile("package.json")) as RootPackageJson;
-  }
-
-  function script(name: string): string {
-    const value = rootPackageJson().scripts?.[name];
-    if (value === undefined) throw new Error(`Root package.json has no "${name}" script`);
-    return value;
   }
 
   it("TP-0.13x: package.json is a private workspace root with pnpm 10 pinned and Node 24", () => {
@@ -87,47 +82,16 @@ describe("TP-0.13x: root workspace files (§2.2)", () => {
     expect(pkg.engines?.node).toBe(">=24 <25");
   });
 
-  it.each([["check"], ["test"], ["test:int"], ["lint"], ["format"], ["typecheck"]])(
-    "TP-0.13x: package.json has a %s script",
-    (name) => {
-      expect(script(name).trim()).not.toBe("");
-    },
-  );
-
-  it("TP-0.13x: `test` runs every Vitest project except server-int, and `test:int` only server-int", () => {
-    const test = script("test");
-    const testInt = script("test:int");
-
-    expect(test).toMatch(/\bvitest run\b/);
-    expect(test).toMatch(/--project[= ]['"]?!server-int\b/);
-    expect(testInt).toMatch(/\bvitest run\b/);
-    expect(testInt).toMatch(/--project[= ]['"]?server-int\b/);
-  });
-
-  it("TP-0.13x: `check` runs format, lint, typecheck, test and test:int", () => {
-    const check = script("check");
-
-    expect(check).toMatch(/format|prettier/);
-    expect(check).toMatch(/\blint\b/);
-    expect(check).toMatch(/\btypecheck\b/);
-    expect(check).toMatch(/\btest(?!:)\b/);
-    expect(check).toMatch(/\btest:int\b/);
-  });
-
   it("TP-0.13x: pnpm-workspace.yaml lists exactly the §2.2 workspaces", () => {
-    const lines = readRootFile("pnpm-workspace.yaml").split(/\r?\n/);
-    const start = lines.findIndex((line) => /^packages:\s*$/.test(line));
-    expect(start).toBeGreaterThanOrEqual(0);
-    const packages: string[] = [];
-    for (const line of lines.slice(start + 1)) {
-      const item = /^\s+-\s+['"]?([^'"#]+?)['"]?\s*(#.*)?$/.exec(line);
-      if (item?.[1] === undefined) break;
-      packages.push(item[1]);
-    }
+    const workspace = parse(readRootFile("pnpm-workspace.yaml")) as { packages?: unknown };
 
-    expect(packages.sort()).toEqual(
-      ["apps/server", "apps/web", "infra/budmonctl", "packages/*", "tools/*"].sort(),
-    );
+    expect(workspace.packages).toEqual([
+      "apps/server",
+      "apps/web",
+      "packages/*",
+      "infra/budmonctl",
+      "tools/*",
+    ]);
   });
 
   it("TP-0.13x: .nvmrc is 24", () => {

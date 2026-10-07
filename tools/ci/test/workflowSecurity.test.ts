@@ -1,10 +1,6 @@
-// TP-0.21x (test-architect addition, not an LLD ID; code-review finding B-4): every workflow under
-// .github/workflows/ pins each `uses:` to a full commit SHA, and no `run:` script contains a
-// `${{ }}` expression (values reach scripts only through `env`).
-//
-// The LLD states both rules for F-6's `migrations` job (A-7: `actions/checkout@<pinned SHA>`;
-// "Values reach the script only through `env`, never by `${{ }}` interpolation inside `run:`").
-// This test applies them to every job in every workflow; the planner is asked to record that scope.
+// TP-0.23: the rules for every workflow under .github/workflows/ (§2.2, A-17). Every job- and
+// step-level `uses:` is pinned to a 40-hex commit SHA, except local `./` references; no `run:`
+// script contains a `${{` expression (values reach scripts only through `env:`).
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -44,12 +40,12 @@ function isPinned(uses: string): boolean {
   return uses.startsWith("./") || /^[^@\s]+@[0-9a-f]{40}$/.test(uses);
 }
 
-describe("TP-0.21x: workflow security", () => {
-  it("TP-0.21x: .github/workflows has at least one workflow file", () => {
+describe("TP-0.23: workflow security", () => {
+  it("TP-0.23: .github/workflows has at least one workflow file", () => {
     expect(workflowFiles().length).toBeGreaterThan(0);
   });
 
-  it("TP-0.21x: every uses: is pinned to a 40-hex commit SHA", () => {
+  it("TP-0.23: every uses: is pinned to a 40-hex commit SHA", () => {
     const unpinned: string[] = [];
     for (const file of workflowFiles()) {
       for (const [jobName, job] of jobsOf(file)) {
@@ -66,7 +62,7 @@ describe("TP-0.21x: workflow security", () => {
     expect(unpinned).toEqual([]);
   });
 
-  it("TP-0.21x: no run: contains a ${{ expression", () => {
+  it("TP-0.23: no run: contains a ${{ expression", () => {
     const interpolated: string[] = [];
     for (const file of workflowFiles()) {
       for (const [jobName, job] of jobsOf(file)) {

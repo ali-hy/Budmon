@@ -1,4 +1,4 @@
-// TP-0.19: `ci.yml`'s `migrations` job feeds F-6 (A-7).
+// TP-0.19: `ci.yml`'s `migrations` job feeds F-6 (A-7, A-16).
 import { spawnSync } from "node:child_process";
 import {
   chmodSync,
@@ -73,12 +73,14 @@ describe("TP-0.19: ci.yml migrations job wiring", () => {
     expect(checkout?.with?.["fetch-depth"]).toBe(0);
   });
 
-  it("TP-0.19: a step lists changed files with a three-dot diff against origin/${BASE_REF}", () => {
+  it("TP-0.19: a step lists changed files with git -c core.quotePath=false and a three-dot diff against origin/${BASE_REF}", () => {
     const diffStep = steps().find(
-      (s) => s.run?.includes("git diff --no-renames --name-only") === true,
+      (s) => s.run?.includes("git -c core.quotePath=false diff --no-renames --name-only") === true,
     );
 
-    expect(diffStep?.run).toMatch(/origin\/\$\{BASE_REF\}\.\.\.HEAD/);
+    expect(diffStep?.run).toMatch(
+      /git -c core\.quotePath=false diff --no-renames --name-only "?origin\/\$\{BASE_REF\}\.\.\.HEAD"?/,
+    );
     expect(String(diffStep?.env?.["BASE_REF"]).replace(/\s+/g, "")).toBe("${{github.base_ref}}");
   });
 

@@ -19,12 +19,26 @@ const FIXTURE_TSCONFIG = {
     module: "preserve",
     moduleResolution: "bundler",
     lib: ["ES2022", "DOM"],
+    jsx: "preserve",
     types: [],
     noEmit: true,
     skipLibCheck: true,
   },
-  include: ["**/*.ts"],
+  include: ["**/*.ts", "**/*.tsx"],
 };
+
+// JSX fixtures (TP-0.22) type-check against this minimal global JSX namespace, so they don't need
+// solid-js installed in the fixture directory.
+const JSX_GLOBALS = `declare global {
+  namespace JSX {
+    type Element = unknown;
+    interface IntrinsicElements {
+      [name: string]: Record<string, unknown>;
+    }
+  }
+}
+export {};
+`;
 
 const STUB_PACKAGES: Readonly<Record<string, Readonly<Record<string, string>>>> = {
   "drizzle-orm": {
@@ -33,6 +47,9 @@ const STUB_PACKAGES: Readonly<Record<string, Readonly<Record<string, string>>>> 
   },
   pg: {
     "index.d.ts": "export declare class Pool {\n  end(): Promise<void>;\n}\n",
+  },
+  "lucide-solid": {
+    "index.d.ts": "export declare function Home(): unknown;\n",
   },
   pino: {
     "index.d.ts":
@@ -54,6 +71,7 @@ export async function lintFixture(files: Readonly<Record<string, string>>): Prom
   try {
     await writeFile(path.join(root, "package.json"), '{ "type": "module", "private": true }\n');
     await writeFile(path.join(root, "tsconfig.json"), JSON.stringify(FIXTURE_TSCONFIG, null, 2));
+    await writeFile(path.join(root, "jsx-globals.d.ts"), JSX_GLOBALS);
     for (const [name, stubFiles] of Object.entries(STUB_PACKAGES)) {
       const dir = path.join(root, "node_modules", name);
       await mkdir(dir, { recursive: true });
