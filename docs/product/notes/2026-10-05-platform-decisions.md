@@ -89,3 +89,7 @@ Hetzner's cheap tier became unavailable (whole CX/CAX line marked unavailable si
 - "once it's done... auto approve the lld and start building right away, I don't mind that" — the revised platform HLD (v1.1) and LLD are approved on the user's behalf once the plan-reviewer passes them; open questions take their recommended defaults (FX before 2024-03-02: "no rate", extendable by amendment; the extra release approval click: deferred with the stage-1 deploy chain).
 - "yeah work on feat/platform, that's good." — the platform build uses branch `feat/platform` with its own PR.
 - "once you're done with the platform keep going with the workflow till you're done with the platform module as well as the identity module." — after platform, design and build `identity` the same way (planner → plan-reviewer → approval on the user's behalf → build), on `feat/identity`.
+
+## Auto-approval of design documents (2026-10-07)
+
+User: "auto approve the hlds as well just keep going man. I want you to skip the human in the loop (me) and just keep going". From now on, HLDs and LLDs that pass plan review are approved on the owner's behalf by the main conversation, and the pipeline continues (platform build, then identity design and build) without waiting for the owner. Open questions take the recommended option and are flagged "needs user confirmation" in the PR.
