@@ -2,7 +2,7 @@
 module: platform
 doc: lld
 status: approved # draft | in-review | approved
-version: 0.10
+version: 0.11
 hld_version: 1.3
 author: planner
 approved_by: the user (project owner), delegated auto-approval
@@ -76,6 +76,7 @@ Nothing in that list changes application code (D-29 rule 2).
 | 0.9     | 2026-10-07 | Plan review round 3: READY-FOR-USER, no blocking findings; status set to `in-review`. Suggestions applied in F-178 `restore`: **S-1** the database-level statements of F-14 (`REVOKE ALL ON DATABASE … FROM PUBLIC`) are re-applied to `budmon_restore` after `pg_restore`, and `migrate` grants `CONNECT` back; **S-2** `ALLOW_CONNECTIONS false` before terminating backends, up to 3 terminate-and-rename attempts (exit 24), `ALLOW_CONNECTIONS true` after the renames and on the rollback path; **S-3** a free-space check before creating `budmon_restore` (exit 23); **S-4** `restore:verify` runs as the `migrate` service (`budmon_migrator`) with `DB_NAME=budmon_restore` (F-93, F-178); **S-5** `setup-bats.sh` pins bats-core, bats-support and bats-assert by verified commit SHA and refuses a mismatch. TP-15.22 extended ((h5) to (h7), privilege and role assertions in (I1)). |
 | 0.10    | 2026-10-07 | Implementation-time amendments A-1 to A-6 from the approved identity HLD v0.5 §5.6 (PA-1 to PA-6): `Principal.sessionId` and `testPrincipal`; Mailpit in the laptop stack with worker-general email configuration, prompts and the rehearsal's email and Mailpit checks; Google sign-in configuration, the recovery-code key ring and the Android `budmon.googleServerClientId` property (F-265); the Google callback as the one exception to D-24 rule 4; stage-1 egress notes (§7.8); `identity:bootstrap-owner` in F-93 and the `budmon-local bootstrap-owner` wrapper. Tests added: TP-2.22, TP-2.23, TP-13.17, TP-15.29, TP-16.13; changed: TP-4.16, TP-15.13, TP-15.23, TP-15.27. A-2 and A-4 change the HLD (v1.3) and need user confirmation. Status stays `approved`. |
 | 0.9     | 2026-10-07 | **Approved.** Approved on the owner's behalf by the main conversation, under the owner's direct instruction on 2026-10-07: "auto approve the hlds as well just keep going man. I want you to skip the human in the loop (me) and just keep going" (and earlier: "auto approve the lld and start building right away"). Plan review passed. No content change. |
+| 0.11    | 2026-10-07 | Implementation-time amendments A-7 to A-9, raised by the test-architect while writing the S-0 tests. **A-7:** F-6's CLI runs `tools/ci/checkMigrationFiles.ts` (the `@budmon/tools-ci` sources sit at the package root, no `src/`; F-185's CLI line corrected the same way); the CLI takes `--branch`, `--changed-files` and `--hotfix-merge-back`, parsed by new exported functions; `ci.yml`'s `migrations` job (from S-0) supplies them from `github.head_ref`, a `git diff --no-renames --name-only origin/<base_ref>...HEAD` file and the PR labels, through `env`; TP-0.17 and TP-0.19 added. **A-8:** §10.1 uses a root `vitest.config.ts` with `test.projects` and `passWithNoTests` instead of `vitest.workspace.ts` (removed in Vitest 4); pins unchanged (Vitest 5.0.3, TypeScript 5.9.3). **A-9:** `.gitattributes` moves from S-15 to S-0 with its exact content in §2.2; TP-0.18 added. Approval stands. |
 
 ## Amendments
 
@@ -87,6 +88,9 @@ Nothing in that list changes application code (D-29 rule 2).
 | A-4 | Google's callback carries `code` and `state` in its query string, against D-24 rule 4 (identity PA-4). | `GET /api/v1/auth/google/callback?code&state` is the one stated exception, listed in §5.3 with its mitigations; contract rule R4 is unchanged; TP-15.13 proves Caddy logs the bare path; the runbook's stage-0 checklist confirms Caddy and Tailscale Serve keep no query strings. Lands in **S-15** (Caddy test, runbook); the route itself is `identity`'s. | §5.3, runbook, S-15, TP-15.13 | HLD D-24 rule 4 v1.3: the exception and its mitigations | **needs user confirmation** |
 | A-5 | Egress for stage 1's firewall work (identity PA-5). | Recorded in §7.8: API → `oauth2.googleapis.com:443`, `www.googleapis.com:443`; worker-general → the email provider's SMTP host on 587 or 465; for the stage-1 LLD. No stage-0 change beyond A-3's note that `api` uses `egress` for Google. No slice. | §7.8, F-175 networks note | none | planner decision |
 | A-6 | The owner bootstrap needs a platform entry point that keeps the token out of Docker logs (identity PA-6). | F-93 lists `identity:bootstrap-owner --email <address> [--replace]` with config kind `api` (as `budmon_app`, the API's `PUBLIC_ORIGIN`), stdout only, exits 0/1/64; its handler is identity's; unknown commands now print `Unknown command: <name>`. `budmon-local bootstrap-owner` runs it with `docker compose exec -T` in the running `api` container (exit 25 if not running; never `compose run`). The rehearsal runs it in step 7 and scans for its token (skipped until identity exists). Wrapper lands in **S-15**, rehearsal in **S-16**; the F-93 row is filled by `identity`'s build. | F-93, F-178, F-195 step 7, runbook, S-15, S-16, TP-15.29, TP-16.13 | none | planner decision |
+| A-7 | F-6's file and CLI line disagree (`tools/ci/checkMigrationFiles.ts` vs `src/checkMigrationFiles.ts`), and how the CLI's inputs reach it from `ci.yml` isn't defined (test-architect, S-0). | One location: `tools/ci/checkMigrationFiles.ts`. `@budmon/tools-ci` keeps its sources at the package root (no `src/`), so F-185's CLI line becomes `tsx buildNumber.ts <tag>` too. F-6 gains `parseCheckMigrationFilesArgs`, `parseChangedFiles` and `runCheckMigrationFilesCli` (exit 0 / 1 / 64) and an entry guard; arguments `--branch <head ref>`, `--changed-files <file>`, `--hotfix-merge-back`. `ci.yml`'s `migrations` job (created in **S-0**, extended in S-14) runs on `pull_request` (types `opened`, `synchronize`, `reopened`, `labeled`, `unlabeled`), checks out with `fetch-depth: 0`, writes `git diff --no-renames --name-only "origin/${BASE_REF}...HEAD"` to `$RUNNER_TEMP/changed-files.txt`, and passes `github.head_ref` and the `hotfix-merge-back`/`infra-merge-back` labels through `env`, never by `${{ }}` interpolation into the script. Lands in **S-0**. | §2.2 (`tools/ci/`, `ci.yml`), F-6, F-185, S-0, §10.1 CI jobs, TP-0.17, TP-0.19 | none | planner decision |
+| A-8 | §10.1 names `vitest.workspace.ts`; Vitest 4 removed workspace files and Vitest 5.0.3 throws on them (test-architect, S-0). | The root `vitest.config.ts` declares the same projects through `test.projects` (`shared`, `contract`, `server-unit`, `server-int`, `tools` in S-0; `web-unit` added in S-11a; `server-int`'s `globalSetup` added in S-2) with `test.passWithNoTests: true`, because several projects have no tests until their slice. No `vitest.workspace.ts` or `vitest.workspace.*` file exists. Pins unchanged: `vitest` 5.0.3 and TypeScript 5.9.3 (§2.4). Lands in **S-0**. | §10.1 Runner, §2.2 (root configs), S-0 | none | planner decision |
+| A-9 | `.gitattributes` is in §2.2 but sits in S-15's function list, so S-0 (which creates the files every later commit depends on) doesn't own it (test-architect, S-0). | Moves to **S-0** with the exact content in §2.2 (`* text=auto eol=lf`; LF for `*.sh`, `*.bash`, `*.bats`, `gradlew`, `infra/local/budmon-local`; CRLF for `*.bat`, `*.cmd`, `*.ps1`; `binary` for `*.png`, `*.jpg`, `*.jar`, `*.keystore`, `*.dump`). The index holds no CRLF text file. Removed from S-15. | §2.2 `.gitattributes`, S-0, S-15, TP-0.18 | none (implements HLD D-29's Windows rules) | planner decision |
 
 ## 1. Deviations from the HLD, and decisions the HLD left open
 
@@ -129,12 +133,13 @@ Nothing in that list changes application code (D-29 rule 2).
 | `package.json` | Private workspace root. Scripts: `dev`, `check`, `check:all`, `test`, `lint`, `format`, `typecheck`, `db:reset`, `db:seed`, `db:release-migration`, `db:pending-report`, `db:check-migrations`, `db:check-risky`, `contract:openapi`. `packageManager: pnpm@10.x` (pinned), `engines.node: ">=24 <25"`. |
 | `pnpm-workspace.yaml` | Workspaces: `apps/server`, `apps/web`, `packages/*`, `infra/budmonctl`, `tools/*`. |
 | `.nvmrc` | `24`. |
-| `.gitattributes` | `* text=auto eol=lf`; `*.sh`, `*.bash`, `infra/local/budmon-local` `text eol=lf`; `*.bat`, `*.cmd`, `*.ps1` `text eol=crlf`; `*.png *.jpg *.jar *.keystore *.dump` `binary` (Windows, HLD D-29). |
+| `.gitattributes` | Line-ending rules for the owner's Windows laptop (HLD D-29) (S-0, A-9). Exact content below (§2.2.1). |
 | `.gitignore` | `node_modules/`, `dist/`, `build/`, `.data/`, `.env*` except `.env.example`, `coverage/`, `playwright-report/`, `test-results/`, Android `build/`, `.gradle/`, `local.properties`. |
 | `.editorconfig`, `prettier.config.js`, `eslint.config.js`, `stylelint.config.js` | Root configs; the last three import from `@budmon/config`. |
+| `vitest.config.ts` | Root Vitest configuration with `test.projects` (§10.1, A-8). Owned by the test-architect. There is no `vitest.workspace.*` file. |
 | `.env.example` | Every variable in §4.2 with safe development values. |
 | `README.md` | Layout, prerequisites, commands, environments, the stage model (link to the HLD). |
-| `.github/workflows/ci.yml` | CI steps 1 to 6 (D-27), plus calls to `rehearsal.yml` (§4.17). |
+| `.github/workflows/ci.yml` | CI steps 1 to 6 (D-27), plus calls to `rehearsal.yml` (§4.17). Triggers: `pull_request` with `types: [opened, synchronize, reopened, labeled, unlabeled]` (so adding or removing a merge-back label re-runs the checks, A-7) and `push` to `main`. The `migrations` job's F-6 step is defined in F-6 (A-7). |
 | `.github/workflows/rehearsal.yml` | Reusable release rehearsal, stage-0 shape (D-41, F-195). |
 | `.github/workflows/tag.yml` | Stage-0 tagging: on a merged `release/*` PR, or dispatched with a hotfix PR number, re-runs check (i) on the commit and pushes the tag with `GITHUB_TOKEN` through `tools/ci/tagRelease.sh` (§4.17 "Stage-0 tagging", TP-14.10). `permissions: contents: write` only. The stage-1 LLD replaces it with the App-based chain. |
 | `packages/test-support/` (`@budmon/test-support`) | Test tooling owned by the test-architect: `src/canaries.ts` (F-198), shared fakes and helpers (§10.1) (S-3). |
@@ -142,8 +147,38 @@ Nothing in that list changes application code (D-29 rule 2).
 | `packages/shared/` (`@budmon/shared`) | `src/money/*`, `src/time/*`, `src/ids/*`, `src/i18n/*`, `src/json/canonical.ts`, `src/index.ts`, `test-vectors/*.json` (S-1). |
 | `packages/contract/` (`@budmon/contract`) | `src/common/{money,dates,ids,cursor,errors,create,version}.ts`, `src/meta/metaContract.ts`, `src/index.ts`, `src/rules/contractRules.ts`, `scripts/emitOpenapi.ts`, `openapi.json` (S-4). |
 | `infra/budmonctl/` (`@budmon/budmonctl`) | The owner-side CLI in TypeScript: `src/cli.ts`, `src/scram.ts` (F-190), `src/localSecrets.ts` (F-191) (S-15). |
-| `tools/ci/` (`@budmon/tools-ci`) | `checkMigrationFiles.ts`, `checkMergeBack.ts`, `checkApiMinor.ts`, `checkCatalogs.ts`, `checkEnvExample.ts`, `buildNumber.ts`, `tagRelease.sh` (the stage-0 tagging step, §4.17 "Stage-0 tagging") (S-0, S-2, S-4, S-11a, S-14, S-15). |
+| `tools/ci/` (`@budmon/tools-ci`) | Sources sit at the package root (`tools/ci/<name>.ts`; there is no `src/` directory, A-7); tests in `tools/ci/test/`. `package.json` has `tsx` (latest 4.x, pinned in the lockfile) as a dev dependency for the CLIs. `checkMigrationFiles.ts`, `checkMergeBack.ts`, `checkApiMinor.ts`, `checkCatalogs.ts`, `checkEnvExample.ts`, `buildNumber.ts`, `tagRelease.sh` (the stage-0 tagging step, §4.17 "Stage-0 tagging") (S-0, S-2, S-4, S-11a, S-14, S-15). |
 | `tools/rehearsal/` (`@budmon/tools-rehearsal`) | Rehearsal harness: `src/run.ts`, `src/fakeGoogle.ts`, `src/fakeFx.ts`, `src/sentryCapture.ts` (S-16). |
+
+#### 2.2.1 `.gitattributes` (S-0, A-9)
+
+Exact content (comments may be reworded; the non-comment lines, their order and their attributes are fixed and checked by TP-0.18):
+
+```gitattributes
+# Line endings (HLD D-29: the owner's laptop runs Windows; scripts run in WSL2 and containers).
+* text=auto eol=lf
+
+# Shell scripts stay LF on every checkout, or bash fails on "\r".
+*.sh text eol=lf
+*.bash text eol=lf
+*.bats text eol=lf
+gradlew text eol=lf
+infra/local/budmon-local text eol=lf
+
+# Windows-only scripts.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Binary files: no line-ending conversion and no textual diff.
+*.png binary
+*.jpg binary
+*.jar binary
+*.keystore binary
+*.dump binary
+```
+
+`gradlew` and `infra/local/budmon-local` are listed before they exist (S-13, S-15) so that they are LF from their first commit. The S-0 commit re-normalises the index (`git add --renormalize .`), so no tracked text file is stored with CRLF.
 
 ### 2.3 Created: applications, images and infrastructure
 
@@ -410,12 +445,53 @@ export interface RequestContext {
   - Prettier: `{ printWidth: 100, semi: true, singleQuote: false, trailingComma: "all" }`.
 
 #### F-6: `checkMigrationFiles`
-- **File:** `tools/ci/checkMigrationFiles.ts` · **Layer:** CI script
-- **Signature:** `export function checkMigrationFiles(input: { branch: string; changedFiles: readonly string[]; isHotfixMergeBack: boolean }): { ok: true } | { ok: false; message: string }`. CLI: `pnpm --filter @budmon/tools-ci exec tsx src/checkMigrationFiles.ts` reads `GITHUB_HEAD_REF` and `git diff --name-only origin/main...HEAD`; exit 1 if not ok.
-- **Behaviour:**
+- **File:** `tools/ci/checkMigrationFiles.ts` (the only location; A-7) · **Layer:** CI script (S-0)
+- **Signatures:**
+  - `export interface CheckMigrationFilesInput { branch: string; changedFiles: readonly string[]; isHotfixMergeBack: boolean }`
+  - `export function checkMigrationFiles(input: CheckMigrationFilesInput): { ok: true } | { ok: false; message: string }`
+  - `export function parseCheckMigrationFilesArgs(argv: readonly string[]): { ok: true; branch: string; changedFilesPath: string; isHotfixMergeBack: boolean } | { ok: false; message: string }` (A-7)
+  - `export function parseChangedFiles(text: string): string[]` (A-7)
+  - `export function runCheckMigrationFilesCli(argv: readonly string[], deps: { readFile: (path: string) => string /* [inj] */; stdout: (line: string) => void /* [inj] */; stderr: (line: string) => void /* [inj] */ }): number` (A-7). Returns the exit code.
+- **Behaviour, `checkMigrationFiles`:**
   - If `branch` matches `^(release|hotfix|infra)/` or `isHotfixMergeBack` is true → `{ ok: true }`.
-  - Otherwise, any changed file under `apps/server/drizzle/` → `{ ok: false, message: "Migration files may only change on release/* and hotfix/* branches (D-12): <files>" }`.
-  - A merge-back PR is identified by the label `hotfix-merge-back` (or `infra-merge-back`) on the PR, which `ci.yml` passes in.
+  - Otherwise, any changed file whose path starts with `apps/server/drizzle/` → `{ ok: false, message: "Migration files may only change on release/* and hotfix/* branches (D-12): <files>" }`, where `<files>` is the matching paths in input order joined with `", "`.
+  - Otherwise → `{ ok: true }`.
+- **Behaviour, `parseCheckMigrationFilesArgs`** (pure; argv is `process.argv.slice(2)`): reads tokens left to right.
+  - `--branch <value>` and `--changed-files <value>` take the next token as their value. If there is no next token, or it is the empty string, or it starts with `--` → `{ ok: false, message: "Missing value for <flag>" }`.
+  - `--hotfix-merge-back` is a flag with no value; present → `isHotfixMergeBack: true`, absent → `false`.
+  - A flag given twice → `"Duplicate argument: <flag>"`. Any other token (including `--branch=x` forms and positional words) → `"Unknown argument: <token>"`. The first problem in argv order is returned.
+  - After the loop: no `--branch` → `"Missing required argument: --branch"`; then no `--changed-files` → `"Missing required argument: --changed-files"`.
+- **Behaviour, `parseChangedFiles`:** splits on `/\r?\n/` and drops empty strings; no other trimming; order and duplicates are kept. `""` → `[]`.
+- **Behaviour, `runCheckMigrationFilesCli`:**
+  1. Parse the arguments. On `ok: false`: `stderr("checkMigrationFiles: <message>")`, then `stderr("Usage: checkMigrationFiles.ts --branch <head ref> --changed-files <file> [--hotfix-merge-back]")`; return **64**.
+  2. `deps.readFile(changedFilesPath)` (a relative path resolves against the process's working directory, which under `pnpm --filter … exec` is `tools/ci/`; `ci.yml` passes an absolute path). If it throws: `stderr("checkMigrationFiles: cannot read <path>: <error message>")`; return **64**.
+  3. `checkMigrationFiles({ branch, changedFiles: parseChangedFiles(text), isHotfixMergeBack })`. Not ok → `stderr(message)`; return **1**. Ok → `stdout("checkMigrationFiles: ok (<n> changed files)")`, `n` the number of parsed paths; return **0**.
+- **Entry guard:** the module ends with `if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) process.exitCode = runCheckMigrationFilesCli(process.argv.slice(2), { readFile: (p) => readFileSync(p, "utf8"), stdout: (l) => process.stdout.write(`${l}\n`), stderr: (l) => process.stderr.write(`${l}\n`) })`. Importing the module (tests) runs nothing.
+- **CLI invocation:** `pnpm --filter @budmon/tools-ci exec tsx checkMigrationFiles.ts --branch <head ref> --changed-files <file> [--hotfix-merge-back]`.
+- **Wiring in `ci.yml`** (job `migrations`, created in S-0 and extended in S-14; A-7). The job has `if: github.event_name == 'pull_request'` and `permissions: contents: read`. Values reach the script only through `env`, never by `${{ }}` interpolation inside `run:` (a branch name is attacker-controlled text):
+  ```yaml
+  - uses: actions/checkout@<pinned SHA>
+    with:
+      fetch-depth: 0          # the base branch's history, for the three-dot diff
+  # … pnpm/Node setup and `pnpm install --frozen-lockfile` as in the `check` job …
+  - name: List changed files
+    env:
+      BASE_REF: ${{ github.base_ref }}
+    run: git diff --no-renames --name-only "origin/${BASE_REF}...HEAD" > "$RUNNER_TEMP/changed-files.txt"
+  - name: Migration files only on release branches (F-6)
+    env:
+      HEAD_REF: ${{ github.head_ref }}
+      MERGE_BACK: ${{ contains(github.event.pull_request.labels.*.name, 'hotfix-merge-back') || contains(github.event.pull_request.labels.*.name, 'infra-merge-back') }}
+    run: |
+      args=(--branch "$HEAD_REF" --changed-files "$RUNNER_TEMP/changed-files.txt")
+      if [ "$MERGE_BACK" = "true" ]; then args+=(--hotfix-merge-back); fi
+      pnpm --filter @budmon/tools-ci exec tsx checkMigrationFiles.ts "${args[@]}"
+  ```
+  - `branch` = `github.head_ref` (the pull request's source branch, e.g. `release/v1.2.0`).
+  - `changedFiles` = the three-dot diff against the pull request's base (`github.base_ref`), so only the pull request's own changes count. `HEAD` is the pull request's merge ref checked out by `actions/checkout`. `--no-renames` lists both sides of a rename, so moving a file out of `apps/server/drizzle/` also counts.
+  - `isHotfixMergeBack` = the pull request carries the label `hotfix-merge-back` or `infra-merge-back`. The `labeled`/`unlabeled` triggers (§2.2 `ci.yml`) re-run the job when a label changes.
+- **Errors:** none thrown; failures are return values and exit codes (0 ok, 1 check failed, 64 usage or unreadable file).
+- **Calls:** `node:fs` (`readFileSync`, `realpathSync`) and `node:url` only in the entry guard; everything else is pure or goes through `deps`.
 
 #### F-6b: `checkMergeBack`
 - **File:** `tools/ci/checkMergeBack.ts` · **Layer:** CI script (S-14). Runs on pull requests labelled `hotfix-merge-back` or `infra-merge-back` (D-12).
@@ -2025,7 +2101,7 @@ Stage 0 runs on the owner's Windows laptop (HLD D-29 v1.1): Docker Desktop with 
   - The CLI prints `file:line pattern` and exits 1 if anything is flagged.
 
 #### F-185: `buildNumber`
-- **File:** `tools/ci/buildNumber.ts` (also used by F-178 through `pnpm --filter @budmon/tools-ci exec tsx src/buildNumber.ts <tag>`)
+- **File:** `tools/ci/buildNumber.ts` (also used by F-178 through `pnpm --filter @budmon/tools-ci exec tsx buildNumber.ts <tag>`; sources at the package root, A-7)
 - **Signature:** `export function buildNumber(revCount: number): number`, plus the CLI, which runs `git rev-list --count <tag>` and prints the result.
 - **Behaviour:** returns `revCount` (the number of commits reachable from the tag). It's monotonic along `main`, and a hotfix branched from the last release tag has a count greater than that tag's. This number is the web build number (`X-Budmon-Client: web/<n>`, `version.json`).
   - In stage 1 the stage-1 LLD may replace it with the release workflow's sequence number (HLD D-29 rule 4); `CLIENT_MIN_WEB` is then raised to the first stage-1 number.
@@ -2627,7 +2703,7 @@ The platform's slices are **capability slices** rather than one story each. Each
 
 ### S-0: Repository, clean-up, lint and CI skeleton (US-1, US-14, US-12)
 - **Depends on:** none
-- **Functions:** F-1, F-2 (rule file only; tested in S-11a), F-3 (same), F-5, F-6; root `package.json`, workspace files, `.gitignore`, README; `.github/workflows/ci.yml` steps 1 to 3; the removals in §2.1.
+- **Functions:** F-1, F-2 (rule file only; tested in S-11a), F-3 (same), F-5, F-6 (including its CLI, A-7); root `package.json`, workspace files, `.gitignore`, `.gitattributes` (§2.2.1, A-9), root `vitest.config.ts` (§10.1, A-8), README; `.github/workflows/ci.yml` steps 1 to 3, including the `migrations` job's F-6 step (A-7); the removals in §2.1.
 - **Scenarios:**
 
 | Scenario | Happy / unhappy | Expected | Tests |
@@ -2637,6 +2713,9 @@ The platform's slices are **capability slices** rather than one story each. Each
 | `pino` imported outside observability; `console` in platform code | unhappy | Lint fails. | TP-0.3 |
 | `parseFloat` / `Number()` / `bigint({ mode: "number" })` | unhappy | Lint fails; a described disable passes. | TP-0.4 |
 | Migration file changed on a feature branch | unhappy | `checkMigrationFiles` fails; release/hotfix/infra/merge-back branches pass. | TP-0.5 |
+| F-6's CLI given missing, duplicate or unknown arguments, or an unreadable changed-files file | unhappy | Exit 64 with the message and the usage line; a valid call exits 0 or 1. | TP-0.17 |
+| `ci.yml` feeds F-6 the head branch, the pull request's changed files and its merge-back labels | happy | As in F-6's wiring (A-7). | TP-0.19 |
+| A checkout on Windows | happy | Text and shell scripts are LF, Windows scripts CRLF, binaries untouched; the index holds no CRLF text. | TP-0.18 |
 | `pnpm check` on the skeleton | happy | Format, lint, type-check and unit tests pass. | TP-0.6 |
 | Strict TypeScript | unhappy | An unchecked index access fails type-check. | TP-0.7 |
 
@@ -2957,7 +3036,7 @@ The platform's slices are **capability slices** rather than one story each. Each
 
 ### S-15: Stage-0 laptop stack (D-29 stage 0)
 - **Depends on:** S-5 to S-10, S-11b (the web image embeds the built SPA and `version.json`), S-14
-- **Functions:** F-170, F-175, F-178, F-179, F-185, F-190, F-191; `images/*`; `infra/local/*`; `.gitattributes`; runbook `infra/runbooks/stage0-laptop.md`.
+- **Functions:** F-170, F-175, F-178, F-179, F-185, F-190, F-191; `images/*`; `infra/local/*`; runbook `infra/runbooks/stage0-laptop.md`. (`.gitattributes` moved to S-0, A-9.)
 - **Scenarios:**
 
 | Scenario | Happy / unhappy | Expected | Tests |
@@ -3009,7 +3088,7 @@ The platform's slices are **capability slices** rather than one story each. Each
 
 The repository has no test tooling yet. The test-architect sets it up in S-0 to S-2 as follows.
 
-- **Runner:** Vitest 5 with a root `vitest.workspace.ts`.
+- **Runner:** Vitest 5 (`vitest` 5.0.3, TypeScript 5.9.3, §2.4) with a root **`vitest.config.ts`** that declares the projects below through `test.projects` and sets `test.passWithNoTests: true` (several projects have no tests until their slice). Vitest 4 removed workspace files and 5.0.3 throws on them, so no `vitest.workspace.*` file exists (A-8). Projects are added as their slices create them: `shared`, `contract`, `server-unit`, `server-int` and `tools` in S-0; `server-int`'s `globalSetup` in S-2; `web-unit` in S-11a. `tools` sets `testTimeout: 60000` (its tests start ESLint and `tsc` programs).
 
   | Project | Environment | Includes |
   | ------- | ----------- | -------- |
@@ -3054,7 +3133,7 @@ The repository has no test tooling yet. The test-architect sets it up in S-0 to 
   | `e2e` | 5 | Every PR |
   | `android` | 6 | Path filter, release candidates |
   | `infra-lint` | TP-15.16, bats | Changes to `infra/`, `images/`, `.github/` |
-  | `migrations` | F-6 + report, or checks (i), (iii), (iv) | By branch type |
+  | `migrations` | F-6 + report, or checks (i), (iii), (iv) | Pull requests only. The F-6 step (S-0, A-7) runs on every PR; the branch-type steps arrive in S-14 |
   | `rehearsal` | `rehearsal.yml` (stage-0 shape, F-195) | `release/*` and `hotfix/*` PRs |
   | `dev-smoke` | TP-2.18 | `main` only |
 
@@ -3071,6 +3150,9 @@ Types: **U** unit, **I** integration (real Postgres and/or HTTP in-process), **E
 | TP-0.5 | S-0 | U | F-6 | none | branch `feat/x` + `apps/server/drizzle/0001.sql`; `release/v1.0.0` + same; `feat/x` without; merge-back true; `infra/v1.0.0-infra.1` | `ok:false` with the file listed; ok; ok; ok; ok |
 | TP-0.6 | S-0 | S | `pnpm check` | clean clone | Run | Exit 0 |
 | TP-0.7 | S-0 | S | F-5 | fixture `const a: number[] = []; const b: number = a[0];` | `tsc -p` fixture | TS2322 error (`noUncheckedIndexedAccess`) |
+| TP-0.17 | S-0 | U | F-6 CLI (`parseCheckMigrationFilesArgs`, `parseChangedFiles`, `runCheckMigrationFilesCli`) | fake `readFile` (map of path → text, throws `Error("ENOENT")` for unknown paths), recording `stdout`/`stderr` | (a) `--branch feat/x --changed-files /c.txt` with `/c.txt` = `"apps/server/drizzle/0001.sql\nREADME.md\n"`; (b) same with `--hotfix-merge-back` (in any position); (c) `--branch release/v1.0.0 --changed-files /c.txt`; (d) `--branch feat/x --changed-files /empty.txt` (`""`); (e) `[]`; (f) `--changed-files /c.txt`; (g) `--branch` alone; (h) `--branch "" --changed-files /c.txt`; (i) `--branch --changed-files /c.txt`; (j) `--branch a --branch b --changed-files /c.txt`; (k) `--branch=feat/x --changed-files /c.txt`; (l) `--branch feat/x extra --changed-files /c.txt`; (m) `--branch feat/x --changed-files /missing.txt`; (n) `parseChangedFiles("a\r\nb\n\nc")` | (a) exit 1, stderr = F-6's message listing `apps/server/drizzle/0001.sql`, nothing on stdout; (b) exit 0, stdout `checkMigrationFiles: ok (2 changed files)`; (c) exit 0; (d) exit 0, `ok (0 changed files)`; (e) exit 64, stderr `checkMigrationFiles: Missing required argument: --branch` then the usage line; (f) the same as (e); (g) `Missing value for --branch`; (h) and (i) `Missing value for --branch`; (j) `Duplicate argument: --branch`; (k) `Unknown argument: --branch=feat/x`; (l) `Unknown argument: extra`; all (e) to (l) exit 64 with the usage line and `readFile` not called; (m) exit 64, stderr `checkMigrationFiles: cannot read /missing.txt: ENOENT`; (n) `["a", "b", "c"]`. Importing the module runs no CLI (no output, `process.exitCode` unchanged) |
+| TP-0.18 | S-0 | S | `.gitattributes` (§2.2.1) | repository root; `git` | (a) read the file; (b) `git check-attr text eol diff -- a.ts x/y.sh x.bash t/x.bats apps/android/gradlew infra/local/budmon-local x.ps1 x.bat x.cmd i.png k.jar d.dump`; (c) `git ls-files --eol` | (a) its non-comment, non-blank lines equal §2.2.1's, in order; (b) `a.ts`: text `auto`, eol `lf`; every shell path: text `set`, eol `lf`; `.ps1`/`.bat`/`.cmd`: text `set`, eol `crlf`; `.png`/`.jar`/`.dump`: text `unset`, diff `unset`; (c) no entry has index status `i/crlf` or `i/mixed` |
+| TP-0.19 | S-0 | S | `ci.yml` F-6 wiring (A-7) | parse `.github/workflows/ci.yml` as YAML | Inspect `on` and the `migrations` job | `on.pull_request.types` includes `opened`, `synchronize`, `reopened`, `labeled`, `unlabeled`; the job's `if` restricts it to `pull_request`; checkout has `fetch-depth: 0`; a step's `run` contains `git diff --no-renames --name-only` against `origin/${BASE_REF}...HEAD` with `env.BASE_REF` = `${{ github.base_ref }}`; the F-6 step's `env.HEAD_REF` = `${{ github.head_ref }}`, its `env.MERGE_BACK` tests both labels `hotfix-merge-back` and `infra-merge-back`, its `run` calls `checkMigrationFiles.ts` with `--branch "$HEAD_REF"` and `--changed-files`; no `run:` in the job contains `${{ github.head_ref }}` or `${{ github.event.pull_request` |
 | TP-1.1 | S-1 | U | F-300 `parseDecimal` | none | "0.1", "-12.50", "1.5e-3", "1e3", "", "1.", "abc", "1e9999" | 1/10, −25/2, 3/2000, 1000/1; `RangeError` ×4 |
 | TP-1.2 | S-1 | U | F-300 `roundHalfEven` | vectors | each case | `expected` |
 | TP-1.3 | S-1 | U | F-301 redaction | `m = Money.of(987654321n, EGP)` | `String(m)`, `JSON.stringify({m})`, `util.inspect(m)`, `` `${m}` `` | All contain `[redacted]` and no `987654321` |

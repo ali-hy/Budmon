@@ -1,7 +1,7 @@
 ---
 module: platform
 doc: lld-brief
-summarises: lld.md v0.10
+summarises: lld.md v0.11
 ---
 
 # Platform: LLD brief
@@ -46,6 +46,7 @@ The code stage 1 needs is built now (the HLD's rule: moving off the laptop must 
 | 1 | **Needs your confirmation (amendment A-2): a Mailpit e-mail catcher on the laptop.** Budmon's e-mails (invitations, password resets) go to a small "Mailpit" container on the laptop; you read them at `http://127.0.0.1:8025` on the laptop only. It logs nothing, so no address reaches the logs. You can point the same settings at a real mail relay (for example Gmail's SMTP) to get them on your phone. | Requested by the approved identity design. It adds one container to the platform's stage-0 setup, which changes the platform HLD (D-29). | Amendments A-2, F-175, §7.8 |
 | 2 | **Needs your confirmation (amendment A-4): one web address may carry a sign-in code.** Google's sign-in sends the browser back to `/api/v1/auth/google/callback?code=…&state=…`. That's the only exception to "no sensitive values in web addresses". The code works once, within seconds, and only together with secrets Budmon holds; logs and error reports strip it, and a test proves it. | Changes the platform HLD's privacy rule D-24 (rule 4) by one stated exception. | Amendments A-4, §5.3 |
 | 3 | **Other amendments for identity (planner decisions):** sessions are known to every request (A-1); new settings for Google sign-in and a new "recovery code" key that must be **carried over** when moving to a server (A-3), plus prompts for them at install and an Android build setting; firewall notes for stage 1 (A-5); a `budmon-local bootstrap-owner --email <you>` command that prints the link to create your owner account, run so the link never lands in a log file (A-6). | Needed before the identity module can be built. Install now asks for the Google sign-in client and e-mail settings. | Amendments A-1, A-3, A-5, A-6 |
+| 3a | **Build fixes from the first slice (planner decisions A-7 to A-9).** The migration-file check in CI has one fixed location and a defined way of getting the branch name, the list of changed files and the merge-back label from GitHub; the test setup uses Vitest's current configuration format; and the line-ending rules (`.gitattributes`, which keep scripts working on your Windows laptop) are created in the first slice instead of the laptop-stack slice. | Nothing changes in what Budmon does. Listed so you know the design moved. | Amendments A-7, A-8, A-9 |
 | 4 | **Q-1, decided: exchange rates before 2 March 2024 show "no rate".** The free backup rate source has no data before that date, so conversions dated earlier say "no rate" instead of guessing. This was the recommended default and went ahead with your go-ahead. | Matters only if you import old history. It can be extended later by an amendment, for example fetching older rates from Open Exchange Rates if its free plan includes them (not confirmed). | §11, F-132 |
 | 5 | **Q-2, deferred: an approval click on every release.** It belonged to the release-signing chain, which now starts at stage 1. In stage 0 nothing deploys from CI: a merged release PR only gets a tag, and you run `budmon-local upgrade` yourself, which is the approval. | Nothing to decide now; it comes back with the stage-1 design. | §11 Q-2 |
 | 6 | **One-time laptop setup by hand**, following `infra/runbooks/stage0-laptop.md`: WSL2 with Ubuntu (your user needs `sudo`), Docker Desktop (WSL2 backend, start at login), Tailscale on the laptop and phone (MagicDNS and HTTPS certificates switched on), two Backblaze B2 buckets for exports and the erasure log (free tier), a Sentry project and a Google OAuth client. Then `budmon-local install <tag>`: it creates the secret files, asks for a few settings (Tailscale name, bucket names, Sentry address, OAuth client id) and stops with a list of what's still missing. You run the Google Cloud script, paste each missing secret with `budmon-local secret set …`, and run `install` again; it finishes and prints the `tailscale serve` command. | No agent can or should do these. The install is resumable, and it refuses to start Budmon while anything is missing, so a skipped step shows up at once. `secret set` gives each file to the one container that reads it. | §2.2 runbook, F-175, F-178, F-179, F-191 |
@@ -165,14 +166,14 @@ The LLD's catalog has about 180 functions. They're grouped by area here; the rig
 
 ## 7. Testing
 
-About 247 test cases:
+About 250 test cases:
 
 | Type | Count | Notes |
 | ---- | ----- | ----- |
-| Unit | ~128 | Including 5 for the `budmon-local` and Google Cloud scripts. |
+| Unit | ~129 | Including 5 for the `budmon-local` and Google Cloud scripts. |
 | Integration | ~90 | Against a real Postgres database. |
 | End-to-end | 15 | Browser, Android emulator, and the rehearsal. |
-| Static checks | 11 | Configuration, workflow and Android build checks. |
+| Static checks | 13 | Configuration, workflow, line-ending and Android build checks. |
 | Manual | 2 | First install and phone access; the Sentry test e-mail. |
 
 **What's covered:**
