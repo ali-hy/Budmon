@@ -1,7 +1,7 @@
 ---
 module: platform
 doc: lld-brief
-summarises: lld.md v0.11
+summarises: lld.md v0.12
 ---
 
 # Platform: LLD brief
@@ -47,6 +47,7 @@ The code stage 1 needs is built now (the HLD's rule: moving off the laptop must 
 | 2 | **Needs your confirmation (amendment A-4): one web address may carry a sign-in code.** Google's sign-in sends the browser back to `/api/v1/auth/google/callback?code=…&state=…`. That's the only exception to "no sensitive values in web addresses". The code works once, within seconds, and only together with secrets Budmon holds; logs and error reports strip it, and a test proves it. | Changes the platform HLD's privacy rule D-24 (rule 4) by one stated exception. | Amendments A-4, §5.3 |
 | 3 | **Other amendments for identity (planner decisions):** sessions are known to every request (A-1); new settings for Google sign-in and a new "recovery code" key that must be **carried over** when moving to a server (A-3), plus prompts for them at install and an Android build setting; firewall notes for stage 1 (A-5); a `budmon-local bootstrap-owner --email <you>` command that prints the link to create your owner account, run so the link never lands in a log file (A-6). | Needed before the identity module can be built. Install now asks for the Google sign-in client and e-mail settings. | Amendments A-1, A-3, A-5, A-6 |
 | 3a | **Build fixes from the first slice (planner decisions A-7 to A-9).** The migration-file check in CI has one fixed location and a defined way of getting the branch name, the list of changed files and the merge-back label from GitHub; the test setup uses Vitest's current configuration format; and the line-ending rules (`.gitattributes`, which keep scripts working on your Windows laptop) are created in the first slice instead of the laptop-stack slice. | Nothing changes in what Budmon does. Listed so you know the design moved. | Amendments A-7, A-8, A-9 |
+| 3b | **Build fixes after the first slice (planner decisions A-10 to A-18).** Lint and tooling only: (A-10) the "icons only from the registry" check looks at third-party package names only, so the app's own files are never flagged; (A-11) the "services don't touch the database directly" check covers exactly the server's module and platform service files; (A-12) translation messages keep readable names such as `error.generic.read`, checked by a small Budmon lint rule instead of the translation plugin's hash-based one, which crashed on the current linter; (A-13) the linter stays on version 10, the translation lint plugin moves to 8.1.1, and the accessibility plugin stays on 6.10.2 with one declared exception for its out-of-date version range; (A-14) every root command (`pnpm dev`, `pnpm db:seed`, `pnpm check:all`, …) now has a stated slice, and `pnpm db:seed` is defined: it re-runs the sample data on your local development database without wiping it, and refuses anything else; (A-15) the money lint also blocks `Number.parseFloat` and `+value` conversions; (A-16) the CI migration check reads file names with unusual characters correctly; (A-17) every CI workflow pins its third-party actions to an exact version and never pastes GitHub values straight into scripts; (A-18) lint rejects a translation message whose text is malformed (for example an unclosed `{`), as the HLD asked. | Nothing changes in what Budmon does. A-15, A-17 and A-18 make safety checks stricter. | Amendments A-10 to A-18, §2.2.2 |
 | 4 | **Q-1, decided: exchange rates before 2 March 2024 show "no rate".** The free backup rate source has no data before that date, so conversions dated earlier say "no rate" instead of guessing. This was the recommended default and went ahead with your go-ahead. | Matters only if you import old history. It can be extended later by an amendment, for example fetching older rates from Open Exchange Rates if its free plan includes them (not confirmed). | §11, F-132 |
 | 5 | **Q-2, deferred: an approval click on every release.** It belonged to the release-signing chain, which now starts at stage 1. In stage 0 nothing deploys from CI: a merged release PR only gets a tag, and you run `budmon-local upgrade` yourself, which is the approval. | Nothing to decide now; it comes back with the stage-1 design. | §11 Q-2 |
 | 6 | **One-time laptop setup by hand**, following `infra/runbooks/stage0-laptop.md`: WSL2 with Ubuntu (your user needs `sudo`), Docker Desktop (WSL2 backend, start at login), Tailscale on the laptop and phone (MagicDNS and HTTPS certificates switched on), two Backblaze B2 buckets for exports and the erasure log (free tier), a Sentry project and a Google OAuth client. Then `budmon-local install <tag>`: it creates the secret files, asks for a few settings (Tailscale name, bucket names, Sentry address, OAuth client id) and stops with a list of what's still missing. You run the Google Cloud script, paste each missing secret with `budmon-local secret set …`, and run `install` again; it finishes and prints the `tailscale serve` command. | No agent can or should do these. The install is resumable, and it refuses to start Budmon while anything is missing, so a skipped step shows up at once. `secret set` gives each file to the one container that reads it. | §2.2 runbook, F-175, F-178, F-179, F-191 |
@@ -121,7 +122,7 @@ The LLD's catalog has about 180 functions. They're grouped by area here; the rig
 
 | Area | Functions | Responsibility | Worth a look |
 | ---- | --------- | -------------- | ------------ |
-| Repository tooling | 10 (F-1 to F-9) | Lint rules, CI checks. | F-1: lint bans on float money maths, bypassing the layers, raw logging. F-6/F-6b: migrations only on release branches. |
+| Repository tooling | 11 (F-1 to F-9, with F-3b) | Lint rules, CI checks, root commands (§2.2.2). | F-1: lint bans on float money maths (including `parseFloat` in any form and `+value`), bypassing the layers, raw logging. F-6/F-6b: migrations only on release branches. |
 | Shared money, time, IDs | 11 (F-300 to F-313) | Exact money in code shared by server and web; Android mirrors it. | F-302 `allocate` (splits always add up exactly); F-303 conversion (rounds once, half-to-even); test vectors shared with Android. |
 | Configuration and database | 14 (F-10 to F-23) | Settings checked at start-up, database roles and grants, building dev databases, `db:reset`. | F-11: a wrong setting stops the process and never prints secret values. F-15/F-16: roles, passwords and grants. F-20: `db:reset` refuses anything but a local database. |
 | Observability and privacy | 12 (F-30 to F-42) | Logging, error reports, traces, metrics. | F-30/F-31: logs accept only a fixed list of safe fields. F-33: errors reported without their message. F-35/F-40: Sentry and trace scrubbing. |
@@ -170,10 +171,10 @@ About 250 test cases:
 
 | Type | Count | Notes |
 | ---- | ----- | ----- |
-| Unit | ~129 | Including 5 for the `budmon-local` and Google Cloud scripts. |
+| Unit | ~132 | Including 5 for the `budmon-local` and Google Cloud scripts. |
 | Integration | ~90 | Against a real Postgres database. |
 | End-to-end | 15 | Browser, Android emulator, and the rehearsal. |
-| Static checks | 13 | Configuration, workflow, line-ending and Android build checks. |
+| Static checks | 16 | Configuration, workflow (including action pinning), dependency pins, root commands, line-ending and Android build checks. |
 | Manual | 2 | First install and phone access; the Sentry test e-mail. |
 
 **What's covered:**

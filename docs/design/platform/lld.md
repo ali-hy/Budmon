@@ -2,7 +2,7 @@
 module: platform
 doc: lld
 status: approved # draft | in-review | approved
-version: 0.11
+version: 0.12
 hld_version: 1.3
 author: planner
 approved_by: the user (project owner), delegated auto-approval
@@ -77,6 +77,7 @@ Nothing in that list changes application code (D-29 rule 2).
 | 0.10    | 2026-10-07 | Implementation-time amendments A-1 to A-6 from the approved identity HLD v0.5 §5.6 (PA-1 to PA-6): `Principal.sessionId` and `testPrincipal`; Mailpit in the laptop stack with worker-general email configuration, prompts and the rehearsal's email and Mailpit checks; Google sign-in configuration, the recovery-code key ring and the Android `budmon.googleServerClientId` property (F-265); the Google callback as the one exception to D-24 rule 4; stage-1 egress notes (§7.8); `identity:bootstrap-owner` in F-93 and the `budmon-local bootstrap-owner` wrapper. Tests added: TP-2.22, TP-2.23, TP-13.17, TP-15.29, TP-16.13; changed: TP-4.16, TP-15.13, TP-15.23, TP-15.27. A-2 and A-4 change the HLD (v1.3) and need user confirmation. Status stays `approved`. |
 | 0.9     | 2026-10-07 | **Approved.** Approved on the owner's behalf by the main conversation, under the owner's direct instruction on 2026-10-07: "auto approve the hlds as well just keep going man. I want you to skip the human in the loop (me) and just keep going" (and earlier: "auto approve the lld and start building right away"). Plan review passed. No content change. |
 | 0.11    | 2026-10-07 | Implementation-time amendments A-7 to A-9, raised by the test-architect while writing the S-0 tests. **A-7:** F-6's CLI runs `tools/ci/checkMigrationFiles.ts` (the `@budmon/tools-ci` sources sit at the package root, no `src/`; F-185's CLI line corrected the same way); the CLI takes `--branch`, `--changed-files` and `--hotfix-merge-back`, parsed by new exported functions; `ci.yml`'s `migrations` job (from S-0) supplies them from `github.head_ref`, a `git diff --no-renames --name-only origin/<base_ref>...HEAD` file and the PR labels, through `env`; TP-0.17 and TP-0.19 added. **A-8:** §10.1 uses a root `vitest.config.ts` with `test.projects` and `passWithNoTests` instead of `vitest.workspace.ts` (removed in Vitest 4); pins unchanged (Vitest 5.0.3, TypeScript 5.9.3). **A-9:** `.gitattributes` moves from S-15 to S-0 with its exact content in §2.2; TP-0.18 added. Approval stands. |
+| 0.12    | 2026-10-07 | Implementation-time amendments A-10 to A-18, raised by the software-engineer and the code-reviewer after S-0. **A-10:** F-3 checks only non-relative (package) specifiers, by package name matching `/icon/i`, in imports, re-exports and literal dynamic imports; relative imports are never reported except `.svg` files outside `ui/icons/`; TP-11.19 rewritten. **A-11:** the service layering rule's `files` are `apps/server/src/*/*Service.ts` and `apps/server/src/platform/*/*Service.ts`; TP-0.2 rewritten with full paths. **A-12:** `formatjs/enforce-id` is removed (the catalog uses explicit dotted IDs, which the hash pattern rejects, and the rule's hash path calls `context.getFilename()`, which ESLint 10 removed); new rule F-3b `budmon/message-id` requires a literal ID matching the ID grammar; F-1 sets `settings.formatjs.additionalFunctionNames: ["t"]` and F-9 extracts with `--additional-function-names t`; TP-11.30 added. **A-13:** ESLint 10.12.0 stays; `eslint-plugin-formatjs` pinned to 8.1.1 (peer `9 || 10`; code review G-1: 5.4.2 crashes under ESLint 10); `eslint-plugin-jsx-a11y` 6.10.2 pinned exactly, its ESLint 9 peer widened to 10 by a single `pnpm-workspace.yaml` `peerDependencyRules.allowedVersions` entry; TP-0.20 and TP-0.22 (web-rule smoke lint) added, TP-11.21 and TP-11.22 also assert no rule throws. **A-14:** new §2.2.2 lists every root script with its command and owning slice (`dev`, `db:reset`, `db:seed`, `db:migrate` in S-2; `contract:openapi` in S-4; `stylelint.config.js`, F-4 and CSS linting in S-11a; `test:e2e` and `check:all` in S-11b, extended in S-13; `db:release-migration`, `db:pending-report`, `db:check-migrations`, `db:check-risky` in S-14; `test:bats` in S-15); `db:seed` defined (F-20 `seedDevelopmentDatabase`, F-94 `--seed-only`); TP-0.21 and TP-2.24 added. **A-15:** the money rule also bans `Number.parseFloat`, `globalThis.parseFloat`, `window.parseFloat` and unary `+`; TP-0.4 extended. **A-16:** the `migrations` job's diff uses `git -c core.quotePath=false`; TP-0.19 extended. **A-17:** the SHA pin for `uses:` (local `./` exempt) and the `env`-only rule for `run:` apply to every workflow; the existing workflow security test is TP-0.23. **A-18:** F-1 enables `formatjs/no-invalid-icu` (HLD D-37's "valid ICU syntax"); TP-0.22 and TP-11.21 extended. A-10, A-12 and A-13 also answer code review G-1 and G-2. Approval stands. |
 
 ## Amendments
 
@@ -91,6 +92,15 @@ Nothing in that list changes application code (D-29 rule 2).
 | A-7 | F-6's file and CLI line disagree (`tools/ci/checkMigrationFiles.ts` vs `src/checkMigrationFiles.ts`), and how the CLI's inputs reach it from `ci.yml` isn't defined (test-architect, S-0). | One location: `tools/ci/checkMigrationFiles.ts`. `@budmon/tools-ci` keeps its sources at the package root (no `src/`), so F-185's CLI line becomes `tsx buildNumber.ts <tag>` too. F-6 gains `parseCheckMigrationFilesArgs`, `parseChangedFiles` and `runCheckMigrationFilesCli` (exit 0 / 1 / 64) and an entry guard; arguments `--branch <head ref>`, `--changed-files <file>`, `--hotfix-merge-back`. `ci.yml`'s `migrations` job (created in **S-0**, extended in S-14) runs on `pull_request` (types `opened`, `synchronize`, `reopened`, `labeled`, `unlabeled`), checks out with `fetch-depth: 0`, writes `git diff --no-renames --name-only "origin/${BASE_REF}...HEAD"` to `$RUNNER_TEMP/changed-files.txt`, and passes `github.head_ref` and the `hotfix-merge-back`/`infra-merge-back` labels through `env`, never by `${{ }}` interpolation into the script. Lands in **S-0**. | §2.2 (`tools/ci/`, `ci.yml`), F-6, F-185, S-0, §10.1 CI jobs, TP-0.17, TP-0.19 | none | planner decision |
 | A-8 | §10.1 names `vitest.workspace.ts`; Vitest 4 removed workspace files and Vitest 5.0.3 throws on them (test-architect, S-0). | The root `vitest.config.ts` declares the same projects through `test.projects` (`shared`, `contract`, `server-unit`, `server-int`, `tools` in S-0; `web-unit` added in S-11a; `server-int`'s `globalSetup` added in S-2) with `test.passWithNoTests: true`, because several projects have no tests until their slice. No `vitest.workspace.ts` or `vitest.workspace.*` file exists. Pins unchanged: `vitest` 5.0.3 and TypeScript 5.9.3 (§2.4). Lands in **S-0**. | §10.1 Runner, §2.2 (root configs), S-0 | none | planner decision |
 | A-9 | `.gitattributes` is in §2.2 but sits in S-15's function list, so S-0 (which creates the files every later commit depends on) doesn't own it (test-architect, S-0). | Moves to **S-0** with the exact content in §2.2 (`* text=auto eol=lf`; LF for `*.sh`, `*.bash`, `*.bats`, `gradlew`, `infra/local/budmon-local`; CRLF for `*.bat`, `*.cmd`, `*.ps1`; `binary` for `*.png`, `*.jpg`, `*.jar`, `*.keystore`, `*.dump`). The index holds no CRLF text file. Removed from S-15. | §2.2 `.gitattributes`, S-0, S-15, TP-0.18 | none (implements HLD D-29's Windows rules) | planner decision |
+| A-10 | F-3's "any module whose name matches `/icons?/`" also flags the app's own `./ui/icons/registry.js` imports and anything under `ui/icons/`. Limit it to package specifiers, or explicitly allow relative imports of the registry? (software-engineer, S-0; code review G-2 adds `./iconButton`, the registry's alias path, and whether `export … from` and `import()` count) | Only **non-relative** specifiers are checked against icon packages. A specifier is relative when it starts with `./`, `../` or `/`; relative imports are never reported as icon packages, so importing the registry or `Icon.tsx` from anywhere is allowed. For a non-relative specifier, a leading URL scheme (`virtual:`, `node:`, …) is stripped and the **package name** is taken (`@scope/name`, or the first path segment); it's reported when the package name is `lucide-solid` or `@tabler/icons-solidjs` or matches `/icon/i` (so `~icons/…` and `virtual:icons/…` are caught; subpaths such as `@budmon/shared/icons` aren't). Checked nodes: `ImportDeclaration` (including `import type`), `ExportNamedDeclaration`/`ExportAllDeclaration` with a `source`, and `ImportExpression` whose source is a string literal or an expression-free template literal. `export … from` and literal `import()` count as imports. The web app defines **no path aliases** (F-5 `web` has no `paths`, and §8.1's Vite config has no `resolve.alias`), so the registry is only ever imported relatively and needs no alias allowance; adding an alias later needs an F-3 amendment. Exempt file: `apps/web/src/ui/icons/registry.ts`. Separately, any import (relative or not) of a `.svg` file (`/\.svg(\?.*)?$/`) outside `apps/web/src/ui/icons/**` is reported, as is `<svg>` outside `apps/web/src/ui/icons/**` (unchanged). The rule file lands with S-0's rule files; its tests are S-11a's. | F-3, TP-11.19 | none | planner decision |
+| A-11 | The service layering rule targets `*Service.ts` with no `files` scope; the engineer used `**/*Service.ts` (software-engineer, S-0). | `files: ["apps/server/src/*/*Service.ts", "apps/server/src/platform/*/*Service.ts"]`: module services (HLD D-34 layout `src/<module>/<module>Service.ts`) and platform services (`platform/<area>/<area>Service.ts`, e.g. F-132's `platform/fx/fxService.ts`). Files elsewhere named `*Service.ts` (web, tools, tests, deeper server folders) aren't covered by this rule. The `platform/http/**` repo ban still applies on top for files in both scopes. Lands in **S-0**. | F-1 rule 1, S-0, TP-0.2 | none | planner decision |
+| A-12 | `formatjs/enforce-id` needs an `idInterpolationPattern`; the engineer used the default `[sha512:contenthash:base64:6]` (software-engineer, S-0). | Not confirmed. The web catalog (§8.1) uses **explicit dotted IDs** (`error.generic.read`, `validation.too_small`), which a hash pattern reports as wrong (and its autofix would rewrite to hashes); and in `eslint-plugin-formatjs` 5.4.2 the rule's hash path calls `context.getFilename()`, which ESLint 10 removed, so a descriptor crashes the lint run instead of reporting (code review G-1). Even on 8.1.1 (A-13), `enforce-id` can only accept semantic IDs through a case-insensitive `idWhitelist`, reports an ID-less descriptor as a hash mismatch, and autofixes to a hash. **Message-ID scheme: explicit, semantic, dotted IDs** written by hand in every descriptor; no generated IDs anywhere. `formatjs/enforce-id` is therefore **not enabled**. It's replaced by a Budmon rule **F-3b `budmon/message-id`** (explicit, literal ID matching `^[a-z][A-Za-z0-9_]*(\.[a-z][A-Za-z0-9_]*)+$`), which keeps HLD D-37's "every message has an ID". F-1 also sets `settings.formatjs.additionalFunctionNames: ["t"]` so `formatjs/enforce-default-message` sees inline `t({…})` descriptors, and F-9's extraction passes `--additional-function-names t` and no `--id-interpolation-pattern`, so lint and extraction find the same descriptors and use the same explicit IDs. The rule file and its F-1 registration land in **S-0** (with F-2, F-3); tests in **S-11a**. | F-1 rule 4, new F-3b, F-9, §2.2 (`packages/config`), S-0, S-11a, TP-11.30 | none (D-37's lint requirement is kept; the ID check is a Budmon rule instead of a `formatjs` one) | planner decision |
+| A-13 | `eslint-plugin-formatjs` 5.4.2 and `eslint-plugin-jsx-a11y` 6.10.2 declare ESLint 9 as their peer, while §2.4 pins ESLint 10 (software-engineer, S-0). Code review G-1: formatjs 5.4.2's `enforce-id` crashes the whole lint run under ESLint 10.12.0 (`context.getFilename is not a function`); formatjs 8.x declares `eslint: 9 \|\| 10`. | **Keep ESLint 10.12.0.** **`eslint-plugin-formatjs` is pinned to 8.1.1** (latest, peer `9 \|\| 10`, ESM default export; it reads `context.filename`, and its `enforce-default-message`, `no-literal-string-in-jsx` and `settings.formatjs.additionalFunctionNames` are unchanged), so it needs no peer exception. **`eslint-plugin-jsx-a11y` stays at 6.10.2**, pinned exactly: it has no release with an ESLint 10 peer, and code review verified all eight configured rules on ESLint 10.12.0 (the installed sources use none of the context methods ESLint 10 removed). Its mismatch is declared, not ignored: `pnpm-workspace.yaml` gets `peerDependencyRules.allowedVersions` with exactly one entry, `eslint-plugin-jsx-a11y>eslint: "10"` (no `ignoreMissing`, nothing else), so `pnpm install` is warning-free and any other peer problem still shows. Verified in **S-0** by TP-0.20 (pins and install output) and TP-0.22 (a smoke lint of a web fixture: every configured web rule reports and the run doesn't crash), and again in **S-11a** by TP-11.21/TP-11.22. When jsx-a11y publishes an ESLint 10 peer, upgrading and deleting the entry is a routine dependency change. Enabling any further rule from either plugin needs the same smoke coverage. | §2.2 (`pnpm-workspace.yaml`), §2.4 Lint, S-0, S-11a, TP-0.20, TP-0.22, TP-11.21, TP-11.22 | none | planner decision |
+| A-14 | Root scripts `dev`, `check:all`, `db:*`, `contract:openapi`, and `stylelint.config.js` with F-4, weren't added in S-0 because S-0's function list doesn't include them; make sure each has an owning slice (software-engineer, S-0). | New **§2.2.2** lists every root script with its exact command and owning slice; S-0 adds only its own rows, each later slice adds its rows. `dev`, `db:reset`, `db:seed`, `db:migrate` → **S-2**; `contract:openapi` → **S-4**; `stylelint.config.js`, F-4, the `@budmon/config` `./stylelint` export and `lint:css` → **S-11a**; `test:e2e` and `check:all` (`check` + `test:e2e`) → **S-11b**, `check:all` extended with Android's `./gradlew check` in **S-13**; `db:release-migration`, `db:pending-report`, `db:check-migrations`, `db:check-risky` → **S-14**; `test:bats` → **S-15**. `db:migrate`, missing from §2.2's list though HLD D-34 names it, is added. `db:seed` had no behaviour: it runs the seeders (F-23) against the existing local development database without dropping it, behind F-20's guard (new `seedDevelopmentDatabase` in F-20; F-94 `--seed-only`). | §2.2, new §2.2.2, F-4, F-20, F-94, §6 (`ResetRefusedError`), S-0, S-2, S-4, S-11a, S-11b, S-13, S-14, S-15, §10.1 Scripts, TP-0.21, TP-2.24 | none (implements HLD D-34's script list) | planner decision |
+| A-15 | Code review (optional): F-1's money rule misses `Number.parseFloat`, `globalThis.parseFloat` and unary `+`. | Added to F-1 rule 3, same scope and same described-disable escape: `no-restricted-properties` for `Number.parseFloat`, `globalThis.parseFloat` and `window.parseFloat` ("parseFloat is forbidden; use the money helpers"); `no-restricted-syntax` gains `UnaryExpression[operator='+']` ("Unary + conversion is forbidden; use the money helpers or Number.parseInt with a reason"). `Number.parseInt` stays allowed. Lands in **S-0**. | F-1 rule 3, TP-0.4 | none | planner decision |
+| A-16 | Code review (optional): `git diff` quotes non-ASCII paths (`core.quotePath`), so a quoted `"apps/server/drizzle/…"` line slips past F-6's prefix check. | The `migrations` job's diff step runs `git -c core.quotePath=false diff --no-renames --name-only "origin/${BASE_REF}...HEAD"`, so every path is written verbatim. F-6 itself is unchanged. Lands in **S-0**. | F-6 wiring, TP-0.19 | none | planner decision |
+| A-17 | The LLD states the SHA pin for `uses:` and the `env`-only rule for `run:` only for F-6's `migrations` job (A-7); the test-architect's workflow security test applies them to every workflow (coordinator, from code review B-4, S-0). | Both are rules for **every workflow under `.github/workflows/`**: every job- or step-level `uses:` is pinned to a 40-hex commit SHA, except local `./` references (actions and reusable workflows in this repository); no `run:` contains a `${{` expression, values reaching scripts only through `env:`. Recorded in §2.2 (workflow rules row). The existing test `tools/ci/test/workflowSecurity.test.ts` (labelled "TP-0.21x" by the test-architect) is this LLD's **TP-0.23**; its IDs should be renamed to TP-0.23 (TP-0.21 is now the root-scripts test, A-14). Lands in **S-0**. | §2.2 (workflows), S-0, TP-0.23 | none | planner decision |
+| A-18 | HLD D-37 requires web lint to check "valid ICU syntax", and F-1 has no rule for it (planner, found while answering A-12; confirmed by the coordinator). | F-1 rule 4 enables **`formatjs/no-invalid-icu`** (in `eslint-plugin-formatjs` 8.1.1, A-13): it parses each descriptor's `defaultMessage` with the ICU parser and reports `parseError` when parsing fails. It finds descriptors through the same `settings.formatjs.additionalFunctionNames: ["t"]` (A-12), so inline `t({…})` is covered. Lands in **S-0**; part of TP-0.22's smoke list, and TP-11.21 checks malformed and valid messages. | F-1 rule 4, S-0, TP-0.22, TP-11.21 | none (implements HLD D-37) | planner decision |
 
 ## 1. Deviations from the HLD, and decisions the HLD left open
 
@@ -130,20 +140,21 @@ Nothing in that list changes application code (D-29 rule 2).
 
 | File | Responsibility |
 | ---- | -------------- |
-| `package.json` | Private workspace root. Scripts: `dev`, `check`, `check:all`, `test`, `lint`, `format`, `typecheck`, `db:reset`, `db:seed`, `db:release-migration`, `db:pending-report`, `db:check-migrations`, `db:check-risky`, `contract:openapi`. `packageManager: pnpm@10.x` (pinned), `engines.node: ">=24 <25"`. |
-| `pnpm-workspace.yaml` | Workspaces: `apps/server`, `apps/web`, `packages/*`, `infra/budmonctl`, `tools/*`. |
+| `package.json` | Private workspace root. Scripts: exactly those in §2.2.2, each added by its owning slice (A-14). `packageManager: pnpm@10.x` (pinned), `engines.node: ">=24 <25"`. |
+| `pnpm-workspace.yaml` | Workspaces: `apps/server`, `apps/web`, `packages/*`, `infra/budmonctl`, `tools/*`. `peerDependencyRules.allowedVersions` with exactly one entry, `eslint-plugin-jsx-a11y>eslint: "10"` (S-0, A-13); no other peer rules. |
 | `.nvmrc` | `24`. |
 | `.gitattributes` | Line-ending rules for the owner's Windows laptop (HLD D-29) (S-0, A-9). Exact content below (§2.2.1). |
 | `.gitignore` | `node_modules/`, `dist/`, `build/`, `.data/`, `.env*` except `.env.example`, `coverage/`, `playwright-report/`, `test-results/`, Android `build/`, `.gradle/`, `local.properties`. |
-| `.editorconfig`, `prettier.config.js`, `eslint.config.js`, `stylelint.config.js` | Root configs; the last three import from `@budmon/config`. |
+| `.editorconfig`, `prettier.config.js`, `eslint.config.js`, `stylelint.config.js` | Root configs; the last three import from `@budmon/config`. The first three are S-0's; `stylelint.config.js` (`export default` of `@budmon/config/stylelint`) is S-11a's (A-14). |
 | `vitest.config.ts` | Root Vitest configuration with `test.projects` (§10.1, A-8). Owned by the test-architect. There is no `vitest.workspace.*` file. |
 | `.env.example` | Every variable in §4.2 with safe development values. |
 | `README.md` | Layout, prerequisites, commands, environments, the stage model (link to the HLD). |
 | `.github/workflows/ci.yml` | CI steps 1 to 6 (D-27), plus calls to `rehearsal.yml` (§4.17). Triggers: `pull_request` with `types: [opened, synchronize, reopened, labeled, unlabeled]` (so adding or removing a merge-back label re-runs the checks, A-7) and `push` to `main`. The `migrations` job's F-6 step is defined in F-6 (A-7). |
 | `.github/workflows/rehearsal.yml` | Reusable release rehearsal, stage-0 shape (D-41, F-195). |
 | `.github/workflows/tag.yml` | Stage-0 tagging: on a merged `release/*` PR, or dispatched with a hotfix PR number, re-runs check (i) on the commit and pushes the tag with `GITHUB_TOKEN` through `tools/ci/tagRelease.sh` (§4.17 "Stage-0 tagging", TP-14.10). `permissions: contents: write` only. The stage-1 LLD replaces it with the App-based chain. |
+| `.github/workflows/*.yml`, `*.yaml` (rules for every workflow, A-17) | (1) Every `uses:`, at job level (reusable workflows) and step level, is pinned to a full 40-hex commit SHA (`owner/repo[/path]@<40 lowercase hex>`, a version comment after it is allowed); references starting with `./` (local actions and reusable workflows in this repository) are exempt. (2) No `run:` script contains `${{`: values reach scripts only through `env:` (`${{ }}` is allowed in `env:`, `with:`, `if:` and other keys). Enforced by TP-0.23 from S-0; every later slice that adds or edits a workflow keeps to them. |
 | `packages/test-support/` (`@budmon/test-support`) | Test tooling owned by the test-architect: `src/canaries.ts` (F-198), shared fakes and helpers (§10.1) (S-3). |
-| `packages/config/` (`@budmon/config`) | `tsconfig/base.json`, `tsconfig/node.json`, `tsconfig/web.json`; `eslint/index.js` (F-1); `eslint/rules/*.js` (custom rules F-2 to F-4); `prettier/index.js`; `stylelint/index.js`. |
+| `packages/config/` (`@budmon/config`) | `tsconfig/base.json`, `tsconfig/node.json`, `tsconfig/web.json`; `eslint/index.js` (F-1); `eslint/rules/*.js` (custom ESLint rules F-2, F-3, F-3b; S-0); `prettier/index.js`; `stylelint/index.js` (F-4; S-11a, exported as `./stylelint`, A-14). |
 | `packages/shared/` (`@budmon/shared`) | `src/money/*`, `src/time/*`, `src/ids/*`, `src/i18n/*`, `src/json/canonical.ts`, `src/index.ts`, `test-vectors/*.json` (S-1). |
 | `packages/contract/` (`@budmon/contract`) | `src/common/{money,dates,ids,cursor,errors,create,version}.ts`, `src/meta/metaContract.ts`, `src/index.ts`, `src/rules/contractRules.ts`, `scripts/emitOpenapi.ts`, `openapi.json` (S-4). |
 | `infra/budmonctl/` (`@budmon/budmonctl`) | The owner-side CLI in TypeScript: `src/cli.ts`, `src/scram.ts` (F-190), `src/localSecrets.ts` (F-191) (S-15). |
@@ -179,6 +190,33 @@ infra/local/budmon-local text eol=lf
 ```
 
 `gradlew` and `infra/local/budmon-local` are listed before they exist (S-13, S-15) so that they are LF from their first commit. The S-0 commit re-normalises the index (`git add --renormalize .`), so no tracked text file is stored with CRLF.
+
+#### 2.2.2 Root scripts (A-14)
+
+The root `package.json` `scripts` hold exactly these entries. Each slice adds its own rows (and S-11a, S-13 replace the command of a row as stated); no slice adds a script before its owning slice. Root scripts that delegate use `pnpm --filter <package> <name>`, and the package's script of the same name holds the command in the third column; pnpm appends extra arguments at both levels (`pnpm db:release-migration v0.1.0`). Package scripts run with the package directory as working directory, so a CLI that takes repository paths resolves relative arguments against `process.env.INIT_CWD` (set by pnpm to the directory it was invoked from).
+
+| Script | Root command | Package script command | Defined by | Slice |
+| ------ | ------------ | ---------------------- | ---------- | ----- |
+| `format` | `prettier --write .` | | F-5 | S-0 |
+| `format:check` | `prettier --check .` | | F-5 | S-0 |
+| `lint` | S-0: `eslint .`; from S-11a: `eslint . && pnpm lint:css` | | F-1, F-4 | S-0, changed in S-11a |
+| `typecheck` | `tsc -p tsconfig.json` | | F-5 | S-0 |
+| `test` | `vitest run --project=!server-int` | | §10.1 | S-0 |
+| `test:int` | `vitest run --project=server-int` | | §10.1 | S-0 |
+| `check` | `pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm test:int` | | §10.1, D-27 steps 1 to 4 | S-0 |
+| `dev` | `pnpm --filter @budmon/server dev` | `tsx src/main/dev.ts` | F-22 (resolves `infra/compose.yaml` and `apps/web` from the repository root, not the working directory) | S-2 |
+| `db:reset` | `pnpm --filter @budmon/server db:reset` | `tsx src/main/dbReset.ts` | F-94, F-20 | S-2 |
+| `db:seed` | `pnpm --filter @budmon/server db:seed` | `tsx src/main/dbReset.ts --seed-only` | F-94, F-20 `seedDevelopmentDatabase`, F-23 | S-2 |
+| `db:migrate` | `pnpm --filter @budmon/server db:migrate` | `tsx src/main/migrate.ts` | F-92 (the image runs `node dist/main/migrate.js`) | S-2 |
+| `contract:openapi` | `pnpm --filter @budmon/contract contract:openapi` | `tsx scripts/emitOpenapi.ts` | F-347 | S-4 |
+| `lint:css` | `stylelint "apps/web/src/**/*.css"` | | F-4 (with root `stylelint.config.js`) | S-11a |
+| `test:e2e` | `pnpm --filter @budmon/web test:e2e` | `playwright test` | §10.1 Playwright | S-11b |
+| `check:all` | S-11b: `pnpm check && pnpm test:e2e`; from S-13: `pnpm check && pnpm test:e2e && cd apps/android && ./gradlew check` | | HLD D-27 (`check` plus end-to-end and Android) | S-11b, changed in S-13 |
+| `db:release-migration` | `pnpm --filter @budmon/server db:release-migration` | `tsx tools/releaseMigration.ts generate` | F-180 | S-14 |
+| `db:pending-report` | `pnpm --filter @budmon/server db:pending-report` | `tsx tools/releaseMigration.ts pending` | F-181 | S-14 |
+| `db:check-migrations` | `pnpm --filter @budmon/server db:check-migrations` | `tsx tools/checkMigrations.ts` | F-182 | S-14 |
+| `db:check-risky` | `pnpm --filter @budmon/server db:check-risky` | `tsx tools/checkRisky.ts` (file arguments resolved against `INIT_CWD`) | F-184 | S-14 |
+| `test:bats` | `bash infra/local/test/setup-bats.sh && .tools/bats/bats-core/bin/bats infra/local/test` | | §10.1 Bash | S-15 |
 
 ### 2.3 Created: applications, images and infrastructure
 
@@ -222,7 +260,7 @@ Versions were checked against npm and Maven Central on 2026-10-05. Exact version
 | Runtime | Node 24 LTS (`.nvmrc`), pnpm 10, TypeScript **5.9.3** (typescript-eslint 8.71 supports `<6.1`; TypeScript 7 is excluded until typescript-eslint supports it) |
 | Server | `fastify` 5.12.5, `@fastify/helmet` 13.1.1, `@fastify/rate-limit` 11.2.0, `@fastify/cookie` 11.1.2, `@orpc/server`/`@orpc/contract`/`@orpc/openapi`/`@orpc/zod`/`@orpc/client`/`@orpc/openapi-client` 1.15.4, `zod` 4.6.5, `drizzle-orm` 0.45.3, `drizzle-kit` 0.31.11 (dev only), `pg` 8.23.1, `pg-boss` 12.36.0, `pino` 10.4.0, `@sentry/node` 11.4.0, `@opentelemetry/sdk-node` 0.222.0 (with the matching `@opentelemetry/auto-instrumentations-node`), `@google-cloud/kms` 6.2.1, `@node-rs/argon2` 2.2.1, `@aws-sdk/client-s3` and `@aws-sdk/s3-request-presigner` 3.1146.0, `undici` 8.11.2, `uuid` 14.0.2, `@js-temporal/polyfill` 0.5.1 |
 | Web | `solid-js` 1.9.15, `vite` 8.3.2, `vite-plugin-solid` 2.11.14, `@tanstack/solid-router` 1.170.38, `@tanstack/solid-query` 5.104.1, `@orpc/tanstack-query` 1.15.4, `@tanstack/solid-table` 9.2.x, `@tanstack/solid-virtual` 3.13.x, `@tanstack/solid-form` 1.33.x, `@kobalte/core` 0.13.14, `@formatjs/intl` 6.1.2, `@sentry/solid` 11.4.0, `tailwindcss` 4.3.3 |
-| Lint | `eslint` 10.12.0, `typescript-eslint` 8.71.0, `eslint-plugin-formatjs` (latest 5.x), `eslint-plugin-jsx-a11y` (latest 6.x), `eslint-plugin-solid` (latest), `stylelint` 17.16.0, `stylelint-use-logical` 2.1.3, `prettier` 3.x |
+| Lint | `eslint` 10.12.0, `typescript-eslint` 8.71.0, `eslint-plugin-formatjs` **8.1.1** (peer `eslint 9 || 10`), `eslint-plugin-jsx-a11y` **6.10.2** (declares an ESLint 9 peer; accepted for ESLint 10 through `pnpm-workspace.yaml` `peerDependencyRules`, A-13), `eslint-plugin-solid` (latest), `stylelint` 17.16.0, `stylelint-use-logical` 2.1.3, `prettier` 3.x |
 | Tests | `vitest` 5.0.3, `testcontainers` and `@testcontainers/postgresql` 12.2.0, `@playwright/test` 1.63.0, `@axe-core/playwright` 4.13.0, `msw` 3.0.2, `@solidjs/testing-library` 0.8.10, `node-pty` 1.1.0 (release tooling) |
 | Android | Kotlin 2.x latest stable (not a pre-release), AGP latest stable, Compose BOM latest stable, Room, WorkManager and Paging 3 latest stable, Hilt 2.60.1, OkHttp 5.5.0, Retrofit 3.0.0, kotlinx.serialization (latest stable), OpenAPI Generator Gradle plugin 7.14.0, Sentry Android 8.59.0, Robolectric 4.17, MockK 1.14.11, Turbine 1.2.1, ktlint 1.8.0 |
 | Infrastructure (stage 0) | Postgres **18** (image pinned by digest), Mailpit `axllent/mailpit` 1.x (pinned by digest; A-2), pgBackRest 2.x from PGDG apt (installed, unused until stage 1), Caddy 2.x, Docker Desktop with the WSL2 backend and Compose v2, Tailscale (Windows client), bats-core, shellcheck (pinned by version in CI). Alloy, Squid, cosign, crane, sops, age and OpenTofu are stage-1 tools (stage-1 LLD). |
@@ -401,17 +439,18 @@ export interface RequestContext {
 - **Behaviour:** returns a flat config with typescript-eslint `strictTypeChecked`, Prettier compatibility, and these rules, all `error`:
   1. **Layering** (`no-restricted-imports`):
      - files `apps/server/src/*/*Router.ts` may not import `drizzle-orm*`, `pg`, `**/db/**` or `**/*Repo.js`;
-     - files `*Service.ts` may not import `drizzle-orm*`, `pg` or `**/db/client.js`;
+     - files `apps/server/src/*/*Service.ts` and `apps/server/src/platform/*/*Service.ts` (exactly these two globs, A-11) may not import `drizzle-orm*`, `pg` or `**/db/client.js`;
      - files under `apps/server/src/platform/http/**` may not import `**/*Repo.js`.
   2. **Logging:** `pino` may be imported only under `apps/server/src/platform/observability/**`. `no-console` everywhere except `apps/server/src/main/**` and `tools/**`.
   3. **Money**, in `apps/server/src`, `packages/shared/src` and `apps/web/src`:
      - `no-restricted-globals: ["parseFloat"]`;
-     - `no-restricted-syntax` with `CallExpression[callee.name='Number']` ("Number() conversion is forbidden; use the money helpers or Number.parseInt with a reason") and `CallExpression[callee.name='bigint'] ObjectExpression > Property[key.name='mode'][value.value='number']`.
+     - `no-restricted-properties` for `Number.parseFloat`, `globalThis.parseFloat` and `window.parseFloat` ("parseFloat is forbidden; use the money helpers") (A-15);
+     - `no-restricted-syntax` with `CallExpression[callee.name='Number']` ("Number() conversion is forbidden; use the money helpers or Number.parseInt with a reason"), `UnaryExpression[operator='+']` ("Unary + conversion is forbidden; use the money helpers or Number.parseInt with a reason") (A-15) and `CallExpression[callee.name='bigint'] ObjectExpression > Property[key.name='mode'][value.value='number']`.
 
      A line may opt out with `// eslint-disable-next-line … -- <reason>` (the `eslint-comments/require-description` rule enforces the reason).
-  4. **Web** (`apps/web/src/**`): `formatjs/enforce-default-message`, `formatjs/enforce-id`, `formatjs/no-literal-string-in-jsx`; `budmon/no-physical-tailwind` (F-2); `budmon/icon-from-registry` (F-3); and the **blocking** accessibility rules (D-39, HLD Q-1 (a)): `jsx-a11y/alt-text`, `jsx-a11y/control-has-associated-label`, `jsx-a11y/label-has-associated-control`, `jsx-a11y/aria-props`, `jsx-a11y/aria-proptypes`, `jsx-a11y/aria-role`, `jsx-a11y/role-has-required-aria-props`, `jsx-a11y/tabindex-no-positive`. Every other `jsx-a11y` rule is `off` (D-39: report-only checks happen in Playwright).
+  4. **Web** (`apps/web/src/**`): `formatjs/enforce-default-message`, `formatjs/no-literal-string-in-jsx`, `formatjs/no-invalid-icu` (every descriptor's `defaultMessage` must parse as ICU; HLD D-37, A-18), with `settings: { formatjs: { additionalFunctionNames: ["t"] } }` (A-12); `budmon/message-id` (F-3b; `formatjs/enforce-id` is **not** enabled, A-12); `budmon/no-physical-tailwind` (F-2); `budmon/icon-from-registry` (F-3); and the **blocking** accessibility rules (D-39, HLD Q-1 (a)): `jsx-a11y/alt-text`, `jsx-a11y/control-has-associated-label`, `jsx-a11y/label-has-associated-control`, `jsx-a11y/aria-props`, `jsx-a11y/aria-proptypes`, `jsx-a11y/aria-role`, `jsx-a11y/role-has-required-aria-props`, `jsx-a11y/tabindex-no-positive`. Every other `jsx-a11y` rule is `off` (D-39: report-only checks happen in Playwright).
 - **Errors:** none (pure).
-- **Calls:** F-2, F-3.
+- **Calls:** F-2, F-3, F-3b.
 
 #### F-2: `budmon/no-physical-tailwind` (ESLint rule)
 - **File:** `packages/config/eslint/rules/no-physical-tailwind.js` · **Layer:** lint rule
@@ -428,12 +467,33 @@ export interface RequestContext {
 
 #### F-3: `budmon/icon-from-registry` (ESLint rule)
 - **File:** `packages/config/eslint/rules/icon-from-registry.js` · **Layer:** lint rule
-- **Signature:** as F-2.
-- **Behaviour:** in `apps/web/src/**`, reports any import from an icon package (`lucide-solid`, `@tabler/icons-solidjs`, or any module whose name matches `/icons?/`) outside `apps/web/src/ui/icons/registry.ts`, and any `<svg>` JSX element outside `apps/web/src/ui/icons/**`.
-- **Errors:** message "Use an icon from the registry (D-38 rule 6)."
+- **Signature:** as F-2, with `messages: { registry: string }`.
+- **Behaviour** (A-10). F-1 enables the rule for `apps/web/src/**`. File paths are compared after replacing `\` with `/`, by suffix.
+  - **Checked specifiers:** the `source` of every `ImportDeclaration` (including `import type`), of every `ExportNamedDeclaration` and `ExportAllDeclaration` that has one, and of every `ImportExpression` whose source is a string literal or a template literal without expressions. Other dynamic imports aren't checked.
+  - **Relative vs package:** a specifier is *relative* when it starts with `./`, `../` or `/`; anything else is a *package specifier*. Relative specifiers are never treated as icon packages, so imports of `./ui/icons/registry.js`, `../icons/Icon.js` or any other relative module are allowed in every file.
+  - **Package name:** strip a leading URL scheme matching `/^[a-z][a-z0-9+.-]*:/i` (for example `virtual:`, `node:`); then, if the rest starts with `@`, the package name is the first two `/`-separated segments, otherwise the first segment.
+  - **Icon package:** the package name equals `lucide-solid` or `@tabler/icons-solidjs`, or matches `/icon/i`. Examples reported: `lucide-solid`, `lucide-solid/icons/home`, `@tabler/icons-solidjs`, `~icons/mdi/home`, `virtual:icons/mdi/home`, `unplugin-icons/x`, `@iconify/utils`. Not reported: `./ui/icons/registry.js`, `@budmon/shared`, `@budmon/shared/icons` (the package is `@budmon/shared`), `solid-js`.
+  - Reports a checked package specifier that names an icon package, unless the file is `apps/web/src/ui/icons/registry.ts`.
+  - Reports any checked specifier (relative or package) matching `/\.svg(\?.*)?$/` unless the file is under `apps/web/src/ui/icons/`.
+  - Reports any JSX element named `svg` unless the file is under `apps/web/src/ui/icons/`.
+- **Errors:** report message `registry`: "Use an icon from the registry (D-38 rule 6)." (one report per offending node).
+- **Calls:** none.
+
+#### F-3b: `budmon/message-id` (ESLint rule) (A-12)
+- **File:** `packages/config/eslint/rules/message-id.js` · **Layer:** lint rule
+- **Signature:** `export default { meta: { type: "problem", schema: [], messages: { missing: string; notLiteral: string; format: string } }, create(context): RuleListener }`
+- **Behaviour:** F-1 enables it for `apps/web/src/**`.
+  - **Message descriptors** are object literals in these positions: the first argument of a call whose callee is the identifier `t`, `defineMessage` or `formatMessage`, or a member expression whose property is `t` or `formatMessage`; and each property value that is an object literal inside the object-literal first argument of `defineMessages(...)`. Descriptors passed by reference (`t(m)`) are checked where they're written. Nothing else is checked.
+  - For each descriptor, looks at its own non-computed property named `id`:
+    - none, and the object has no spread element → `missing`. (An object with a spread and no `id` isn't reported.)
+    - present, and its value isn't a string literal or a template literal without expressions → `notLiteral`.
+    - a literal not matching `^[a-z][A-Za-z0-9_]*(\.[a-z][A-Za-z0-9_]*)+$` (case-sensitive) → `format`. Every ID in §8.1's catalog matches, for example `error.generic.read`, `error.rateLimited`, `validation.too_small`.
+  - No autofix.
+- **Errors:** report messages: `missing` "Give this message an explicit id (D-37)."; `notLiteral` "Message ids must be string literals so they can be extracted."; `format` "Message id '{{id}}' must be dot-separated segments starting with a lowercase letter, like 'error.generic.read'."
+- **Calls:** none.
 
 #### F-4: stylelint configuration
-- **File:** `packages/config/stylelint/index.js` · **Layer:** config
+- **File:** `packages/config/stylelint/index.js` (exported by `@budmon/config` as `./stylelint`), used by the root `stylelint.config.js` and the root `lint:css` script (§2.2.2). All of it lands in **S-11a** (A-14). · **Layer:** config
 - **Behaviour:** `plugins: ["stylelint-use-logical"]`, `rules: { "csstools/use-logical": ["always", { except: [] }] }`. A declaration preceded by the comment `/* rtl-exempt: <reason> */` is ignored (through `stylelint-disable-next-line csstools/use-logical` written by authors with the reason).
 
 #### F-5: TypeScript and Prettier bases
@@ -477,7 +537,7 @@ export interface RequestContext {
   - name: List changed files
     env:
       BASE_REF: ${{ github.base_ref }}
-    run: git diff --no-renames --name-only "origin/${BASE_REF}...HEAD" > "$RUNNER_TEMP/changed-files.txt"
+    run: git -c core.quotePath=false diff --no-renames --name-only "origin/${BASE_REF}...HEAD" > "$RUNNER_TEMP/changed-files.txt"
   - name: Migration files only on release branches (F-6)
     env:
       HEAD_REF: ${{ github.head_ref }}
@@ -488,7 +548,7 @@ export interface RequestContext {
       pnpm --filter @budmon/tools-ci exec tsx checkMigrationFiles.ts "${args[@]}"
   ```
   - `branch` = `github.head_ref` (the pull request's source branch, e.g. `release/v1.2.0`).
-  - `changedFiles` = the three-dot diff against the pull request's base (`github.base_ref`), so only the pull request's own changes count. `HEAD` is the pull request's merge ref checked out by `actions/checkout`. `--no-renames` lists both sides of a rename, so moving a file out of `apps/server/drizzle/` also counts.
+  - `changedFiles` = the three-dot diff against the pull request's base (`github.base_ref`), so only the pull request's own changes count. `HEAD` is the pull request's merge ref checked out by `actions/checkout`. `--no-renames` lists both sides of a rename, so moving a file out of `apps/server/drizzle/` also counts. `-c core.quotePath=false` writes non-ASCII paths verbatim instead of quoted, so they can't slip past the prefix check (A-16).
   - `isHotfixMergeBack` = the pull request carries the label `hotfix-merge-back` or `infra-merge-back`. The `labeled`/`unlabeled` triggers (§2.2 `ci.yml`) re-run the job when a label changes.
 - **Errors:** none thrown; failures are return values and exit codes (0 ok, 1 check failed, 64 usage or unreadable file).
 - **Calls:** `node:fs` (`readFileSync`, `realpathSync`) and `node:url` only in the entry guard; everything else is pure or goes through `deps`.
@@ -516,7 +576,7 @@ export interface RequestContext {
 #### F-9: `checkCatalogs`
 - **File:** `tools/ci/checkCatalogs.ts` · **Layer:** CI script (S-11a)
 - **Signature:** `export function checkCatalogs(input: { usedIds: ReadonlySet<string>; catalogs: Record<string, Record<string, string>> }): { missing: Record<string, string[]> }`
-- **Behaviour:** for each shipped locale in `catalogs` (`en` at launch; pseudo-locales are generated, not shipped), lists the used IDs it lacks. The CLI extracts IDs with `@formatjs/cli extract` over `apps/web/src/**/*.{ts,tsx}` and fails if anything is missing.
+- **Behaviour:** for each shipped locale in `catalogs` (`en` at launch; pseudo-locales are generated, not shipped), lists the used IDs it lacks. The CLI extracts IDs with `@formatjs/cli extract --additional-function-names t` (no `--id-interpolation-pattern`: IDs are the explicit ones, A-12) over `apps/web/src/**/*.{ts,tsx}` (the same call sites F-1's `formatjs` settings and F-3b check, A-12) and fails if anything is missing.
 
 ### 4.2 Shared library `@budmon/shared` (S-1)
 
@@ -854,6 +914,10 @@ Pure functions with no I/O. Imported by the server and the web app. Android mirr
   2. Terminates connections to `databaseName`, drops it (`WITH (FORCE)`), then F-14, then F-19 with `mode: "push"`, then the seeders when `seed` is true.
   3. `superuserUrl` comes from `DEV_SUPERUSER_URL` (development only; `.env.example`: `postgres://postgres:postgres@localhost:5432/postgres`). The dev roles' passwords come from `.data/dev-secrets/roles.json`, which `pnpm dev` creates with random values on first run.
 - **Errors:** a failed guard throws `ResetRefusedError` (exit 2, message "db:reset only runs against a local development or test database"). Otherwise rethrows.
+- **`seedDevelopmentDatabase`** (A-14, `pnpm db:seed`), same file:
+  - **Signature:** `export async function seedDevelopmentDatabase(input: { appEnv: AppEnv; superuserUrl: string }, deps: { seed: () => Promise<void> [inj] }): Promise<void>`
+  - **Behaviour:** applies exactly the guard of step 1 above (before any connection); then calls `deps.seed()` once. It never drops, creates or migrates anything; the database must already exist (created by `pnpm dev` or `db:reset`). F-94 supplies `deps.seed` as building a worker container from the development configuration, running F-23's `runSeeders` (every registered seeder, each idempotent) and closing the container.
+  - **Errors:** a failed guard throws `ResetRefusedError` with message "db:seed only runs against a local development or test database" (exit 2), and `deps.seed` isn't called. Errors from `deps.seed` are rethrown (exit 1 through F-94).
 
 #### F-21: `loadReferenceData`
 - **File:** `platform/db/referenceData.ts` · **Layer:** repo
@@ -1375,7 +1439,7 @@ Pure functions with no I/O. Imported by the server and the web app. Android mirr
   Unknown command → `Unknown command: <name>` and the usage text, exit 64. Config kind: `worker` with `WORKER_ROLES=general` for every command except `secrets:rewrap-api` and `identity:bootstrap-owner` (kind `api`; the latter connects as `budmon_app` and uses the API's `PUBLIC_ORIGIN` for the link). In stage 0 it's run only inside the running `api` container through `budmon-local bootstrap-owner` (F-178), because `docker compose exec` output isn't captured by the logging driver; a one-off `compose run` container would put the token into the json-file logs.
 
 #### F-94: `main/dbReset.ts` (`pnpm db:reset`)
-- **Behaviour:** reads `DEV_SUPERUSER_URL` and the dev role secrets, then calls F-20 with `seed: !argv.includes("--no-seed")`.
+- **Behaviour:** reads `DEV_SUPERUSER_URL` and the dev role secrets. With `--seed-only` (root `pnpm db:seed`, §2.2.2, A-14) it calls F-20's `seedDevelopmentDatabase` and nothing else; otherwise it calls F-20 `resetDevelopmentDatabase` with `seed: !argv.includes("--no-seed")`. `--seed-only` together with `--no-seed` prints "--seed-only and --no-seed can't be combined" and exits 64. Exit codes: 0 success; 2 `ResetRefusedError`; 1 any other error.
 
 #### F-95: `main/dev.ts`: see F-22.
 
@@ -2524,7 +2588,7 @@ flowchart TD
 | `SchemaStepError(code, subject?)`, codes `invalid_verifier`, `password_form_in_production`, `table_without_grants`, `credential_table_granted_to_capture`, `minor_units_changed`, `queue_schema_ahead`, `queue_policy_changed` | `platform/db/schemaStep.ts` | F-15, F-16, F-21, F-74, F-75 |
 | `PushTargetNotEmptyError` | `platform/db/schemaPush.ts` | F-17 |
 | `UnknownMigrationError` | `platform/db/migrations.ts` | F-18 |
-| `ResetRefusedError` | `platform/db/reset.ts` | F-20 |
+| `ResetRefusedError` | `platform/db/reset.ts` | F-20 (`resetDevelopmentDatabase`, `seedDevelopmentDatabase`, A-14) |
 | `JobPayloadInvalidError`, `UnsafeJobPayloadError`, `MissingQueueError`, `JobFailure` | `platform/queue/*` | F-72, F-73, F-76, F-78 |
 | `EnvelopeFormatError`, `EnvelopeAuthError`, `UnknownKeyVersionError`, `KmsUnavailableError` | `platform/crypto/*` | F-110 to F-118 |
 | `OAuthExchangeError`, `EgressDeniedError` | `platform/crypto/*` | F-120, F-121 |
@@ -2703,7 +2767,7 @@ The platform's slices are **capability slices** rather than one story each. Each
 
 ### S-0: Repository, clean-up, lint and CI skeleton (US-1, US-14, US-12)
 - **Depends on:** none
-- **Functions:** F-1, F-2 (rule file only; tested in S-11a), F-3 (same), F-5, F-6 (including its CLI, A-7); root `package.json`, workspace files, `.gitignore`, `.gitattributes` (§2.2.1, A-9), root `vitest.config.ts` (§10.1, A-8), README; `.github/workflows/ci.yml` steps 1 to 3, including the `migrations` job's F-6 step (A-7); the removals in §2.1.
+- **Functions:** F-1, F-2 (rule file only; tested in S-11a), F-3 (same), F-3b (same, A-12), F-5, F-6 (including its CLI, A-7); root `package.json` with only S-0's scripts from §2.2.2 (A-14), workspace files including `pnpm-workspace.yaml`'s `peerDependencyRules` (A-13), `.gitignore`, `.gitattributes` (§2.2.1, A-9), root `vitest.config.ts` (§10.1, A-8), README; `.github/workflows/ci.yml` steps 1 to 3, including the `migrations` job's F-6 step (A-7); the removals in §2.1.
 - **Scenarios:**
 
 | Scenario | Happy / unhappy | Expected | Tests |
@@ -2717,6 +2781,11 @@ The platform's slices are **capability slices** rather than one story each. Each
 | `ci.yml` feeds F-6 the head branch, the pull request's changed files and its merge-back labels | happy | As in F-6's wiring (A-7). | TP-0.19 |
 | A checkout on Windows | happy | Text and shell scripts are LF, Windows scripts CRLF, binaries untouched; the index holds no CRLF text. | TP-0.18 |
 | `pnpm check` on the skeleton | happy | Format, lint, type-check and unit tests pass. | TP-0.6 |
+| ESLint 10 with its lint plugins (A-13) | happy | formatjs 8.1.1 and jsx-a11y 6.10.2 pinned; one peer rule (jsx-a11y); `pnpm install` prints no peer warning. | TP-0.20 |
+| Web lint rules under ESLint 10 (A-12, A-13, A-18) | unhappy | A web fixture with one violation per configured rule (including malformed ICU): each rule reports, nothing crashes, `formatjs/enforce-id` isn't active. | TP-0.22 |
+| Float conversions bypassing the money rule (A-15) | unhappy | `Number.parseFloat`, `globalThis.parseFloat`, `window.parseFloat`, unary `+` fail lint. | TP-0.4 |
+| A workflow with a tag-pinned action or a `${{ }}` inside `run:` (A-17) | unhappy | TP-0.23 fails and names the file and job. | TP-0.23 |
+| Root scripts (A-14) | happy | Every root script is in §2.2.2 with its exact command; S-0's are all present. | TP-0.21 |
 | Strict TypeScript | unhappy | An unchecked index access fails type-check. | TP-0.7 |
 
 - **Acceptance criteria:**
@@ -2750,7 +2819,7 @@ The platform's slices are **capability slices** rather than one story each. Each
 
 ### S-2: Configuration, database, schema step, local stack and test tooling (US-5, US-2, US-7 development)
 - **Depends on:** S-1
-- **Functions:** F-7, F-10 to F-23, F-90 to F-92 (start-up and config handling only), F-94, F-95, F-96 (base members), §3 tables, `infra/compose.yaml`, test tooling (§10.1).
+- **Functions:** F-7, F-10 to F-23 (including F-20 `seedDevelopmentDatabase`, A-14), F-90 to F-92 (start-up and config handling only), F-94, F-95, F-96 (base members), §3 tables, `infra/compose.yaml`, test tooling (§10.1); root scripts `dev`, `db:reset`, `db:seed`, `db:migrate` (§2.2.2, A-14).
 - **Scenarios:**
 
 | Scenario | Happy / unhappy | Expected | Tests |
@@ -2772,6 +2841,7 @@ The platform's slices are **capability slices** rather than one story each. Each
 | Reference data load; `minor_units` changed | happy and unhappy | Upserted; error and rollback. | TP-2.14 |
 | Schema step end to end, twice | happy | The report; the second run is a no-op. | TP-2.15 |
 | `db:reset` against a non-local host or in production | unhappy | `ResetRefusedError`, exit 2. | TP-2.16 |
+| `db:seed` on the local database; against a non-local host or in production; combined with `--no-seed` (A-14) | happy and unhappy | Seeders run without dropping anything; `ResetRefusedError`, exit 2, seeders not run; exit 64. | TP-2.24 |
 | Test tooling | happy | Per-file database from the template; connects as `budmon_app`. | TP-2.17 |
 | Local stack | happy | `pnpm dev` serves `/health/ready` 200 within 90 s. | TP-2.18 |
 | Pool and TLS options | happy | As in F-12. | TP-2.19 |
@@ -2804,7 +2874,7 @@ The platform's slices are **capability slices** rather than one story each. Each
 
 ### S-4: Contract, OpenAPI, API server and error model (US-3, US-9)
 - **Depends on:** S-3
-- **Functions:** F-8, F-50 to F-58, F-90 (complete), F-96 (API members used so far), F-160, F-340 to F-349, CI step 2 (contract checks: drift, `oasdiff`, F-8, F-348).
+- **Functions:** F-8, F-50 to F-58, F-90 (complete), F-96 (API members used so far), F-160, F-340 to F-349, root script `contract:openapi` (§2.2.2, A-14), CI step 2 (contract checks: drift, `oasdiff`, F-8, F-348).
 - **Scenarios:**
 
 | Scenario | Happy / unhappy | Expected | Tests |
@@ -2942,13 +3012,14 @@ The platform's slices are **capability slices** rather than one story each. Each
 
 ### S-11a: Web lint guards, i18n and pseudo-locales (D-37, D-38, D-39)
 - **Depends on:** S-4
-- **Functions:** F-2, F-3, F-4, F-9, F-206, F-207, F-215, F-221; the web workspace scaffold (Vite, Tailwind, the ESLint and stylelint wiring).
+- **Functions:** F-2, F-3, F-3b (tests; the rule files exist from S-0), F-4 with the root `stylelint.config.js`, the `@budmon/config` `./stylelint` export and root scripts `lint:css` and `lint` (changed) (§2.2.2, A-14), F-9, F-206, F-207, F-215, F-221; the web workspace scaffold (Vite, Tailwind, the ESLint and stylelint wiring).
 - **Scenarios:**
 
 | Scenario | Happy / unhappy | Expected | Tests |
 | -------- | --------------- | -------- | ----- |
 | Locale, direction, relative times | happy | As in F-206. | TP-11.6 |
-| Lint guards (Tailwind, icons, stylelint, formatjs, blocking a11y rules) | unhappy | Each fails on its fixture. | TP-11.18 to TP-11.22 |
+| Lint guards (Tailwind, icons, stylelint, formatjs, blocking a11y rules) | unhappy | Each fails on its fixture; no rule throws under ESLint 10 (A-13). | TP-11.18 to TP-11.22 |
+| Message IDs missing, computed or malformed (A-12) | unhappy | `budmon/message-id` reports each; catalog-style IDs pass. | TP-11.30 |
 | Catalog completeness; pseudo-locale generation | unhappy and happy | As in F-9/F-207. | TP-11.23, TP-11.24 |
 | Icons; `version.json` | happy | As in F-215/F-221. | TP-11.26, TP-11.27 |
 
@@ -2958,7 +3029,7 @@ The platform's slices are **capability slices** rather than one story each. Each
 
 ### S-11b: Web UI foundations (D-7, J-1 to J-3, J-6, J-7)
 - **Depends on:** S-11a
-- **Functions:** F-200 to F-205, F-209 to F-214, F-216 to F-218; CI step 5 (Playwright, pseudo-RTL run, axe report).
+- **Functions:** F-200 to F-205, F-209 to F-214, F-216 to F-218; CI step 5 (Playwright, pseudo-RTL run, axe report); root scripts `test:e2e` and `check:all` (§2.2.2, A-14).
 - **Scenarios:**
 
 | Scenario | Happy / unhappy | Expected | Tests |
@@ -2996,7 +3067,7 @@ The platform's slices are **capability slices** rather than one story each. Each
 
 ### S-13: Android skeleton (D-8, J-1, J-2, J-4, J-5)
 - **Depends on:** S-4, S-7
-- **Functions:** F-250 to F-264, the generated client; CI step 6.
+- **Functions:** F-250 to F-264, the generated client; CI step 6; root script `check:all` extended with `./gradlew check` (§2.2.2, A-14).
 - **Scenarios:**
 
 | Scenario | Happy / unhappy | Expected | Tests |
@@ -3019,7 +3090,7 @@ The platform's slices are **capability slices** rather than one story each. Each
 
 ### S-14: Release-migration tooling (US-7)
 - **Depends on:** S-2
-- **Functions:** F-6b, F-180 to F-185, the CI wiring for branch types (D-12), and `.github/workflows/tag.yml` in its stage-0 form (§2.2).
+- **Functions:** F-6b, F-180 to F-185, root scripts `db:release-migration`, `db:pending-report`, `db:check-migrations`, `db:check-risky` (§2.2.2, A-14), the CI wiring for branch types (D-12), and `.github/workflows/tag.yml` in its stage-0 form (§2.2).
 - **Scenarios:**
 
 | Scenario | Happy / unhappy | Expected | Tests |
@@ -3036,7 +3107,7 @@ The platform's slices are **capability slices** rather than one story each. Each
 
 ### S-15: Stage-0 laptop stack (D-29 stage 0)
 - **Depends on:** S-5 to S-10, S-11b (the web image embeds the built SPA and `version.json`), S-14
-- **Functions:** F-170, F-175, F-178, F-179, F-185, F-190, F-191; `images/*`; `infra/local/*`; runbook `infra/runbooks/stage0-laptop.md`. (`.gitattributes` moved to S-0, A-9.)
+- **Functions:** F-170, F-175, F-178, F-179, F-185, F-190, F-191; `images/*`; `infra/local/*`; root script `test:bats` (§2.2.2, A-14); runbook `infra/runbooks/stage0-laptop.md`. (`.gitattributes` moved to S-0, A-9.)
 - **Scenarios:**
 
 | Scenario | Happy / unhappy | Expected | Tests |
@@ -3098,7 +3169,7 @@ The repository has no test tooling yet. The test-architect sets it up in S-0 to 
   | `server-int` | node, `globalSetup` | `apps/server/test/integration/**/*.test.ts` |
   | `web-unit` | jsdom, `@solidjs/testing-library`, MSW | `apps/web/test/**/*.test.tsx?` |
   | `tools` | node | `tools/*/test/**/*.test.ts`, `infra/budmonctl/test/**/*.test.ts`, `packages/config/test/**/*.test.ts` |
-- **Scripts:** root `pnpm test` runs all projects except `server-int`. `pnpm test:int` runs `server-int`. `pnpm test:e2e` runs Playwright. `pnpm check` = format + lint + typecheck + `test` + `test:int`.
+- **Scripts** (exact commands and owning slices in §2.2.2, A-14): root `pnpm test` runs all projects except `server-int`. `pnpm test:int` runs `server-int`. `pnpm test:e2e` runs Playwright (S-11b). `pnpm test:bats` runs the bats suites (S-15). `pnpm check` = format + lint + typecheck + `test` + `test:int`; `pnpm check:all` = `check` + `test:e2e` (S-11b) + Android `./gradlew check` (S-13).
 - **Integration database** (`apps/server/test/setup/globalSetup.ts`):
   1. Start `postgres:18` (same digest as `images/postgres`'s base) with Testcontainers and the command `postgres -c shared_preload_libraries=pg_stat_statements -c pg_stat_statements.track_utility=off`, or use `TEST_DATABASE_URL` (a superuser URL) if set.
   2. `bootstrapCluster` (F-14), then `runSchemaStep` into database `budmon_template`, with mode `push`, or `migrate` when `BUDMON_SCHEMA_MODE=migrate` (CI sets it on `release/*` and `hotfix/*`), using test role passwords.
@@ -3144,15 +3215,19 @@ Types: **U** unit, **I** integration (real Postgres and/or HTTP in-process), **E
 | ID | Slice | Type | Target | Setup | Input / action | Expected |
 | -- | ----- | ---- | ------ | ----- | -------------- | -------- |
 | TP-0.1 | S-0 | S | repo layout | checkout | Check the paths | `server/`, root `compose.yaml`, `code-bites.md` and `.prettierrc` don't exist; `git ls-files` has no `dist/` |
-| TP-0.2 | S-0 | U | F-1 layering | ESLint API on fixture files | `x/xRouter.ts` imports `./xRepo.js`; `x/xService.ts` imports `drizzle-orm`; `x/xRepo.ts` imports `drizzle-orm` | Errors on the first two; none on the third |
+| TP-0.2 | S-0 | U | F-1 layering (A-11) | ESLint API on fixture files at these repository paths | (a) `apps/server/src/x/xRouter.ts` imports `./xRepo.js`; (b) `apps/server/src/x/xService.ts` imports `drizzle-orm`; (c) `apps/server/src/x/xService.ts` imports `pg`; (d) `apps/server/src/platform/x/xService.ts` imports `../db/client.js`; (e) `apps/server/src/x/xRepo.ts` imports `drizzle-orm`; (f) `apps/server/src/x/xService.ts` imports `../platform/db/types.js`; (g) `apps/web/src/x/xService.ts` imports `drizzle-orm`; (h) `tools/ci/xService.ts` imports `pg` | (a) to (d): a `no-restricted-imports` error; (e) to (h): no `no-restricted-imports` error |
 | TP-0.3 | S-0 | U | F-1 logging | same | `import pino from "pino"` in `platform/http/x.ts`; `console.log` in `platform/x.ts`; `console.log` in `main/x.ts` | Error, error, none |
-| TP-0.4 | S-0 | U | F-1 money | same | `parseFloat(a)`; `Number(a)`; `bigint({ mode: "number" })`; `// eslint-disable-next-line no-restricted-syntax -- reason` before `Number(a)`; the same without `-- reason` | Errors; none; error |
+| TP-0.4 | S-0 | U | F-1 money (A-15) | same | `parseFloat(a)`; `Number(a)`; `bigint({ mode: "number" })`; `Number.parseFloat(a)`; `globalThis.parseFloat(a)`; `window.parseFloat(a)`; `+a`; `-a`; `Number.parseInt(a, 10)`; `// eslint-disable-next-line no-restricted-syntax -- reason` before `Number(a)`; the same without `-- reason` | Errors on the first seven; none on `-a` and `Number.parseInt`; none; error |
 | TP-0.5 | S-0 | U | F-6 | none | branch `feat/x` + `apps/server/drizzle/0001.sql`; `release/v1.0.0` + same; `feat/x` without; merge-back true; `infra/v1.0.0-infra.1` | `ok:false` with the file listed; ok; ok; ok; ok |
 | TP-0.6 | S-0 | S | `pnpm check` | clean clone | Run | Exit 0 |
 | TP-0.7 | S-0 | S | F-5 | fixture `const a: number[] = []; const b: number = a[0];` | `tsc -p` fixture | TS2322 error (`noUncheckedIndexedAccess`) |
 | TP-0.17 | S-0 | U | F-6 CLI (`parseCheckMigrationFilesArgs`, `parseChangedFiles`, `runCheckMigrationFilesCli`) | fake `readFile` (map of path → text, throws `Error("ENOENT")` for unknown paths), recording `stdout`/`stderr` | (a) `--branch feat/x --changed-files /c.txt` with `/c.txt` = `"apps/server/drizzle/0001.sql\nREADME.md\n"`; (b) same with `--hotfix-merge-back` (in any position); (c) `--branch release/v1.0.0 --changed-files /c.txt`; (d) `--branch feat/x --changed-files /empty.txt` (`""`); (e) `[]`; (f) `--changed-files /c.txt`; (g) `--branch` alone; (h) `--branch "" --changed-files /c.txt`; (i) `--branch --changed-files /c.txt`; (j) `--branch a --branch b --changed-files /c.txt`; (k) `--branch=feat/x --changed-files /c.txt`; (l) `--branch feat/x extra --changed-files /c.txt`; (m) `--branch feat/x --changed-files /missing.txt`; (n) `parseChangedFiles("a\r\nb\n\nc")` | (a) exit 1, stderr = F-6's message listing `apps/server/drizzle/0001.sql`, nothing on stdout; (b) exit 0, stdout `checkMigrationFiles: ok (2 changed files)`; (c) exit 0; (d) exit 0, `ok (0 changed files)`; (e) exit 64, stderr `checkMigrationFiles: Missing required argument: --branch` then the usage line; (f) the same as (e); (g) `Missing value for --branch`; (h) and (i) `Missing value for --branch`; (j) `Duplicate argument: --branch`; (k) `Unknown argument: --branch=feat/x`; (l) `Unknown argument: extra`; all (e) to (l) exit 64 with the usage line and `readFile` not called; (m) exit 64, stderr `checkMigrationFiles: cannot read /missing.txt: ENOENT`; (n) `["a", "b", "c"]`. Importing the module runs no CLI (no output, `process.exitCode` unchanged) |
 | TP-0.18 | S-0 | S | `.gitattributes` (§2.2.1) | repository root; `git` | (a) read the file; (b) `git check-attr text eol diff -- a.ts x/y.sh x.bash t/x.bats apps/android/gradlew infra/local/budmon-local x.ps1 x.bat x.cmd i.png k.jar d.dump`; (c) `git ls-files --eol` | (a) its non-comment, non-blank lines equal §2.2.1's, in order; (b) `a.ts`: text `auto`, eol `lf`; every shell path: text `set`, eol `lf`; `.ps1`/`.bat`/`.cmd`: text `set`, eol `crlf`; `.png`/`.jar`/`.dump`: text `unset`, diff `unset`; (c) no entry has index status `i/crlf` or `i/mixed` |
-| TP-0.19 | S-0 | S | `ci.yml` F-6 wiring (A-7) | parse `.github/workflows/ci.yml` as YAML | Inspect `on` and the `migrations` job | `on.pull_request.types` includes `opened`, `synchronize`, `reopened`, `labeled`, `unlabeled`; the job's `if` restricts it to `pull_request`; checkout has `fetch-depth: 0`; a step's `run` contains `git diff --no-renames --name-only` against `origin/${BASE_REF}...HEAD` with `env.BASE_REF` = `${{ github.base_ref }}`; the F-6 step's `env.HEAD_REF` = `${{ github.head_ref }}`, its `env.MERGE_BACK` tests both labels `hotfix-merge-back` and `infra-merge-back`, its `run` calls `checkMigrationFiles.ts` with `--branch "$HEAD_REF"` and `--changed-files`; no `run:` in the job contains `${{ github.head_ref }}` or `${{ github.event.pull_request` |
+| TP-0.19 | S-0 | S | `ci.yml` F-6 wiring (A-7) | parse `.github/workflows/ci.yml` as YAML | Inspect `on` and the `migrations` job | `on.pull_request.types` includes `opened`, `synchronize`, `reopened`, `labeled`, `unlabeled`; the job's `if` restricts it to `pull_request`; checkout has `fetch-depth: 0`; a step's `run` contains `git -c core.quotePath=false diff --no-renames --name-only` (A-16) against `origin/${BASE_REF}...HEAD` with `env.BASE_REF` = `${{ github.base_ref }}`; the F-6 step's `env.HEAD_REF` = `${{ github.head_ref }}`, its `env.MERGE_BACK` tests both labels `hotfix-merge-back` and `infra-merge-back`, its `run` calls `checkMigrationFiles.ts` with `--branch "$HEAD_REF"` and `--changed-files`; no `run:` in the job contains `${{ github.head_ref }}` or `${{ github.event.pull_request` |
+| TP-0.20 | S-0 | S | ESLint 10 dependency pins (A-13) | read `pnpm-workspace.yaml` and `packages/config/package.json`; run `pnpm install --frozen-lockfile` in a clean checkout | (a) inspect the files; (b) capture the install output | (a) `peerDependencyRules.allowedVersions` has exactly one key, `eslint-plugin-jsx-a11y>eslint`, with value `"10"`, and `peerDependencyRules` has no other field; `eslint-plugin-formatjs` is `8.1.1` and `eslint-plugin-jsx-a11y` is `6.10.2` (exact, no range); `eslint` is `10.12.0`; (b) exit 0 and no peer-dependency warning |
+| TP-0.21 | S-0 (extended by each slice that adds a root script) | S | §2.2.2 root scripts (A-14) | read the root `package.json` | Compare `scripts` with §2.2.2 | Every key in `scripts` is a §2.2.2 row and its value equals that row's root command for the current slice; every row owned by S-0 (`format`, `format:check`, `lint`, `typecheck`, `test`, `test:int`, `check`) is present. Later slices add their rows to the expected set |
+| TP-0.22 | S-0 | U | F-1 rule 4 web rules smoke (A-12, A-13) | `lintFixture` (§10.1 helper) with one fixture `apps/web/src/smoke.tsx` (the fixture tsconfig includes `*.tsx`; stubs for `lucide-solid`) | The fixture holds one violation for each configured web rule: `formatjs/enforce-default-message` (`t({ id: "a.b" })`), `formatjs/no-literal-string-in-jsx` (`<p>Hello</p>`), `budmon/message-id` (`t({ defaultMessage: "x" })`), `budmon/no-physical-tailwind` (`class="ml-2"`), `budmon/icon-from-registry` (`import { Home } from "lucide-solid"`), `formatjs/no-invalid-icu` (`defineMessage({ id: "a.c", defaultMessage: "{count, plural, one {x}" })`, malformed ICU, A-18), and the eight blocking `jsx-a11y` rules as in TP-11.22 | The run resolves (no thrown error, no message with `fatal: true`); the set of reported `ruleId`s contains all fourteen configured web rules, and `formatjs/no-invalid-icu` reports on the malformed message's `defaultMessage`; no message has `ruleId` `formatjs/enforce-id` |
+| TP-0.23 | S-0 (applies to every later workflow) | S | workflow rules (A-17), `tools/ci/test/workflowSecurity.test.ts` | parse every `*.yml`/`*.yaml` under `.github/workflows/` as YAML | (a) list the directory; (b) collect every job-level and step-level `uses:`; (c) collect every step `run:` | (a) at least one workflow file; (b) each value is a string that starts with `./` or matches `^[^@\s]+@[0-9a-f]{40}$`; (c) no `run:` contains `${{` |
 | TP-1.1 | S-1 | U | F-300 `parseDecimal` | none | "0.1", "-12.50", "1.5e-3", "1e3", "", "1.", "abc", "1e9999" | 1/10, −25/2, 3/2000, 1000/1; `RangeError` ×4 |
 | TP-1.2 | S-1 | U | F-300 `roundHalfEven` | vectors | each case | `expected` |
 | TP-1.3 | S-1 | U | F-301 redaction | `m = Money.of(987654321n, EGP)` | `String(m)`, `JSON.stringify({m})`, `util.inspect(m)`, `` `${m}` `` | All contain `[redacted]` and no `987654321` |
@@ -3189,6 +3264,7 @@ Types: **U** unit, **I** integration (real Postgres and/or HTTP in-process), **E
 | TP-2.21 | S-2 | U | F-11 `GOOGLE_OAUTH_REDIRECT_ORIGIN` | `APP_ENV=production`, otherwise valid | api with the variable unset and `PUBLIC_ORIGIN=https://a.ts.net`; `http://localhost:8080`; `http://localhost:8080/`; `http://example.com`; `https://a.ts.net/cb`; capture worker with the client id set and the variable unset | `https://a.ts.net`; accepted; problem (trailing slash); problem (http only for localhost); problem (path); problem "required" |
 | TP-2.22 | S-2 | U | F-11 `SMTP_URL`, `SMTP_PASSWORD_FILE`, `EMAIL_FROM`, worker `PUBLIC_ORIGIN` (A-2) | worker with `general`, `APP_ENV=production`, otherwise valid | `smtp://mailpit:1025`; `smtps://u@smtp.example.com`; `smtp://u@smtp.example.com:587`; `smtp://localhost:1025`; `smtp://u:pw@smtp.example.com:587`; `http://x`; `SMTP_PASSWORD_FILE` empty; `EMAIL_FROM` unset; `PUBLIC_ORIGIN` unset | accepted, plaintext; accepted, implicit TLS port 465; accepted, STARTTLS required; problem (plain SMTP to localhost only in development and test); problem (password in URL, value not echoed); problem (scheme); `smtpPassword` undefined; problem "required"; problem "required" |
 | TP-2.23 | S-2 | U | F-11 `GOOGLE_SIGNIN_*`, `RECOVERY_CODE_HMAC_KEYS_FILE` (A-3) | api, `APP_ENV=production`, otherwise valid | client id unset; client id set without the secret file; with callback `http://localhost:8080` and app origins `https://a.ts.net,http://localhost:8080`; app origins containing `https://a.ts.net/path`; Android ids `x.apps.googleusercontent.com,bad`; recovery key ring with `current` not in `keys`; recovery file missing; `APP_ENV=development` with the client id unset | problem "required"; problem "required" for `GOOGLE_SIGNIN_CLIENT_SECRET_FILE`; accepted with two app origins; problem (path); problem naming `GOOGLE_SIGNIN_ANDROID_CLIENT_IDS`; problem; problem "file not readable"; accepted with `googleSignIn` undefined |
+| TP-2.24 | S-2 | U | F-20 `seedDevelopmentDatabase`, F-94 `--seed-only` (A-14) | fake `deps.seed` recording calls; for F-94, fakes for F-20's two functions | (a) `appEnv: "development"`, host `localhost`; (b) `appEnv: "production"`, host `localhost`; (c) `appEnv: "development"`, host `db.example.com`; (d) `deps.seed` rejects with `Error("x")`; (e) F-94 argv `["--seed-only"]`; (f) F-94 argv `[]`; (g) F-94 argv `["--seed-only", "--no-seed"]` | (a) `seed` called once; (b), (c) `ResetRefusedError` with message "db:seed only runs against a local development or test database", `seed` not called; (d) rejects with that error; (e) only `seedDevelopmentDatabase` called, exit 0; (f) only `resetDevelopmentDatabase` called with `seed: true`; (g) neither called, stderr "--seed-only and --no-seed can't be combined", exit 64 |
 | TP-3.1 | S-3 | U | F-30 | none | `{userId:"u1", payee:"x", count:-1, route:"/a b", rateDate:"2026-10-05"}` | `{userId:"u1", count:"[invalid]", route:"[invalid]", rateDate:"2026-10-05"}`, `dropped: 3` |
 | TP-3.2 | S-3 | U | F-31 | `logCapture`, `onDrop` spy | `info("Bad Event!", {payee: CANARIES.payee})`; `error("x_failed", {}, new Error(CANARIES.message))` | Line 1 `event:"invalid_event"`, `dropped:2`, `onDrop(2)`; line 2 has `err.class:"Error"`; the canary is absent from all lines |
 | TP-3.3 | S-3 | U | F-32 | `Secret.of(CANARIES.token)` | `JSON.stringify`, `util.inspect({s})`, template, `console.log` captured | `[redacted]`; no canary |
@@ -3323,10 +3399,10 @@ Types: **U** unit, **I** integration (real Postgres and/or HTTP in-process), **E
 | TP-11.16 | S-11b | E | layout | viewport 360×740 | Each platform route | `document.scrollingElement.scrollWidth ≤ 360` |
 | TP-11.17 | S-11b | E | pseudo-RTL | locale `ar-XB`, `/__fixtures/rtl-probe` | For each `data-rtl-probe` | `start` elements' right edge = container right edge ±1 px; `end` at the left edge; `mirror` icons' computed transform has `scaleX(-1)`; `no-mirror` none; no horizontal overflow; screenshot saved |
 | TP-11.18 | S-11a | U | F-2 | RuleTester | `class="ml-2"`, `"ms-2"`, `"rtl:ml-2"`, `"space-x-2"`, `"space-x-2 rtl:space-x-reverse"`, `"text-left"`, a line after `// rtl-exempt: logo`, `cn("pr-4")` | Error, ok, ok, error, ok, error, ok, error |
-| TP-11.19 | S-11a | U | F-3 | RuleTester | import from `lucide-solid` in a component; same in `ui/icons/registry.ts`; `<svg>` in a page | Error; ok; error |
+| TP-11.19 | S-11a | U | F-3 (A-10) | RuleTester; filenames are absolute paths ending as given | In `apps/web/src/pages/Home.tsx`: (a) `import { Home } from "lucide-solid"`; (b) `import x from "lucide-solid/icons/home"`; (c) `import type { P } from "@tabler/icons-solidjs"`; (d) `export { Home } from "lucide-solid"`; (e) `export * from "~icons/mdi"`; (f) `await import("virtual:icons/mdi/home")`; (g) `import x from "@iconify/utils"`; (h) `import { Icon } from "../ui/icons/Icon.js"`; (i) `import { icons } from "../ui/icons/registry.js"`; (j) `import { x } from "@budmon/shared/icons"`; (k) `import { createSignal } from "solid-js"`; (k2) `import { IconButton } from "./iconButton.js"`; (l) `import logo from "./logo.svg"`; (m) `import logo from "./logo.svg?component"`; (n) `await import(name)` with `name` a variable; (o) `<svg/>`. In `apps/web/src/ui/icons/registry.ts`: (p) `import { Home } from "lucide-solid"`; (q) `import a from "./arrow.svg"`. In `apps/web/src/ui/icons/Icon.tsx`: (r) `<svg/>`; (s) `import { Home } from "lucide-solid"`. A Windows path `C:\\repo\\apps\\web\\src\\ui\\icons\\registry.ts`: (t) as (p) | (a) to (g): one `registry` error each; (h) to (k2): ok; (l), (m): error; (n): ok; (o): error; (p), (q): ok; (r): ok; (s): error; (t): ok |
 | TP-11.20 | S-11a | U | F-4 | stylelint API | `margin-left: 1px`; `margin-inline-start: 1px` | Error; ok |
-| TP-11.21 | S-11a | U | F-1 formatjs | ESLint | `<p>Hello</p>`; `<p>{t(m)}</p>` | Error; ok |
-| TP-11.22 | S-11a | U | F-1 a11y | ESLint | `<img src="a">`; `<button><Icon name="x"/></button>`; `<div aria-foo="1">`; `<div tabindex={1}>`; `<div onClick={f}>` | Error ×4 (blocking set); the last isn't reported (rule off) |
+| TP-11.21 | S-11a | U | F-1 formatjs | ESLint | `<p>Hello</p>`; `<p>{t(m)}</p>` | Error; ok. The ESLint run uses `eslint` 10.12.0 and completes without a thrown error (A-13); `formatjs/enforce-default-message` reports `t({ id: "a.b" })` without `defaultMessage` (proves `additionalFunctionNames`, A-12); `formatjs/no-invalid-icu` (A-18) reports `t({ id: "a.b", defaultMessage: "{count, plural, one {x}" })` and `t({ id: "a.c", defaultMessage: "Hello {name" })`, and doesn't report `t({ id: "a.d", defaultMessage: "{count, plural, one {# item} other {# items}}" })` |
+| TP-11.22 | S-11a | U | F-1 a11y | ESLint | `<img src="a">`; `<button><Icon name="x"/></button>`; `<div aria-foo="1">`; `<div tabindex={1}>`; `<div onClick={f}>` | Error ×4 (blocking set); the last isn't reported (rule off); with `eslint` 10.12.0 each of the eight blocking `jsx-a11y` rules reports on a fixture of its own and none throws (A-13) |
 | TP-11.23 | S-11a | U | F-9 | none | used `{a,b}`, en `{a}` | missing `{en:[b]}` |
 | TP-11.24 | S-11a | U | F-207 | none | `"{count, plural, one {# item} other {# items}} for {name}"` | Both outputs parse as ICU; arguments and keywords unchanged; literal text transformed |
 | TP-11.25 | S-11b | U | F-217 | event with `request.url` with a query, `exception.value` = canary | `scrubWebEvent` | URL without query; value replaced; init options without Replay |
@@ -3334,6 +3410,7 @@ Types: **U** unit, **I** integration (real Postgres and/or HTTP in-process), **E
 | TP-11.27 | S-11a | S | F-221 | `BUDMON_BUILD_NUMBER=12 vite build` | Read `dist/version.json` | `{"buildNumber":12}` |
 | TP-11.28 | S-11b | E | DV-3 spike | `/__fixtures/kobalte-spike` | Keyboard-only: open and close the dialog (focus returns), choose a combobox option, type a date, open a menu and pick an item | Each works without a mouse; focus is visible |
 | TP-11.29 | S-11b | U | F-212 | fake timers | `showToast` info; hover then advance 7 s; leave and advance 6 s; `tone: "error"`; `persistent: true` advance 60 s; `dismissToast(id)` | Shown in a polite region; still shown while hovered; closed; rendered in the assertive region; still shown; removed |
+| TP-11.30 | S-11a | U | F-3b (A-12) | RuleTester, filename `apps/web/src/x.tsx` | (a) `t({ id: "error.generic.read", defaultMessage: "x" })`; (b) `defineMessage({ id: "validation.too_small", defaultMessage: "x" })`; (c) `defineMessages({ a: { id: "home.placeholder", defaultMessage: "x" } })`; (d) `t({ defaultMessage: "x" })`; (e) `defineMessages({ a: { defaultMessage: "x" } })`; (f) `t({ id: key, defaultMessage: "x" })`; (g) `` t({ id: `a.${k}`, defaultMessage: "x" }) ``; (h) `` t({ id: `home.title`, defaultMessage: "x" }) ``; (i) `t({ id: "Error.read", defaultMessage: "x" })`; (j) `t({ id: "error", defaultMessage: "x" })`; (k) `t({ id: "error.", defaultMessage: "x" })`; (l) `intl.formatMessage({ id: "a-b.c", defaultMessage: "x" })`; (m) `t({ ...base })`; (n) `t(m)`; (o) `other({ defaultMessage: "x" })` | (a), (b), (c), (h): ok; (d), (e): `missing`; (f), (g): `notLiteral`; (i), (j), (k), (l): `format`; (m), (n), (o): ok |
 | TP-12.1 | S-12 | U | F-220 | fake `fetchPage` with 100 pages of 100 | Load 60 pages sequentially; `ensurePage(0)`; a fetch error | Pages 0..9 dropped (`rowAt(5)` undefined) while `rowCount` = 6000; after `ensurePage(0)`, `rowAt(5)` equals the original row; `error()` set and fetching stopped |
 | TP-12.2 | S-12 | U | F-219 | source with 1,000 rows, page 2 dropped | render | `role="grid"`, `aria-rowcount`, rows with `aria-rowindex` = index + 2; placeholders `aria-busy="true"` with the same height |
 | TP-12.3 | S-12 | E | F-219 | fixture | ArrowDown ×3, End, Enter; in `ar-XB` ArrowLeft | Focus moves and is scrolled into view; `onRowActivate` called; ArrowLeft moves to the next cell (reversed) |
