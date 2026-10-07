@@ -1,7 +1,7 @@
 ---
 module: identity
 doc: lld-brief
-summarises: lld.md v0.1
+summarises: lld.md v0.2
 ---
 
 # Identity: LLD brief
@@ -35,13 +35,17 @@ Deliberately left out: changing your email address, passkeys, other sign-in prov
 | - | ---- | -------------- | ------- |
 | 1 | **Decided in the HLD under your delegation, flagged "needs user confirmation":** 90-day absolute session limit; sharing invitations count against the inviter's allowance; you can turn off someone's two-step verification; finding users by exact email only (no invite links yet); all security notices are emailed. | These are product choices you may want to change. | HLD D-2, D-10, D-25, D-20, D-19 |
 | 2 | **New table `known_devices`** (DV-2), for a fairer sign-in limit. A stranger hammering your email address can block password sign-in only from devices that have never signed in before. Your own phone and laptop keep working. | It's the answer to "limit guessing without letting someone lock you out". | §1 LD-1, §3.1 |
-| 3 | **Cookies on `http://localhost` aren't `__Secure-` prefixed** (DV-3). They're still `Secure` and `HttpOnly`. | It removes a browser-compatibility risk on the laptop. A spike test still checks that the browsers keep the cookies. | §1 DV-3, TP-0.30 |
+| 3 | **Cookies on `http://localhost` aren't `__Secure-` prefixed** (DV-3). They're still `Secure` and `HttpOnly`. The choice is made by the address the browser used, and each kind of cookie is accepted only where it belongs. | It removes a browser-compatibility risk on the laptop. A spike test still checks that the browsers keep the cookies. | §1 DV-3, TP-0.30 |
 | 4 | **The capture worker can read the whole `users` row**, including email and name; it still can't see any password, session or code (DV-4). | The platform only supports table-level grants. Column-level grants would be a platform change. | §3.2 |
 | 5 | **Lifetimes are constants in code**, not settings (DV-1). | Changing "30 days" means a small code change, not an environment variable. | F-1 |
-| 6 | **A few extra error cases** beyond the HLD's list (DV-5): for example "your Budmon account is connected to a different Google account", and "the owner can't delete their own account". | They make edge cases explicit; wording is in §8.1. | §6 |
-| 7 | **Platform amendments PA-1 to PA-6** must be in place before S-0 starts. The LLD assumes the configuration shape in §1. If the platform's final names differ, an identity amendment aligns them. | Identity can't be built without them. | §1, HLD §5.6 |
-| 8 | **Manual checks only you can do** (TP-M.1 to TP-M.5): signing in on the laptop and phone, real Google sign-in (web from the laptop; Android), a real authenticator app, the bootstrap command on Windows, and Mailpit emails. | The build environment has no Windows, Android SDK, real Google or real SMTP. | §10.1 |
-| 9 | **Before the first invitation (stage-1 gate):** register the Google sign-in client and Android client IDs, choose the email provider, and set the `budmon.com` redirect. | Configuration only; no code change. | §7.1, §7.2 |
+| 6 | **A few extra error cases** beyond the HLD's list (DV-5): for example "your Budmon account is connected to a different Google account", "the owner can't delete their own account", and "your account is already being deleted" (cancelling is refused once the 7 days are up). | They make edge cases explicit; wording is in §8.1. | §6 |
+| 7 | **Built on the platform LLD v0.12.** Your earlier requests PA-1 to PA-6 are in it as amendments A-1 to A-6, and identity uses their exact names. The `budmon-local bootstrap-owner` command and Android's Google client-ID setting are the platform's, not identity's. | Nothing to align later. | §1 |
+| 8 | **Five new platform requests (PA-7 to PA-11)** the platform planner must apply before the slices that need them: a proper file name for export downloads (PA-7, S-10); a "delete all" for Android's offline queue (PA-8, S-3); Google sign-in in the release rehearsal (PA-9, S-6's rehearsal test); the rehearsal's email privacy check (PA-10, S-1's rehearsal test); and named spots in the platform where modules plug in (PA-11, S-0). | Small and specific, but the build waits for them. | §1.1 |
+| 9 | **Reset links open in the phone's browser for the MVP** (LD-9). Your delegated decision Q-1 (a); **needs user confirmation**. | The Android app doesn't open reset links itself. | §1 LD-9 |
+| 10 | **Two tabs refreshing at once never sign you out** (DV-9). The reviewer's option (a), taken under your delegation, changes the approved HLD's wording for one case of D-3. Theft detection is unchanged. | The HLD's D-3 text should be updated to match next time it's revised. | §1 DV-9, F-25 |
+| 11 | **Other recorded deviations:** no separate "event fan-out" job (DV-6); Edge checked by you rather than automatically (DV-7); the module's files are flat in one folder so the platform's checks cover them (DV-8). | Low impact; listed for completeness. | §1 |
+| 12 | **Manual checks only you can do** (TP-M.1 to TP-M.6): signing in on the laptop and phone, real Google sign-in (web from the laptop; Android), a real authenticator app, the bootstrap command on Windows, Mailpit emails, and sign-in in Edge. | The build environment has no Windows, Android SDK, real Google or real SMTP. | §10.1 |
+| 13 | **Before the first invitation (stage-1 gate):** register the Google sign-in client and Android client IDs, choose the email provider, and set the `budmon.com` redirect. | Configuration only; no code change. | §7.1, §7.2 |
 
 ## 3. Data
 
@@ -54,7 +58,7 @@ Fifteen new tables, all owned by identity. "Credential" tables are never readabl
 | `google_identities` ★ | The linked Google account's ID and email. | Deleted. |
 | `two_step_credentials` ★, `recovery_codes` ★ | The encrypted authenticator secret; recovery codes as keyed hashes only. | Deleted. |
 | `sessions` ★, `session_refresh_tokens` ★ | One row per signed-in device; every refresh token the device ever had (hashed), so a stolen old one is recognised. | Deleted. |
-| `known_devices` ★ | Devices that have signed in before (hashed tokens), for the sign-in limit. | Deleted. |
+| `known_devices` ★ | Devices that have signed in before (hashed tokens), for the sign-in limit. A device stays known after you sign out. | Deleted. |
 | `auth_challenges` ★ | Short-lived steps: a pending two-step sign-in, a Google round trip, a sign-up ticket. | Deleted; also purged hourly. |
 | `password_resets` ★ | Reset links (hashed). | Deleted. |
 | `invitations` ★ | Invitations: email, inviter, status (pending, accepted, revoked, expired), hashed token. | Accepted ones go with the user; ended ones are purged after 90 days. |
@@ -85,7 +89,7 @@ Nothing that grants access is stored in a usable form. Passwords are hashed; tok
 - **Others:** look up a user by exact email; data exports (list, request, download link); account deletion (check, request, cancel).
 - **One route outside the API description:** Google's return address. It only ever redirects back into the app.
 
-**Screens** (web and Android): sign in; two-step code; forgot password and new password; invitation landing, account set-up and invitation problems; Android's "paste your invitation link"; settings home; profile and preferences; sign-in and security (password, Google, two-step, devices); two-step setup with QR code and recovery codes; invite people; your data (export); delete account; the "account will be deleted" banner; the "confirm it's you" dialog; and the first-run home ("Welcome to Budmon, {name}."). Every screen has its empty, loading, error and long-content states, and every message is listed word for word in the LLD.
+**Screens** (web and Android): sign in; two-step code; forgot password and new password; invitation landing, account set-up and invitation problems; Android's "paste your invitation link"; settings home; profile and preferences; sign-in and security (password, Google, two-step, devices); two-step setup with QR code and recovery codes; invite people; your data (export); delete account; the "account will be deleted" banner; the "confirm it's you" dialog; the first-run home ("Welcome to Budmon, {name}."); and a public privacy notice at `/privacy` (its full text is in the LLD, §8.3). Every screen has its empty, loading, error and long-content states, and every message is listed word for word in the LLD.
 
 ## 5. Functions at a glance
 
@@ -100,36 +104,36 @@ Nothing that grants access is stored in a usable form. Passwords are hashed; tok
 | Profile, invitations, lookup | F-90, F-95 to F-106 | Preferences, invitations with allowance and cap, exact-email lookup, names for other modules. | **F-95** the exact order of refusal reasons. |
 | Export and deletion | F-110 to F-119 | ZIP export; deletion with grace, erasure across modules, replay after a restore. | **F-118** erasure writes its log record first and is safe to repeat. |
 | Owner services | F-125 | Operations for the admin portal. | **Ban** closes the account at once and erases it within minutes. |
-| Web and Android | F-150 to F-172, F-200 to F-220 | Screens, silent session renewal, encrypted token storage on Android, Credential Manager. | **F-150/F-203** single-flight renewal on both apps. **F-205** unsynced offline entries never sync into another person's account. |
+| Web and Android | F-150 to F-173, F-200 to F-220 | Screens, silent session renewal, encrypted token storage on Android, Credential Manager. | **F-150/F-203** single-flight renewal on both apps. **F-205** unsynced offline entries never sync into another person's account. |
 
 ## 6. Build plan
 
 | Slice | Delivers | How you'd see it working | Depends on |
 | ----- | -------- | ------------------------ | ---------- |
-| S-0 | Foundations | Tests pass; emails appear in Mailpit in development | Platform + PA-1 to PA-6 |
+| S-0 | Foundations | Tests pass; emails appear in Mailpit in development | Platform v0.12 (A-1 to A-6) + PA-11 |
 | S-1 | Sign-up from an invitation with a password | An emailed invitation creates an account on web and Android | S-0 |
 | S-2 | Owner bootstrap | `budmon-local bootstrap-owner` prints a link that makes you the owner | S-1 |
-| S-3 | Sign-in, sessions, "confirm it's you" | You stay signed in; the devices list works; sign-out works | S-1 |
+| S-3 | Sign-in, sessions, "confirm it's you" | You stay signed in; the devices list works; sign-out works | S-1, PA-8 |
 | S-4 | Two-step verification | Your authenticator app's codes are asked for at sign-in | S-3 |
 | S-5 | Password reset and changes | "Forgot password?" emails a working link | S-4 |
 | S-6 | Google Sign-In | "Continue with Google" works on the laptop's browser and on Android | S-4 |
 | S-7 | Profile and preferences | Language changes instantly; base currency asks first | S-3 |
 | S-8 | Invitations | You invite someone; they receive the email and join | S-3 |
 | S-9 | Finding a user | Exact-email lookup for sharing | S-3 |
-| S-10 | Data export | A ZIP with CSV and JSON downloads | S-3 |
+| S-10 | Data export | A ZIP with CSV and JSON downloads, named `budmon-export-<date>.zip` | S-3, PA-7 |
 | S-11 | Account deletion | Delete, undo within 7 days, full erasure after | S-8, S-10 |
 | S-12 | Owner services | Ready for the admin portal | S-11 |
 
 ## 7. Testing
 
-About 200 test cases:
+About 215 test cases:
 
 | Type | Count | What |
 | ---- | ----- | ---- |
 | Integration | ~130 | Real Postgres, in-process HTTP, the jobs, a fake Google with real signed tokens, and an in-memory mailbox |
 | Unit | ~30 | Server, web and Android |
 | End-to-end | ~25 | Playwright in Chromium, with a fake Google and a test mailbox; the stage-0 rehearsal |
-| Manual | 5 | The owner, on the laptop and phone |
+| Manual | 6 | The owner, on the laptop and phone |
 
 What the tests cover:
 
@@ -139,12 +143,12 @@ What the tests cover:
 - **The credential-table rule:** the capture worker's database role is refused on every credential table.
 - **Erasure:** a guard test fails if any future table references users without being erased.
 
-Not covered automatically: real Google, real SMTP, Android on a device, and Windows. These are the manual cases TP-M.1 to TP-M.5.
+Not covered automatically: real Google, real SMTP, Android on a device, Windows and Edge. These are the manual cases TP-M.1 to TP-M.6.
 
 ## 8. Risks
 
 - **Google on the laptop:** until there's a domain, web Google sign-in works only in a browser on the laptop itself; the phone's browser shows a note. The Android app's Google sign-in isn't affected.
 - **Mailpit in stage 0:** emails stay on the laptop (readable at `http://127.0.0.1:8025`). Fine while you're the only user.
-- **Platform amendments:** if PA-1 to PA-6 land with different names, identity needs a small alignment amendment before S-0.
+- **Platform requests PA-7 to PA-11:** the slices that need them wait until the platform planner applies them.
 - **Later modules must join erasure and export:** every module that stores user data registers how it's erased and exported. The guard test catches the ones that forget.
 - **Lost authenticator and lost codes:** only you, as owner, can help (by turning two-step off for that user). The user is emailed when you do.

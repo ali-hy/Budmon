@@ -2,7 +2,7 @@
 module: identity
 doc: lld
 status: draft # draft | in-review | approved
-version: 0.1
+version: 0.2
 hld_version: 0.5
 author: planner
 approved_by:
@@ -11,13 +11,16 @@ approved_on:
 
 # Identity: Low-Level Design
 
-Implements [HLD](./hld.md) v0.5 (approved 2026-10-07). Decisions are cited as **D-n**, journeys as **J-n**, screens as **S-n** (HLD screens) from the HLD; platform functions as **P-F-n** from the [platform LLD](../platform/lld.md) v0.9; platform amendments as **PA-n** (HLD §5.6, being applied to the platform LLD on `feat/platform`; this LLD assumes them as specified there). This document doesn't restate the HLD's rationale.
+Implements [HLD](./hld.md) v0.5 (approved 2026-10-07). Decisions are cited as **D-n**, journeys as **J-n**, screens as **S-n** (HLD screens) from the HLD.
+
+Platform functions are cited as **P-F-n** from the platform LLD **v0.12** (`docs/design/platform/lld.md` on branch `feat/platform`). Its amendments **A-1 to A-6** implement this module's HLD requests PA-1 to PA-6 and are cited by their platform IDs. Requests this LLD adds are **PA-7 to PA-11** (§1.1). This document doesn't restate the HLD's rationale.
 
 ## Changelog
 
 | Version | Date | Change |
 | ------- | ---- | ------ |
 | 0.1     | 2026-10-07 | Initial draft |
+| 0.2     | 2026-10-07 | Plan review round 1 (REVISE), against platform LLD v0.12. **P-1:** configuration names aligned with v0.12 (`api.googleSignIn?`, `api.recoveryCodeKeys`, `email?.smtpPassword?`, `SealContext.rowId`); citations moved from v0.9 and "PA being applied" to v0.12 and A-1 to A-6. **P-2:** the `budmon-local bootstrap-owner` wrapper (P-F-178, A-6) and the Android `GOOGLE_SERVER_CLIENT_ID` (P-F-265, A-3) are the platform's; F-47 and TP-2.6 removed, references added. **P-3:** new §1.1 with platform amendment requests PA-7 (presigned download file name), PA-8 (`OutboxDao.deleteAll`/`countAll`), PA-9 (rehearsal fake Google for sign-in), PA-10 (rehearsal email canary flows), PA-11 (module wiring points incl. the server router root). **P-4:** TOTP envelopes registered with P-F-115 (F-34) and a re-wrap test (TP-4.16). **P-5:** no `bigint({ mode: "number" })` (`integer` columns); the module is flat under `src/identity/` so A-11's and F-1's globs cover every router, service and repo; one schema file per table (platform HLD layout). **P-6:** F-30 applies `SMTP_URL`'s TLS rule exactly (TP-0.31). **P-7:** links are rendered outside `renderMessage`; every email kind's message IDs and value sources defined (§7.2). **P-8:** concurrent-refresh option (a): R3 re-issues while the current token is unpresented; e2e cases for each response order and the 60.001 s boundary. **P-9:** the web `device` cookie (path `/api/v1`) feeds `presentedDeviceToken` in every session-creating procedure; Android `clear()` keeps the device token. **P-10:** `clear()` never touches `outboxOwnerUserId`; unknown owner with pending entries → `AskDiscard`. **P-11:** unprefixed cookie names are set and accepted only when the request's `Host` is `localhost`/`127.0.0.1`; `Origin` isn't used for cookie naming (null origins don't matter). **P-12:** cancelling is refused once `scheduledFor ≤ now`, and erasure re-checks under a row lock. **P-13:** §5.7 public surface, `requireConfirmed(ctx, maxAgeSeconds = 600)`, privacy notice content and route (§8.3). **P-14:** DV-6 (no `identity.event-fanout` job), DV-7 (cookie spike browsers); aligned with the HLD: F-82's unknown-state redirect, the refresh limit per session, the `invite.user` limit enforced and tested, CSV names `<module>-<entity>`. **P-15:** `invitation-ended` published on ban, owner deletion and `--replace`; a second ban defined. Owner decision Q-1 (reset links open in the browser) recorded (LD-9, brief). |
 
 ## Amendments
 
@@ -30,25 +33,34 @@ Implements [HLD](./hld.md) v0.5 (approved 2026-10-07). Decisions are cited as **
 
 | # | HLD says | LLD does | Why |
 | - | -------- | -------- | --- |
-| DV-1 | D-2: lifetimes "are configuration with these defaults". | They're constants in `identity/constants.ts` (F-1), not environment variables. | PA-3 defines no variables for them; adding some would be another platform amendment for values nobody plans to change at runtime. Changing one is a one-line, reviewed code change. |
+| DV-1 | D-2: lifetimes "are configuration with these defaults". | They're constants in `identity/constants.ts` (F-1), not environment variables. | A-3 defines no variables for them; adding some would be another platform amendment for values nobody plans to change at runtime. Changing one is a one-line, reviewed code change. |
 | DV-2 | §3.1 lists identity's tables. | One more credential table, **`known_devices`** (§3.1), for the sign-in limiter scheme the HLD left to the LLD (LD-1). | Bounding password guessing per account without letting a stranger block the account's owner needs a per-device credential (OWASP "device cookies"). |
-| DV-3 | §7.5: cookies are `__Secure-` prefixed, with unprefixed names on `localhost` as the fallback if the spike fails. | The fallback is taken unconditionally: on an `http://localhost` origin, cookies are unprefixed (still `Secure`, `HttpOnly`, `SameSite=Strict`); on every `https://` origin they're `__Secure-` prefixed. The server reads either name. The spike (TP-0.30) only confirms that the browsers store `Secure` cookies from `http://localhost`. | Browsers' handling of the `__Secure-` prefix on `http://localhost` varies by version. Not depending on it removes the only reason the spike could block the slice. The prefix adds nothing on `localhost`, where the host is the laptop itself. |
+| DV-3 | §7.5: cookies are `__Secure-` prefixed, with unprefixed names on `localhost` as the fallback if the spike fails. | The fallback is taken unconditionally for `localhost` (F-4). Requests whose `Host` is `localhost[:port]` or `127.0.0.1[:port]` set and accept **only** unprefixed names (still `Secure`, `HttpOnly`, `SameSite=Strict`). Every other host sets and accepts **only** `__Secure-` names. The spike (TP-0.30) confirms that browsers store `Secure` cookies from `http://localhost`. | Browsers' handling of the `__Secure-` prefix on `http://localhost` varies by version. The prefix adds nothing on `localhost`, where the host is the laptop itself. Keying on `Host` (always present) rather than `Origin` (absent on same-origin `GET`s) makes the rule total. |
 | DV-4 | §7.1: `budmon_capture` gets `SELECT` on `users` "(the column list in the LLD)". | Table-level `SELECT` on `users` (it can read `email` and `display_name` too). | P-F-16 grants are table-level by design (`TableGrant`). `users` holds no credential; capture already reads most financial data (P-D-19). A column-level grant mechanism would be a platform change for little gain. |
-| DV-5 | §5.1 error list. | Adds `GOOGLE_OTHER_ACCOUNT_LINKED` 409 (the Budmon user already has a different Google account linked, so an automatic or explicit link can't proceed), `PASSWORD_REUSED`, `PASSWORD_ALREADY_SET`, `TWO_STEP_ALREADY_ENABLED`, `TWO_STEP_NOT_ENABLED`, `TWO_STEP_SETUP_EXPIRED`, `EXPORT_NOT_READY`, `DELETION_ALREADY_PENDING`, `OWNER_CANNOT_BE_DELETED`. | Cases the HLD's journeys imply but didn't key (J-17, D-7 rule 8, D-21's single owner). |
+| DV-5 | §5.1 error list. | Adds `GOOGLE_OTHER_ACCOUNT_LINKED` 409, `PASSWORD_REUSED`, `PASSWORD_ALREADY_SET`, `TWO_STEP_ALREADY_ENABLED`, `TWO_STEP_NOT_ENABLED`, `TWO_STEP_SETUP_EXPIRED`, `EXPORT_NOT_READY`, `DELETION_ALREADY_PENDING`, `DELETION_IN_PROGRESS`, `OWNER_CANNOT_BE_DELETED`. | Cases the HLD's journeys imply but didn't key (J-17, D-7 rule 8, D-21's single owner, P-12's late cancel). |
+| DV-6 | §5.5 lists an `identity.event-fanout` job that delivers `identity.*` events to module handlers. | No fan-out job. F-21 `publish` enqueues each subscriber's own job definition directly, in the publishing transaction (the pattern of P-D-15's `fx.rates-added`). | Same transactional guarantee with one hop less. A fan-out job would only re-enqueue the same jobs a moment later, and would add a failure point. |
+| DV-7 | §7.5 / A-10: the spike checks Chrome, Edge and Firefox. | TP-0.30 runs on Playwright **Chromium** (required; Chrome and Edge are both Chromium) and **Firefox** (indicative in the build environment, required on release candidates where P-§10.1's `firefox` project runs). **Edge** itself is confirmed by the owner (TP-M.6). | The build environment can't run Edge. Chromium covers Edge's cookie engine; the manual case removes the residual doubt. |
+| DV-8 | Platform HLD layout `src/<module>/<module>Router.ts`, `<module>Service.ts`, `<module>Repo.ts` (one each). | Identity has several of each, all flat in `src/identity/` and named `*Router.ts`, `*Service.ts`, `*Repo.ts`, so P-F-1's and A-11's globs (`apps/server/src/*/*Router.ts`, `apps/server/src/*/*Service.ts`) cover every one. Errors and jobs are `identityErrors.ts` and `identityJobs.ts`. | The module is too large for one file of each kind, and staying flat keeps the layering lint effective without a platform amendment. |
+
+| DV-9 | D-3 (v0.5): a discarded token within both 60-second windows "is answered with `REFRESH_INVALID` without revoking". | F-25 R3 **re-issues** in that case when the current token is still unpresented, so a concurrent-refresh race never signs the user out. `REFRESH_INVALID` without revoking remains for the rare case where the current token has already been used (R3b). | The reviewer's option (a), taken under the owner's delegation (round-1 Q-2). Two tabs whose responses arrive in the wrong order would otherwise end the session. Detection of theft is unchanged, because the R3 windows require the discard to happen within 60 s of the token's issue. The HLD's D-3 text should be updated to match when the HLD is next revised. |
 
 **Decisions the HLD left to the LLD** (planner decisions):
 
-- **LD-1: sign-in limiter scheme (D-18).** Password sign-in attempts are counted by four limiters (§4.3, F-29):
+- **LD-1: sign-in limiter scheme (D-18).** Password sign-in attempts are counted by four limiters (F-29):
   - per IP: 30 / 10 min;
   - per (email, IP): 10 / 15 min;
   - per email for attempts **without** a valid known-device token for that email's user: 30 / hour;
   - per (email, known device) for attempts **with** one: 10 / 15 min.
 
-  A successful sign-in (any method) issues a known-device token: a cookie on web, a stored value on Android. A stranger can exhaust only their own (email, IP) pair and the per-email unknown-device bucket. The account's owner keeps signing in from any device that has signed in before. On a brand-new device they can still use Google, a password reset (not limited by these buckets), or wait the hour. Online guessing is bounded to 720 attempts a day from unknown devices, plus nothing from known devices (an attacker has no device token).
-- **LD-2: cookie names and the localhost spike (DV-3).**
-- **LD-3: the exact refresh-family algorithm** (D-3 as approved): F-25, with both sides of both 60-second windows tested (TP-3.10 to TP-3.17).
-- **LD-4: libraries.** `jose` for Google ID-token verification with a remote JWKS. Token exchange with `fetch`, which goes through the platform's undici dispatcher (P-F-122). `nodemailer` for SMTP. `yazl` for ZIP. TOTP and base32 implemented here (about 60 lines, RFC 6238 test vectors). `qrcode-generator` (web) and `com.google.zxing:core` (Android) render QR codes on the client. No user-agent library: a small parser (F-5).
-- **LD-5: the common-password list.** SecLists `Passwords/Common-Credentials/100k-most-used-passwords-NCSC.txt` (MIT licence), committed gzipped as `apps/server/src/identity/passwords/common-100k.txt.gz` and loaded once into a `Set` of lower-cased NFC entries.
+  A successful sign-in (any method) issues a known-device token: the `device` cookie on web, a stored value on Android. A stranger can exhaust only their own (email, IP) pair and the per-email unknown-device bucket. The account's owner keeps signing in from any device that has signed in before. On a brand-new device they can still use Google, a password reset (not limited by these buckets), or wait the hour. Online guessing is bounded to 720 attempts a day from unknown devices, plus nothing from known devices (an attacker has no device token).
+- **LD-2: cookie names and the localhost spike (DV-3, DV-7).**
+- **LD-3: the exact refresh-family algorithm** (D-3 as approved, with the reviewer's option (a) for concurrent refreshes): F-25, with both sides of both 60-second windows tested.
+- **LD-4: libraries.**
+  - Server: `jose` for Google ID-token verification with a remote JWKS; token exchange with `fetch` through the platform's undici dispatcher (P-F-122); `nodemailer` for SMTP; `yazl` for ZIP.
+  - TOTP and base32 are implemented here (about 60 lines, RFC 6238 test vectors).
+  - QR codes are rendered on the client: `qrcode-generator` (web), `com.google.zxing:core` (Android).
+  - No user-agent library: a small parser (F-5).
+- **LD-5: the common-password list.** SecLists `Passwords/Common-Credentials/100k-most-used-passwords-NCSC.txt` (MIT licence), committed gzipped as `apps/server/src/identity/assets/common-100k.txt.gz` and loaded once into a `Set` of lower-cased NFC entries.
 - **LD-6: export format details** (D-16): §7.4.
 - **LD-7: metrics** use only labels already in P-F-41's `METRIC_LABELS` (`method`, `error_key`), so no platform amendment is needed. Success is recorded as `error_key="none"`.
 - **LD-8: token formats.** `<prefix>_<base64url(32 random bytes)>` (43 characters after the prefix). Prefixes:
@@ -66,87 +78,104 @@ Implements [HLD](./hld.md) v0.5 (approved 2026-10-07). Decisions are cited as **
   | `bmd` | known device |
 
   Stored as `SHA-256(token string)`. Google nonces are bare base64url (Google echoes them unchanged); their SHA-256 is stored.
-- **LD-9: the reset link on Android.** Reset links open the web app in the phone's browser in stage 0. From stage 1, Android App Links handle `/invite` only (D-23), so resetting a password is a web flow, and the Android app then signs in normally.
+- **LD-9: reset links open in the browser for the MVP** (owner decision Q-1 (a), recommended default, **needs user confirmation**). Reset links open the web app in the phone's browser. From stage 1, Android App Links handle `/invite` only (D-23). Resetting a password is a web flow, after which the Android app signs in normally.
 - **LD-10: locales.** The server accepts a `locale` only from `SUPPORTED_LOCALES` (`["en"]`). It also accepts `en-XA` and `ar-XB` when `APP_ENV` is `development` or `test`, so pseudo-locale testing works end to end.
 
-**Configuration this LLD consumes** (defined by PA-2, PA-3, PA-6). The software-engineer implements identity against this shape; if the platform amendment's final shape differs, an identity amendment aligns the names.
+**Configuration this LLD consumes** (platform v0.12, P-F-10, A-2 and A-3), exactly as the platform defines it:
 
 ```ts
-// added to P-F-10's Config by PA-3 (kind "api")
-api.identity: {
-  google: null | {                                   // null when GOOGLE_SIGNIN_CLIENT_ID is unset
-    clientId: string; clientSecret: Secret<string>;
-    androidClientIds: readonly string[];             // GOOGLE_SIGNIN_ANDROID_CLIENT_IDS (comma list, may be empty)
-    callbackOrigin: URL;                             // GOOGLE_SIGNIN_CALLBACK_ORIGIN
-    appOrigins: readonly URL[];                      // GOOGLE_SIGNIN_APP_ORIGINS (comma list, ≥ 1)
-  };
-  recoveryCodeKeys: Secret<{ current: string; keys: ReadonlyMap<string, Buffer> }>; // RECOVERY_CODE_HMAC_KEYS_FILE, same JSON shape as API_SECRETS_KEYS_FILE
-}
-// added by PA-2 (kind "worker" with role general)
-email: { smtpUrl: URL; smtpPassword: Secret<string> | null; from: string; publicOrigin: URL }
+api.publicOrigin: URL;                                   // links printed by the bootstrap command (A-6)
+api.googleSignIn?: { clientId: string; clientSecret: Secret<string>; androidClientIds: string[]; callbackOrigin: URL; appOrigins: URL[] };
+                                                         // undefined when GOOGLE_SIGNIN_CLIENT_ID is unset (development and test only)
+api.recoveryCodeKeys: Secret<{ current: string; keys: Map<string, Buffer> }>;
+api.apiSecretsKeys                                       // P-F-114's key ring (TOTP envelopes)
+email?: { smtpUrl: URL; smtpPassword?: Secret<string>; from: string; publicOrigin: URL };   // worker with role general (A-2)
 ```
 
-`api.publicOrigin` (P-F-10) builds links in the bootstrap command (PA-6). `email.publicOrigin` builds links in emails; both come from the same `site.env` value (PA-2).
+`email.publicOrigin` and `api.publicOrigin` come from the same `site.env` value (A-2). Where this LLD writes `googleSignIn`, it means `config.api.googleSignIn`; "Google not configured" means it's `undefined`.
+
+### 1.1 Platform amendment requests (PA-7 to PA-11)
+
+Identity needs these platform capabilities that LLD v0.12 doesn't provide. Each is written so the platform planner can apply it as an amendment. Identity's slices that depend on one say so; the build doesn't start a dependent slice until the amendment is in the platform LLD.
+
+| ID | Platform function | Exact change | Tests to add (platform's) | Needed by |
+| -- | ----------------- | ------------ | ------------------------- | --------- |
+| PA-7 | P-F-140 `ObjectStore.presignGet` and its three implementations | Signature becomes `presignGet(bucket, key, ttlSeconds?, opts?: { downloadName?: string })`. `downloadName` must match `^[A-Za-z0-9._-]{1,100}$` (else `RangeError`). **S3 (P-F-141):** `ResponseContentDisposition: 'attachment; filename="<downloadName>"'` (unchanged `"attachment"` when absent). **fs (P-F-142):** the token payload gains `n` (the name); P-F-145's route sends `Content-Disposition: attachment; filename="<n>"`. **memory (P-F-143):** records the name and returns it in a test-visible URL query `?n=`. | S3: the presigned URL's `response-content-disposition` parameter; fs: the dev route's header; invalid name → `RangeError` | S-10 (F-110 `exportDownloadUrl` names the file `budmon-export-<YYYY-MM-DD>.zip`) |
+| PA-8 | P-F-254 `OutboxDao` | Adds `@Query("DELETE FROM outbox") suspend fun deleteAll(): Int` and `@Query("SELECT COUNT(*) FROM outbox") suspend fun countAll(): Int` (every status). | Room in-memory: insert 3 with different statuses; `countAll()` = 3; `deleteAll()` = 3; then `countAll()` = 0 | S-3 (F-205) |
+| PA-9 | P-F-196 fake Google and P-F-195 rehearsal | (a) `startFakeGoogle` takes `signInClientId: string` and an RS256 key pair (generated per run, `kid "fake-signin-1"`). (b) `oauth2.googleapis.com POST /token`: when the form's `client_id` equals `signInClientId`, the `code` must be `signin.<base64url(nonce)>`, and the answer is `200 { access_token: canaries.token, id_token: <JWT>, expires_in: 3599, token_type: "Bearer", scope: "openid email profile" }`, where the JWT claims are `iss "https://accounts.google.com"`, `aud` and `azp` = `signInClientId`, `sub "canary-sub-7f3a"`, `email` = `canaries.email`, `email_verified true`, `name "Canary User"`, `iat` = now, `exp` = now + 3600, and `nonce` = the decoded nonce. Any other `client_id` keeps the Gmail behaviour; a malformed sign-in code → `400 { error: "invalid_grant" }`. (c) `www.googleapis.com GET /oauth2/v3/certs` → the public JWKS. (d) The rehearsal maps `www.googleapis.com` (and the existing Google hosts) to the fake for the **`api`** container too, and gives `api` `NODE_EXTRA_CA_CERTS` for the fake's CA. It sets `GOOGLE_SIGNIN_CLIENT_ID=rehearsal-signin.apps.googleusercontent.com`, a throwaway secret, `GOOGLE_SIGNIN_CALLBACK_ORIGIN` and `GOOGLE_SIGNIN_APP_ORIGINS` to the rehearsal's web origin. (e) A sign-in sub-step, after A-6's bootstrap sub-step:
+<br>1. `POST /api/v1/auth/google/start { intent: "sign_in", returnTo: "/" }` with `Origin`.
+<br>2. Read `state` and `nonce` from `authorizationUrl`.
+<br>3. `GET /api/v1/auth/google/callback?code=signin.<b64(nonce)>&state=<state>`.
+<br>4. Take `h` from `Location`, then `POST /api/v1/auth/google/complete` with the binding cookie.
+<br>It expects `GOOGLE_ACCOUNT_UNKNOWN` (the canary account has no user) and adds the hand-off token to the needles. It's skipped (`skipped: identity not built`) while `/auth/google/start` returns 404. | The fake's token responses for both client kinds; JWKS served; the sub-step passes against identity once built | S-6 (TP-6.13) |
+| PA-10 | P-F-195 rehearsal (A-2's email canary path) | After the bootstrap sub-step, using the printed owner link:
+<br>1. `POST /api/v1/invitations/accept` with a password method (`tokenDelivery: "body"`) as the owner.
+<br>2. `POST /api/v1/invitations` (owner bearer, `Idempotency-Key`) for `canaries.email`.
+<br>3. `POST /api/v1/auth/password-reset/request` for the owner's email.
+<br>4. Poll Mailpit's API (`GET http://mailpit:8025/api/v1/messages`, inside the `mail-ui` network) for up to 60 s until both messages exist.
+<br>5. Extract every `#t=` token from their bodies; add the tokens and `canaries.email` to step 8's needles.
+<br>6. Pass when step 8 finds none of them in any scanned source.
+<br>Skipped while `/api/v1/invitations/accept` returns 404. | Sub-step green against identity; skipped before | S-1, S-5, S-8 (TP-1.36) |
+| PA-11 | Module wiring points (P-F-55, P-F-91, P-F-96, P-F-16, P-F-23, P-F-115, P-F-216) | Named extension points that modules (identity first) fill in their own slices:
+<br>(a) **Server router root:** `apps/server/src/platform/http/appRouter.ts` exports `appRouter = { meta: metaRouter }`; modules add their keys; P-F-55's default `opts.router` is `appRouter` and `opts.contract` is `contract`.
+<br>(b) **Module HTTP routes:** `ApiContainer.moduleRoutes: ((app: FastifyInstance) => void)[]`, registered by P-F-55 after the health routes and before the `/api/v1/*` catch-all.
+<br>(c) **Module containers:** `ApiContainer.identity` and `WorkerContainer.identity: IdentityModule`. `createApiContainer` sets `authHook = identity.authHook`; `createWorkerContainer` sets `erasureHandler = identity.erasureHandler`.
+<br>(d) **Worker start hook:** `WorkerContainer.onGeneralStarted: (() => Promise<void>)[]`, called by P-F-91 after `startWorkers` when the `general` role runs.
+<br>(e) **Sealed columns:** the container's `sealedColumns` registry (P-F-115) is created before modules, and P-F-93's `secrets:rewrap-api` uses `container.sealedColumns.all()`.
+<br>(f) **Grants, seeders, handlers:** `grants.ts` merges `<module>Grants`, `seed.ts` appends module seeders, `handlers.ts` merges `<module>Handlers(c)`, as P-F-16, P-F-23 and P-F-91 already say. Listed here only so the files identity edits are named. | Container builds with a fake module; `appRouter` serves `meta.clientConfig`; a test route registered through `moduleRoutes` answers before the catch-all; `onGeneralStarted` hooks run once | S-0 |
 
 ## 2. File plan
 
-Server paths are under `apps/server/src/` (written `identity/…` for `apps/server/src/identity/…`). Contract paths are under `packages/contract/src/`, web paths under `apps/web/src/`, and Android paths under `apps/android/app/src/main/java/com/budmon/app/` (written `…/identity/…`).
+Server paths are under `apps/server/src/` (written `identity/…` for `apps/server/src/identity/…`). Contract paths are under `packages/contract/src/`, web paths under `apps/web/src/`, and Android paths under `apps/android/app/src/main/java/com/budmon/app/` (written `…/identity/…`). Every server file of the module sits directly in `identity/` (DV-8).
 
 | File | Create / modify | Responsibility |
 | ---- | --------------- | -------------- |
-| `db/schema/identity.ts` | Create | Every identity table (§3.1). |
-| `db/schema/index.ts` | Modify | Export identity's tables. |
+| `db/schema/identityColumns.ts`, `db/schema/{users,passwordCredentials,googleIdentities,twoStepCredentials,recoveryCodes,sessions,sessionRefreshTokens,knownDevices,authChallenges,passwordResets,invitations,emailBans,identitySettings,securityEvents,dataExports}.ts` | Create | One table per file, `<name>Table` (platform HLD layout; §3.1). |
+| `db/schema/index.ts` | Modify | Register identity's tables. |
 | `db/schema/idempotencyRecords.ts` | Modify | Add the `user_id` FK to `users` (`cascade`) (§3.2). |
-| `identity/grants.ts` | Create | `identityGrants` (F-7). |
-| `platform/db/grants.ts` | Modify | Merge `identityGrants` into `tableGrants` (P-F-16). |
-| `identity/constants.ts` | Create | F-1. |
-| `identity/tokens.ts`, `identity/email.ts`, `identity/cookies.ts`, `identity/deviceLabel.ts` | Create | F-2 to F-5. |
-| `identity/passwords/{policy.ts,hasher.ts,common-100k.txt.gz}` | Create | F-38, F-39, LD-5. |
-| `identity/twoStep/{totp.ts,base32.ts,recoveryCodes.ts}` | Create | F-60, F-61. |
-| `identity/repos/{usersRepo,credentialsRepo,twoStepRepo,sessionsRepo,challengesRepo,invitationsRepo,resetsRepo,bansRepo,settingsRepo,securityEventsRepo,exportsRepo,knownDevicesRepo}.ts` | Create | F-8 to F-18. |
-| `identity/services/securityEvents.ts`, `identity/services/events.ts`, `identity/ports.ts` | Create | F-20 to F-22. |
-| `identity/services/sessionService.ts` | Create | F-23 to F-26. |
-| `identity/http/{deliver.ts,requireConfirmed.ts,authHook.ts,limits.ts}` | Create | F-24, F-27 to F-29. |
-| `identity/email/{sender.ts,templates.ts,emailJob.ts}` | Create | F-30 to F-32. |
-| `identity/jobs.ts` | Create | F-33 (job definitions) and the handler map entries. |
-| `identity/module.ts` | Create | F-34 (composition). |
-| `platform/container.ts` | Modify | `ApiContainer.identity` and `WorkerContainer.identity` (F-34); `authHook` = identity's (P-F-96). |
-| `platform/queue/handlers.ts` | Modify | Add identity's handlers to `buildHandlerMap` (P-F-91). |
-| `main/worker.ts` | Modify | Call `identity.onGeneralWorkerStarted()` after `startWorkers` when the `general` role runs (F-119). |
-| `main/cli.ts` | Modify | The `identity:bootstrap-owner` row (PA-6, F-46). |
+| `identity/identityGrants.ts` | Create | `identityGrants` (F-7). |
+| `platform/db/grants.ts` | Modify | Merge `identityGrants` (P-F-16, PA-11 f). |
+| `identity/constants.ts`, `identity/tokens.ts`, `identity/emailAddress.ts`, `identity/cookies.ts`, `identity/deviceLabel.ts` | Create | F-1 to F-5. |
+| `identity/passwordPolicy.ts`, `identity/passwordHasher.ts`, `identity/assets/common-100k.txt.gz` | Create | F-38, F-39, LD-5. |
+| `identity/totp.ts`, `identity/base32.ts`, `identity/recoveryCodes.ts` | Create | F-60, F-61. |
+| `identity/{usersRepo,credentialsRepo,twoStepRepo,sessionsRepo,challengesRepo,invitationsRepo,resetsRepo,bansRepo,settingsRepo,securityEventsRepo,exportsRepo,knownDevicesRepo}.ts` | Create | F-8 to F-18. |
+| `identity/securityEventsService.ts`, `identity/eventsService.ts`, `identity/ports.ts` | Create | F-20 to F-22. |
+| `identity/sessionService.ts` | Create | F-23, F-25, F-26, F-53, F-54. |
+| `identity/authHook.ts`, `identity/deliver.ts`, `identity/requireConfirmed.ts`, `identity/limits.ts` | Create | F-24, F-27 to F-29. |
+| `identity/emailSender.ts`, `identity/emailTemplates.ts`, `identity/emailJobService.ts` | Create | F-30 to F-32. |
+| `identity/identityJobs.ts`, `identity/identityModule.ts`, `identity/identityErrors.ts`, `identity/index.ts` | Create | F-33, F-34, §6, §5.7. |
+| `identity/{authRouter,meRouter,invitationsRouter,usersRouter,exportsRouter,deletionRouter,identityRouter,googleCallbackRouter}.ts` | Create | F-36, F-88. |
+| `identity/{signInService,twoStepService,stepUpService,passwordService,googleService,profileService,invitationService,directoryService,usersReaderService,exportService,deletionService,ownerService,bootstrapService,knownDevicesService,purgeService}.ts` | Create | F-40 to F-130. |
+| `identity/googleOidc.ts` | Create | F-80. |
+| `identity/exportZip.ts`, `identity/identityExportSection.ts` | Create | F-112, F-113. |
+| `identity/identitySeed.ts`, `identity/bootstrapOwnerCli.ts` | Create | F-37, F-46. |
+| `platform/http/appRouter.ts` | Modify (PA-11 a) | Add `auth`, `me`, `invitations`, `users`, `exports`, `deletion` from `identityRouter`. |
+| `platform/container.ts` | Modify (PA-11 b to e) | `identity` module, `authHook`, `erasureHandler`, `moduleRoutes` (F-88), `onGeneralStarted` (F-119), sealed columns (F-34). |
+| `platform/queue/handlers.ts`, `platform/db/seed.ts` | Modify (PA-11 f) | `identityHandlers(c)` (F-33); `identityDevSeeder` (F-37). |
 | `platform/http/procedures.ts` | Modify | Add identity's public procedures to `PUBLIC_PROCEDURES` (§5.1). |
-| `platform/http/server.ts` | Modify | Register identity's callback route (F-88) before the oRPC catch-all. |
-| `router.ts` (server router root) | Modify | Mount `identityRouter` (F-36). |
-| `identity/router/{authRouter,meRouter,invitationsRouter,usersRouter,exportsRouter,deletionRouter,index}.ts` | Create | F-36: oRPC handlers, wire↔domain conversion, delivery of tokens. |
-| `identity/services/{signInService,twoStepService,stepUpService,passwordService,googleService,profileService,invitationService,directoryService,usersReader,exportService,deletionService,ownerService,bootstrapService,knownDevices,purge}.ts` | Create | F-40 to F-130. |
-| `identity/errors.ts` | Create | §6 error classes. |
-| `identity/cli/bootstrapOwner.ts` | Create | F-46 handler. |
-| `identity/google/{oidcClient.ts,callbackRoute.ts}` | Create | F-80, F-88. |
-| `identity/export/{zip.ts,identitySection.ts}` | Create | F-112, F-113. |
-| `identity/seed.ts` | Create | F-37 (development seeder). |
-| `platform/db/seed.ts` | Modify | Register `identity.dev-owner` after the platform seeder (P-F-23). |
+| `main/cli.ts` | Modify | Fill A-6's `identity:bootstrap-owner` row with F-46's handler. |
 | `i18n/messages/en.json` (server) | Modify | Email strings (§7.2). |
-| `identity/{index.ts}` | Create | Public surface for other modules: types and services in §5.10. |
 | `packages/contract/src/identity/{schemas,errors,authContract,meContract,invitationsContract,usersContract,exportsContract,deletionContract,index}.ts` | Create | F-35. |
 | `packages/contract/src/index.ts` | Modify | Add `auth`, `me`, `invitations`, `users`, `exports`, `deletion` keys (P-F-346). |
 | `packages/contract/openapi.json` | Regenerate | P-F-347. |
-| `infra/local/budmon-local`, `infra/local/lib/stack.sh` | Modify | `bootstrap-owner` subcommand (PA-6, F-47). |
 | `apps/web/src/identity/**` | Create | Web screens and session handling (§8.1, F-150 to F-172). |
 | `apps/web/src/main.tsx`, `apps/web/src/router.tsx`, `apps/web/src/api/client.ts` | Modify | Session provider, routes, authed fetch (F-150 to F-152; P-F-200, P-F-201, P-F-216). |
 | `apps/web/src/i18n/messages/en.json` | Modify | Identity's message IDs (§8.1). |
 | `apps/web/package.json` | Modify | `qrcode-generator` (MIT, latest 1.x). |
 | `apps/server/package.json` | Modify | `jose` 6.x, `nodemailer` 7.x (+ `@types/nodemailer`), `yazl` 3.x (+ types). Exact versions pinned in the lockfile when S-0 is built. |
-| `apps/android/app/src/main/java/com/budmon/app/identity/**` | Create | Android auth, screens and storage (§8.2, F-200 to F-226). |
+| `apps/android/app/src/main/java/com/budmon/app/identity/**` | Create | Android auth, screens and storage (§8.2, F-200 to F-220). Google's server client ID comes from P-F-265's `BuildConfig.GOOGLE_SERVER_CLIENT_ID` (empty → Google hidden). |
 | `apps/android/app/src/main/res/values/strings.xml` | Modify | Identity's strings. |
-| `apps/android/app/src/main/AndroidManifest.xml` | Modify | `FLAG_SECURE` screens are in-code; App Links intent filter for `https://budmon.com/invite` (`autoVerify="true"`, stage 1 build flavour only, F-219). |
-| `apps/android/gradle/libs.versions.toml`, `app/build.gradle.kts` | Modify | `androidx.credentials:credentials` and `credentials-play-services-auth` (latest stable), `com.google.android.libraries.identity.googleid:googleid` (latest stable), `com.google.zxing:core` 3.5.x, `androidx.datastore:datastore-preferences` (latest stable); `buildConfigField GOOGLE_SERVER_CLIENT_ID` from `budmon.googleServerClientId` (PA-3). |
+| `apps/android/app/src/main/AndroidManifest.xml` | Modify | App Links intent filter for `https://budmon.com/invite` (`autoVerify="true"`, stage-1 build only, F-219). |
+| `apps/android/gradle/libs.versions.toml`, `app/build.gradle.kts` | Modify | `androidx.credentials:credentials` and `credentials-play-services-auth` (latest stable), `com.google.android.libraries.identity.googleid:googleid` (latest stable), `com.google.zxing:core` 3.5.x, `androidx.datastore:datastore-preferences` (latest stable). |
 | `apps/server/test/**`, `apps/web/test/**`, `apps/web/e2e/**`, `apps/android/app/src/test/**` | Create | Test-architect's (§10). |
+
+Not identity's (the platform's, already specified): `budmon-local bootstrap-owner` (P-F-178, A-6, TP-15.29), the `GOOGLE_SERVER_CLIENT_ID` build field (P-F-265, A-3, TP-13.17), Mailpit and the SMTP configuration (A-2).
 
 ## 3. Database
 
 ### 3.1 Table definitions
 
-Drizzle, `casing: "snake_case"`, schema `public`, in `apps/server/src/db/schema/identity.ts`. `bytea` is the platform's custom type (`db/schema/types.ts`). Every `timestamp` is `timestamp({ withTimezone: true })` (abbreviated `tstz()` below). Every table has `createdAt: tstz().notNull().defaultNow()` and `updatedAt: tstz().notNull().defaultNow()` (abbreviated `...audit`). Repos set `updated_at = now()` on every update.
+Drizzle, `casing: "snake_case"`, schema `public`, **one file per table** in `apps/server/src/db/schema/` (`users.ts` → `usersTable`, `passwordCredentials.ts` → `passwordCredentialsTable`, … as listed in §2), each registered in `index.ts`. They're shown together below; `tstz` and `audit` live in `db/schema/identityColumns.ts`. `bytea` is the platform's custom type (`db/schema/types.ts`). Every `timestamp` is `timestamp({ withTimezone: true })` (abbreviated `tstz()` below). Every table has `createdAt: tstz().notNull().defaultNow()` and `updatedAt: tstz().notNull().defaultNow()` (abbreviated `...audit`). Repos set `updated_at = now()` on every update.
 
 ```ts
 import { currenciesTable } from "./currencies.js";
@@ -213,7 +242,7 @@ export const twoStepCredentialsTable = pgTable("two_step_credentials", {
   secretEnvelope: bytea(),                               // enabled secret (null while first setup is pending)
   pendingSecretEnvelope: bytea(),                        // setup or replacement in progress
   pendingExpiresAt: tstz(),
-  lastUsedStep: bigint({ mode: "number" }),              // TOTP step counter (Unix time / 30), < 2^53
+  lastUsedStep: integer(),                               // TOTP step counter (Unix time / 30); fits int4 until the year 4011
   enabledAt: tstz(),
   codesAcknowledged: boolean().notNull().default(false),
   ...audit,
@@ -405,7 +434,7 @@ export const dataExportsTable = pgTable("data_exports", {
   userId: uuid().notNull().references(() => usersTable.id, { onDelete: "cascade" }),
   status: text().notNull(),                              // 'queued' | 'running' | 'ready' | 'failed' | 'expired'
   objectKey: text(),
-  byteSize: bigint({ mode: "number" }),
+  byteSize: integer(),                                   // ≤ EXPORT_MAX_BYTES (200 MiB) < 2^31
   requestedAt: tstz().notNull(),
   startedAt: tstz(),
   completedAt: tstz(),
@@ -421,7 +450,7 @@ export const dataExportsTable = pgTable("data_exports", {
 ]);
 ```
 
-`ChallengeData` (TypeScript type, `identity/repos/challengesRepo.ts`):
+`ChallengeData` (TypeScript type, `identity/challengesRepo.ts`):
 
 ```ts
 export type ChallengeIntent = "sign_in" | "sign_up" | "link" | "confirm";
@@ -492,10 +521,10 @@ export type ChallengeData =
 - Identity's errors are `BudmonError` subclasses (§6). "Throws `KEY`" names the error by key.
 - **Request facts** that services need are passed as a `ReqInfo` built by the router from `RequestContext`:
   ```ts
-  export interface ReqInfo { ip: string; clientKind: ClientKind; userAgent: string | null; origin: string | null;
-    cookies: Readonly<Record<string, string>>; deviceModel: string | null; tracker: CommitTracker; requestId: string }
+  export interface ReqInfo { ip: string; clientKind: ClientKind; userAgent: string | null; origin: string | null; host: string | undefined;
+    cookies: Readonly<Record<string, string>>; deviceModel: string | null; presentedDeviceToken: string | null; tracker: CommitTracker; requestId: string }
   ```
-  `origin` is the `Origin` header, or `null`. `cookies` come from F-4 `parseCookies(ctx.headers.cookie)`.
+  `origin` is the `Origin` header, or `null`; `host` is the `Host` header. `cookies` come from F-4 `parseCookies(ctx.headers.cookie)`. `presentedDeviceToken` is built by F-36: the body's `deviceToken` for `tokenDelivery: "body"`, else `readCookie("device", cookies, host)` (P-9). Services read it only from `req`; the per-input `presentedDeviceToken` fields below are filled from it.
 - **Session results** are domain objects; routers turn them into wire output and cookies through F-27.
   ```ts
   export interface IssuedSession { sessionId: string; userId: string; accessToken: string; refreshToken: string;
@@ -571,7 +600,7 @@ export type ChallengeData =
 - **Errors:** none.
 
 #### F-3: email addresses
-- **File:** `identity/email.ts` · **Layer:** domain
+- **File:** `identity/emailAddress.ts` · **Layer:** domain
 - **Signatures:** `export function normaliseEmail(raw: string): string`, `export function isValidEmail(normalised: string): boolean`, `export function localPart(normalised: string): string`
 - **Behaviour:**
   - `normaliseEmail` applies NFC, trims, and lower-cases the whole address.
@@ -585,22 +614,23 @@ export type ChallengeData =
   ```ts
   export type CookieName = "access" | "refresh" | "challenge" | "binding" | "device";
   export const COOKIE_SPEC: Readonly<Record<CookieName, { base: string; path: string }>>;
-  // access  { base: "budmon_at",  path: "/api/v1" }
-  // refresh { base: "budmon_rt",  path: "/api/v1/auth/refresh" }
+  // access    { base: "budmon_at",  path: "/api/v1" }
+  // refresh   { base: "budmon_rt",  path: "/api/v1/auth/refresh" }
   // challenge { base: "budmon_2fa", path: "/api/v1/auth" }
-  // binding { base: "budmon_gb",  path: "/api/v1" }
-  // device  { base: "budmon_dv",  path: "/api/v1/auth" }
-  export function cookieNameFor(name: CookieName, origin: string | null): string;
-  export function setCookie(name: CookieName, value: string, maxAge: Temporal.Duration, origin: string | null): string;
-  export function clearCookie(name: CookieName, origin: string | null): string;
-  export function readCookie(name: CookieName, cookies: Readonly<Record<string, string>>): string | null;
+  // binding   { base: "budmon_gb",  path: "/api/v1" }
+  // device    { base: "budmon_dv",  path: "/api/v1" }
+  export function isLocalhostHost(host: string | undefined): boolean;      // ^(localhost|127\.0\.0\.1)(:\d{1,5})?$, case-insensitive
+  export function cookieNameFor(name: CookieName, host: string | undefined): string;
+  export function setCookie(name: CookieName, value: string, maxAge: Temporal.Duration, host: string | undefined): string;
+  export function clearCookie(name: CookieName, host: string | undefined): string;
+  export function readCookie(name: CookieName, cookies: Readonly<Record<string, string>>, host: string | undefined): string | null;
   export function parseCookies(header: string | undefined): Record<string, string>;
   ```
-- **Behaviour:**
-  - `cookieNameFor` returns `base` when `origin` matches `^http://localhost(:\d+)?$`, and `"__Secure-" + base` otherwise, including a `null` origin (DV-3).
-  - `setCookie` returns a `Set-Cookie` value: `<name>=<value>; Path=<path>; Max-Age=<seconds>; HttpOnly; Secure; SameSite=Strict`. There's never a `Domain` attribute.
+- **Behaviour** (`host` is the request's `Host` header; `Origin` is never used for cookie naming, so a missing `Origin` changes nothing):
+  - `cookieNameFor` returns `base` when `isLocalhostHost(host)`, otherwise `"__Secure-" + base`. A missing `host` counts as not localhost (DV-3).
+  - `setCookie` returns a `Set-Cookie` value: `<name>=<value>; Path=<path>; Max-Age=<seconds>; HttpOnly; Secure; SameSite=Strict`, with the name from `cookieNameFor`. There's never a `Domain` attribute.
   - `clearCookie` returns the same with an empty value and `Max-Age=0`.
-  - `readCookie` returns the `__Secure-` prefixed value if present, else the unprefixed value, else `null`.
+  - `readCookie` reads **only** the name `cookieNameFor(name, host)` gives. An unprefixed cookie sent to a non-localhost host, or a prefixed one sent to localhost, is ignored (returns `null`).
   - `parseCookies` splits on `;`, trims, splits each pair at the first `=`, and keeps the first occurrence of each name. Malformed pairs are skipped and values aren't URL-decoded (tokens are base64url).
 - **Errors:** none.
 
@@ -621,7 +651,7 @@ export type ChallengeData =
 - **Signature:** `export const identityGrants: Readonly<Record<string, TableGrant>>` (P-F-16's type), with the rows in §3.2.
 
 #### F-8: `usersRepo`
-- **File:** `identity/repos/usersRepo.ts` · **Layer:** repo
+- **File:** `identity/usersRepo.ts` · **Layer:** repo
 - **Signatures:**
   ```ts
   export interface UserRow { id: string; email: string; emailVerifiedAt: Date | null; displayName: string; locale: string; timeZone: string;
@@ -650,11 +680,11 @@ export type ChallengeData =
   - Unique violations propagate as the driver error (code `23505`, constraint name).
 
 #### F-9: `credentialsRepo`
-- **File:** `identity/repos/credentialsRepo.ts` · **Layer:** repo
+- **File:** `identity/credentialsRepo.ts` · **Layer:** repo
 - **Signatures:** `getPasswordHash(h, userId): Promise<{ hash: string; updatedAt: Date } | null>`, `upsertPassword(h, userId, hash): Promise<void>`, `findGoogleBySub(h, sub): Promise<{ id; userId; googleSub; emailAtLink } | null>`, `findGoogleByUser(h, userId): Promise<{ id; googleSub; emailAtLink } | null>`, `insertGoogle(h, row: { id; userId; googleSub; emailAtLink; linkedAt: Date }): Promise<void>`, `deleteGoogleByUser(h, userId): Promise<boolean>`, `touchGoogle(h, id, at: Date): Promise<void>`.
 
 #### F-10: `twoStepRepo`
-- **File:** `identity/repos/twoStepRepo.ts` · **Layer:** repo
+- **File:** `identity/twoStepRepo.ts` · **Layer:** repo
 - **Signatures:**
   ```ts
   export interface TwoStepRow { userId: string; state: "pending" | "enabled"; secretEnvelope: Buffer | null; pendingSecretEnvelope: Buffer | null;
@@ -674,7 +704,7 @@ export type ChallengeData =
   ```
 
 #### F-11: `sessionsRepo`
-- **File:** `identity/repos/sessionsRepo.ts` · **Layer:** repo
+- **File:** `identity/sessionsRepo.ts` · **Layer:** repo
 - **Signatures:**
   ```ts
   export interface SessionRow { id: string; userId: string; delivery: "cookie" | "bearer"; clientKind: ClientKind; deviceLabel: string;
@@ -698,12 +728,12 @@ export type ChallengeData =
   ```
 
 #### F-12: `challengesRepo`
-- **File:** `identity/repos/challengesRepo.ts` · **Layer:** repo
+- **File:** `identity/challengesRepo.ts` · **Layer:** repo
 - **Signatures:** `insert(h, c: { id; kind; tokenHash: Buffer; bindingHash?: Buffer | null; userId?: string | null; sessionId?: string | null; invitationId?: string | null; data: ChallengeData; expiresAt: Date }): Promise<void>`, `findByTokenHashForUpdate(h, kind, hash): Promise<ChallengeRow | null>`, `findBySecondaryHashForUpdate(h, kind, hash): Promise<ChallengeRow | null>`, `setCallbackResult(h, id, r: { secondaryHash: Buffer; claims: GoogleClaims; expiresAt: Date }): Promise<void>`, `incrementAttempts(h, id): Promise<number>`, `consume(h, id, at: Date): Promise<boolean>` (`UPDATE … WHERE id = $1 AND consumed_at IS NULL`), `purge(h, before: Date, limit): Promise<number>`.
 - `ChallengeRow` = the table's columns as TypeScript properties.
 
 #### F-13: `invitationsRepo`
-- **File:** `identity/repos/invitationsRepo.ts` · **Layer:** repo
+- **File:** `identity/invitationsRepo.ts` · **Layer:** repo
 - **Signatures:**
   ```ts
   export interface InvitationRow { id: string; email: string; inviterUserId: string | null; origin: "direct" | "account_share" | "bootstrap";
@@ -733,11 +763,11 @@ export type ChallengeData =
   ```
 
 #### F-14: `resetsRepo`
-- **File:** `identity/repos/resetsRepo.ts` · **Layer:** repo
+- **File:** `identity/resetsRepo.ts` · **Layer:** repo
 - **Signatures:** `insert(h, { id, userId, expiresAt })`, `findById(h, id)`, `findByTokenHashForUpdate(h, hash)`, `setToken(h, id, hash: Buffer)`, `countOutstanding(h, userId, now): Promise<number>` (unused, not invalidated, unexpired), `incrementFailedCodes(h, id): Promise<number>`, `invalidate(h, id, at)`, `markUsed(h, id, at)`, `invalidateOthers(h, userId, exceptId: string | null, at): Promise<number>`, `purge(h, before, limit)`.
 
 #### F-15: `bansRepo` and `settingsRepo`
-- **Files:** `identity/repos/bansRepo.ts`, `identity/repos/settingsRepo.ts` · **Layer:** repo
+- **Files:** `identity/bansRepo.ts`, `identity/settingsRepo.ts` · **Layer:** repo
 - **Signatures:** `isBanned(h, email): Promise<boolean>`, `insertBan(h, { email, bannedAt, bannedByUserId }): Promise<boolean>` (`ON CONFLICT DO NOTHING`), `deleteBan(h, email): Promise<boolean>`; `getForUpdate(h): Promise<{ userCap: number }>`, `get(h): Promise<{ userCap: number }>`, `setUserCap(h, cap: number): Promise<void>`.
 - **Behaviour:** `getForUpdate` and `get` first run `INSERT INTO identity_settings (id, user_cap) VALUES (1, 90) ON CONFLICT (id) DO NOTHING`, then `SELECT user_cap FROM identity_settings WHERE id = 1` (with `FOR UPDATE` for `getForUpdate`).
 
@@ -751,7 +781,7 @@ export type ChallengeData =
 - **Signatures:** `insert(h, { id, userId, tokenHash, lastUsedAt, expiresAt })`, `findValid(h, hash, now): Promise<{ id; userId } | null>`, `touch(h, id, at)`, `trimForUser(h, userId, keep: number): Promise<number>` (deletes all but the `keep` most recently used), `purgeExpired(h, now, limit)`.
 
 #### F-20: `recordSecurityEvent`
-- **File:** `identity/services/securityEvents.ts` · **Layer:** service
+- **File:** `identity/securityEventsService.ts` · **Layer:** service
 - **Signature:** `export async function recordSecurityEvent(deps: IdentityDeps, h: DbHandle, e: { userId: string; kind: SecurityEventKind; sessionId?: string | null; clientKind?: ClientKind | null; email?: EmailKind | null; refId?: string }): Promise<void>`
 - **Behaviour:**
   - Inserts the event.
@@ -761,7 +791,7 @@ export type ChallengeData =
 - **Calls:** F-16, P-F-73 [inj], P-F-31.
 
 #### F-21: identity events
-- **File:** `identity/services/events.ts` · **Layer:** service
+- **File:** `identity/eventsService.ts` · **Layer:** service
 - **Signatures:**
   ```ts
   export type IdentityEventName = "identity.user-created" | "identity.preferences-changed" | "identity.deletion-requested"
@@ -804,7 +834,7 @@ export type ChallengeData =
 - **Behaviour:** `defaultPorts().exportParticipants` contains identity's own participant (F-112). Lists are sorted by `order` at composition (F-34). Duplicate `module` names throw `TypeError` there.
 
 #### F-23: session creation
-- **File:** `identity/services/sessionService.ts` · **Layer:** service
+- **File:** `identity/sessionService.ts` · **Layer:** service
 - **Signature:** `export async function createSession(deps: IdentityDeps, h: DbHandle, input: { userId: string; delivery: "cookie" | "bearer"; clientKind: ClientKind; deviceLabel: string; authMethod: SessionRow["authMethod"]; presentedDeviceToken: string | null }): Promise<IssuedSession>`
 - **Behaviour** (inside the caller's transaction):
   1. Generates the access and refresh tokens and a new session ID and refresh ID.
@@ -819,11 +849,11 @@ export type ChallengeData =
 - **Calls:** F-2, F-11, F-57, F-8, `deps.ids` [inj], `deps.clock` [inj].
 
 #### F-24: `createAuthHook`
-- **File:** `identity/http/authHook.ts` · **Layer:** http (P-F-54 implementation)
+- **File:** `identity/authHook.ts` · **Layer:** http (P-F-54 implementation)
 - **Signature:** `export function createAuthHook(deps: Pick<IdentityDeps, "database" | "clock">): AuthHook`
-- **Behaviour** of `authenticate({ headers, cookies })`. It returns `Principal { userId, isOwner, sessionId }` (PA-1) or `null` and never throws for bad input:
+- **Behaviour** of `authenticate({ headers, cookies })`. It returns `Principal { userId, isOwner, sessionId }` (A-1) or `null` and never throws for bad input:
   1. If `authorization` matches `^Bearer (bma_[A-Za-z0-9_-]{43})$`, that token is used with `requiredDelivery = "bearer"`.
-  2. Otherwise, if F-4 `readCookie("access")` returns a token **and** P-F-56 `parseClientHeader(headers["x-budmon-client"]).kind === "web"`, that token is used with `requiredDelivery = "cookie"`. A cookie without the web client header → `null` (CSRF, HLD §7.1).
+  2. Otherwise, if F-4 `readCookie("access", cookies, headers.host)` returns a token **and** P-F-56 `parseClientHeader(headers["x-budmon-client"]).kind === "web"`, that token is used with `requiredDelivery = "cookie"`. A cookie without the web client header → `null` (CSRF, HLD §7.1).
   3. Otherwise → `null`.
   4. F-11 `findAuthByAccessHash(hashToken(token))`. The result is `null` unless all of these hold:
      - the row exists;
@@ -835,40 +865,45 @@ export type ChallengeData =
 - **Calls:** F-2, F-4, F-11, P-F-56.
 
 #### F-25: `refreshSession`
-- **File:** `identity/services/sessionService.ts` · **Layer:** service
+- **File:** `identity/sessionService.ts` · **Layer:** service
 - **Signature:** `export async function refreshSession(deps: IdentityDeps, input: { refreshToken: string | null; channel: "cookie" | "bearer"; req: ReqInfo }): Promise<IssuedSession>`
 - **Behaviour** (LD-3; one transaction, `READ COMMITTED`):
   1. `parseToken("refresh", refreshToken)` null → throws `REFRESH_INVALID`.
-  2. Rate limits (F-29): `refresh.ip` and `refresh.token` (subject: hex of the token hash).
+  2. Rate limit `refresh.ip` (F-29).
   3. F-11 `findRefreshByHashForUpdate`. Throws `REFRESH_INVALID` without other effects when:
      - nothing is found;
      - the session is revoked;
      - `idleExpiresAt ≤ now` or `absoluteExpiresAt ≤ now`;
      - `session.delivery !== channel`.
-  4. Let `T` be the presented token and `C = findRefreshById(session.currentRefreshId)`. Exactly one rule applies:
+
+     Then hit `refresh.session` (subject: the session ID; F-29).
+  4. Let `T` be the presented token and `C = findRefreshById(session.currentRefreshId)`. Exactly one rule applies, checked in this order:
 
      | Rule | Condition | Effect |
      | ---- | --------- | ------ |
-     | R1 current | `T.id === C.id` | Mark `T` `firstPresentedAt = now`, `supersededAt = now`, `supersededReason = "rotated"`; issue `N` (parent `T`, generation `T.generation + 1`). |
-     | R2 benign predecessor | `T.id === C.parentId` **and** `C.firstPresentedAt` is null | Mark `C` `supersededAt = now`, `supersededReason = "discarded"`; issue `N` (parent `T`, generation `C.generation + 1`). |
-     | R3 race tolerance | `T.firstPresentedAt` is null **and** `T.supersededReason === "discarded"` **and** `T.supersededAt − T.issuedAt ≤ REFRESH_RACE_WINDOW` **and** `now − T.supersededAt ≤ REFRESH_RACE_WINDOW` | Throws `REFRESH_INVALID`; **nothing revoked**, no event, no email. |
-     | R4 reuse | anything else (a token presented before and superseded, or a discarded token outside R3's windows) | F-26 `revokeSessionTx(…, "reuse_detected")`; F-20 event `refresh_reuse_detected` with email `session_reuse_signed_out` (refId = session ID); metric; then throws `REFRESH_INVALID` **after** the transaction commits (the revocation must persist). |
+     | R1 current | `T.id === C.id` | Mark `T` `firstPresentedAt = now`, `supersededAt = now`, `supersededReason = "rotated"`; issue `N` (parent `T`). |
+     | R2 benign predecessor | `T.id === C.parentId` **and** `C.firstPresentedAt` is null | Mark `C` `supersededAt = now`, `supersededReason = "discarded"`; issue `N` (parent `T`). |
+     | R3 race re-issue | `T.firstPresentedAt` is null **and** `T.supersededReason === "discarded"` **and** `T.supersededAt − T.issuedAt ≤ REFRESH_RACE_WINDOW` **and** `now − T.supersededAt ≤ REFRESH_RACE_WINDOW` **and** `C.firstPresentedAt` is null | The concurrent-refresh race (option (a)): mark `C` `discarded` (`supersededAt = now`); mark `T` `firstPresentedAt = now`, `supersededReason = "rotated"`; issue `N` (parent `T`). The session lives on; **no** revocation, event or email. |
+     | R3b race, current already used | R3's first four conditions hold, but `C.firstPresentedAt` isn't null | Throws `REFRESH_INVALID`; **nothing revoked**, no event, no email (the other branch already carries on). |
+     | R4 reuse | anything else: a token presented before and superseded, or a discarded token outside R3's windows | F-26 `revokeSessionTx(…, "reuse_detected")`; F-20 event `refresh_reuse_detected` with email `session_reuse_signed_out` (refId = session ID); metric; then throws `REFRESH_INVALID` **after** the transaction commits, so the revocation persists. |
 
-     All comparisons are `≤`/`<` exactly as written; the boundary (exactly 60 s) is inside the window.
-  5. Issuing `N` (R1, R2): new access token; F-11 `insertRefresh` and `rotate` with `idleExpiresAt = min(now + REFRESH_IDLE_TTL, absoluteExpiresAt)`, `accessExpiresAt = now + ACCESS_TTL`, `lastUsedAt = now`. The previous access token hash is replaced, so the old access token stops working immediately (D-3).
+     - The boundaries are inclusive: exactly 60 s is inside a window; 60.001 s is outside.
+     - `generation` is `parent.generation + 1`.
+     - **Why R3 can't be abused:** a thief who redeems the predecessor `P` while the device holds an unused `C` takes R2, which discards `C`. When the device presents `C`, `C` was discarded long after its issue, unless the theft happened within 60 s of the legitimate rotation. So R3 doesn't apply, R4 revokes, and the user is emailed. The one undetected case is a redemption within 60 s of the legitimate rotation (HLD §9, accepted).
+  5. Issuing `N` (R1, R2, R3): new access token; F-11 `insertRefresh` and `rotate` with `idleExpiresAt = min(now + REFRESH_IDLE_TTL, absoluteExpiresAt)`, `accessExpiresAt = now + ACCESS_TTL`, `lastUsedAt = now`. The previous access token hash is replaced, so the old access token stops working immediately (D-3).
   6. F-8 `touchLastActive`.
   7. Returns `IssuedSession` with `deviceToken: null` and `delivery = session.delivery`.
-  - Metric `auth_refresh_total{error_key}` (`none` for R1/R2, `REFRESH_INVALID` otherwise); `auth_refresh_reuse_total` for R4.
+  - Metric `auth_refresh_total{error_key}` (`none` for R1, R2 and R3, `REFRESH_INVALID` otherwise); `auth_refresh_reuse_total` for R4.
 - **Errors:** `REFRESH_INVALID` (401); `RATE_LIMITED`.
 - **Calls:** F-2, F-11, F-26, F-20, F-29, F-8, P-F-13.
 
 #### F-26: session revocation
-- **File:** `identity/services/sessionService.ts`
+- **File:** `identity/sessionService.ts`
 - **Signatures:** `export async function revokeSessionTx(deps, h: DbHandle, sessionId: string, reason: RevokeReason, at: Temporal.Instant): Promise<boolean>`, `export async function revokeAllSessionsTx(deps, h, userId: string, reason: RevokeReason, at: Temporal.Instant, exceptSessionId?: string): Promise<number>`
 - **Behaviour:** wrappers over F-11 `revoke`/`revokeAllForUser`. They return what the repo returns. The caller records events and emails.
 
 #### F-27: `deliverSession` and `clearSessionCookies`
-- **File:** `identity/http/deliver.ts` · **Layer:** router helper
+- **File:** `identity/deliver.ts` · **Layer:** router helper
 - **Signatures:**
   ```ts
   export interface SessionTokensWire { accessToken: string; refreshToken: string; accessExpiresAt: string; refreshExpiresAt: string; deviceToken: string | null }
@@ -878,22 +913,28 @@ export type ChallengeData =
   ```
 - **Behaviour:**
   - **`deliverSession`:**
-    - `cookie` delivery: appends `Set-Cookie` for `access` (max age `ACCESS_TTL`) and `refresh` (max age = `refreshExpiresAt − now`, in whole seconds). When `deviceToken` isn't null it also sets `device` (max age `KNOWN_DEVICE_TTL`). It clears `challenge`. The cookie origin is `ctx.headers.origin`. Returns `null`.
+    - `cookie` delivery (cookie names from `ctx.headers.host`): appends `Set-Cookie` for `access` (max age `ACCESS_TTL`) and `refresh` (max age = `refreshExpiresAt − now`, in whole seconds). When `deviceToken` isn't null it also sets `device` (max age `KNOWN_DEVICE_TTL`). It clears `challenge`. Returns `null`.
     - `bearer` delivery: returns the tokens with instants as RFC 3339 `Z` strings.
   - **`deliverChallenge`:** for `cookie`, sets `challenge` (max age `TWO_STEP_CHALLENGE_TTL`) and returns `null`; for `bearer`, returns the token.
   - **`clearSessionCookies`:** clears `access`, `refresh` and `challenge`, never `device`.
 
 #### F-28: step-up helpers
-- **File:** `identity/http/requireConfirmed.ts` · **Layer:** service helper
-- **Signatures:** `export async function requireConfirmed(deps: IdentityDeps, h: DbHandle, principal: Principal): Promise<void>`, `export async function confirmationFactor(deps, h, userId): Promise<"two_step" | "password" | "google">`
+- **File:** `identity/requireConfirmed.ts` · **Layer:** service helper
+- **Signatures:**
+  ```ts
+  export async function requireConfirmedTx(deps: IdentityDeps, h: DbHandle, principal: Principal, maxAgeSeconds?: number): Promise<void>;
+  export async function requireConfirmed(ctx: RequestContext & { principal: Principal }, maxAgeSeconds = 600): Promise<void>;   // the HLD §5.2 helper other modules use
+  export async function confirmationFactor(deps, h, userId): Promise<"two_step" | "password" | "google">;
+  ```
 - **Behaviour:**
-  - `requireConfirmed` reads the session (F-11 `findById`). It passes when `confirmedAt ≥ now − CONFIRM_VALIDITY` (exactly 10 minutes is still valid). Otherwise it throws `CONFIRMATION_REQUIRED` with `data.factor`.
+  - `requireConfirmedTx` reads the session (F-11 `findById`). It passes when `confirmedAt ≥ now − maxAgeSeconds` (default `CONFIRM_VALIDITY`, 600 s; exactly the limit is still valid). Otherwise it throws `CONFIRMATION_REQUIRED` with `data.factor`. `maxAgeSeconds` must be an integer 1..600 (else `RangeError`): other modules may demand a fresher step-up, never a staler one.
+  - `requireConfirmed(ctx, maxAgeSeconds)` runs `requireConfirmedTx` with `ctx.container.identity.deps` on a pool handle (no transaction). Identity's own services call `requireConfirmedTx` inside their transactions; where this catalog says "`requireConfirmed`", it means that.
   - `confirmationFactor` returns, in order: `two_step` if two-step is enabled; `password` if a password exists; `google` otherwise.
 - **Errors:** `CONFIRMATION_REQUIRED` (403, `{ factor }`). A session that doesn't exist throws `UNAUTHENTICATED` (unreachable after F-24).
 - **Calls:** F-10, F-9, F-11.
 
 #### F-29: limits
-- **File:** `identity/http/limits.ts` · **Layer:** service helper
+- **File:** `identity/limits.ts` · **Layer:** service helper
 - **Signatures:** `export const IDENTITY_LIMITS: Readonly<Record<IdentityLimiter, RateLimitSpec>>`, `export async function hitLimits(deps: Pick<IdentityDeps, "rateLimiter" | "metrics">, rules: readonly { limiter: IdentityLimiter; subject: string }[]): Promise<void>`
 - **Limits** (`limiter`: limit / window):
 
@@ -907,7 +948,7 @@ export type ChallengeData =
   | `twostep.totp-user` | 10 / 900 s | user ID |
   | `twostep.totp-user-day` | 30 / 86400 s | user ID |
   | `refresh.ip` | 120 / 600 s | IP |
-  | `refresh.token` | 30 / 600 s | token-hash hex |
+  | `refresh.session` | 30 / 600 s | session ID (hit after the lookup in F-25 step 3, HLD D-18) |
   | `google.ip` | 60 / 600 s | IP |
   | `reset.ip` | 10 / 3600 s | IP |
   | `reset.email` | 3 / 3600 s | email |
@@ -921,7 +962,7 @@ export type ChallengeData =
 - **Errors:** `RATE_LIMITED`.
 
 #### F-30: email sender
-- **File:** `identity/email/sender.ts` · **Layer:** integration
+- **File:** `identity/emailSender.ts` · **Layer:** integration
 - **Signatures:**
   ```ts
   export interface OutgoingEmail { to: string; subject: string; text: string; html: string }
@@ -931,24 +972,50 @@ export type ChallengeData =
   export function createMemoryEmailSender(): EmailSender & { readonly sent: readonly OutgoingEmail[]; failNext(e: EmailSendError): void }; // tests
   ```
 - **Behaviour:**
-  - The transport is `nodemailer.createTransport({ url: cfg.smtpUrl with auth.pass = smtpPassword, connectionTimeout: 10000, greetingTimeout: 10000, socketTimeout: 15000, requireTLS: url is smtp: and port 587, logger: false, debug: false })`.
+  - The transport applies P-F-10's `SMTP_URL` rule exactly (A-2), as defence in depth (configuration already refuses violations):
+
+    | `smtpUrl` | Transport options |
+    | --------- | ----------------- |
+    | `smtps://host[:port]` | `secure: true` (implicit TLS), port default 465 |
+    | `smtp://mailpit[:port]` (any `APP_ENV`), or `smtp://localhost[:port]` / `smtp://127.0.0.1[:port]` with `APP_ENV` `development` or `test` | `secure: false`, `ignoreTLS: true` (plain SMTP), port as given |
+    | any other `smtp://host[:port]` | `secure: false`, `requireTLS: true` (STARTTLS required; the send fails if the server doesn't offer it), port default 587 |
+    | `smtp://localhost…` or `smtp://127.0.0.1…` with `APP_ENV` `production` or `rehearsal` | refused: throws `EmailSendError(permanent: true)` with message `smtp_plaintext_refused` at construction |
+
+  - Auth: `user` from the URL's user part; `pass` from `smtpPassword` when set and non-empty, else no auth.
+  - Timeouts: `connectionTimeout: 10000`, `greetingTimeout: 10000`, `socketTimeout: 15000`. `logger: false`, `debug: false`.
   - `send` calls `sendMail({ from: cfg.from, to, subject, text, html })`.
   - Nodemailer errors with `responseCode ≥ 500` → `EmailSendError(permanent: true)`; any other error → `permanent: false`. The message is `"smtp_" + (code ?? "error")` and never contains addresses.
 - **Errors:** `EmailSendError`.
 
 #### F-31: email templates
-- **File:** `identity/email/templates.ts` · **Layer:** domain
-- **Signature:** `export type EmailKind = "invitation" | "password_reset" | "password_set" | "password_changed" | "password_added" | "two_step_enabled" | "two_step_disabled" | "two_step_reset_by_owner" | "authenticator_replaced" | "recovery_codes_regenerated" | "recovery_code_used" | "two_step_failed" | "google_linked" | "google_unlinked" | "session_reuse_signed_out" | "export_ready" | "deletion_scheduled" | "deletion_cancelled" | "account_closed" | "account_deleted" | "invitation_cap_failed"; export function renderEmail(kind: EmailKind, locale: string, values: Record<string, string | number>): { subject: string; text: string; html: string }`
+- **File:** `identity/emailTemplates.ts` · **Layer:** domain
+- **Signatures:**
+  ```ts
+  export type EmailKind = "invitation" | "password_reset" | "password_set" | "password_changed" | "password_added" | "two_step_enabled"
+    | "two_step_disabled" | "two_step_reset_by_owner" | "authenticator_replaced" | "recovery_codes_regenerated" | "recovery_code_used"
+    | "two_step_failed" | "google_linked" | "google_unlinked" | "session_reuse_signed_out" | "export_ready" | "deletion_scheduled"
+    | "deletion_cancelled" | "account_closed_owner" | "account_closed_ban" | "account_deleted" | "invitation_cap_failed";
+  export interface EmailContent { subjectId: string; introId: string; outroId?: string; values: Record<string, string | number>;
+    link?: { url: string; buttonId: string } }
+  export function renderEmail(c: EmailContent, locale: string): { subject: string; text: string; html: string };
+  ```
 - **Behaviour:**
-  - Subject and body come from the server catalog IDs `email.<kind>.subject` and `email.<kind>.body` (§7.2), through P-F-160 `renderMessage`. The body uses ICU, with `{link}`, `{date}`, `{device}`, `{inviter}` and `{contextLine}` arguments.
-  - `html` is the text split into paragraphs on blank lines, each HTML-escaped and wrapped in `<p>`. A line equal to the `link` value becomes `<p><a href="{link}">{buttonLabel}</a></p>`, with the label from `email.<kind>.button`.
-  - No images, no external URLs, `<html lang>` from the locale, `dir` from P-F-312 `directionOf`.
+  - `subject = renderMessage(locale, subjectId, values)`, `intro = renderMessage(locale, introId, values)`, `outro` likewise (P-F-160). The values are bidi-isolated by P-F-160, which is right for names, emails and dates inside sentences.
+  - **The link never goes through `renderMessage`** (P-7): its URL is inserted verbatim.
+  - `text` = `intro` + `"
+
+"` + `link.url` (when present) + `"
+
+"` + `outro` (when present).
+  - `html` = `<!doctype html><html lang="<locale>" dir="<directionOf(locale)>"><body>` + the intro's paragraphs (split on blank lines, HTML-escaped, each in `<p>`) + `<p><a href="<url, attribute-escaped>">` + escaped `renderMessage(locale, buttonId)` + `</a></p>` + the outro's paragraphs + `</body></html>`.
+  - No images and no external URLs.
+  - `account_closed` is two kinds (`account_closed_owner`, `account_closed_ban`), so the variant is chosen by the caller, not inside a message.
 - **Errors:** an unknown message ID propagates P-F-160's error (a programming error).
 
 #### F-32: `handleEmailSend`
-- **File:** `identity/email/emailJob.ts` · **Layer:** job handler (worker-general)
+- **File:** `identity/emailJobService.ts` · **Layer:** job handler (worker-general)
 - **Signature:** `export async function handleEmailSend(deps: IdentityWorkerDeps, payload: { kind: EmailKind; refId: string }, ctx: JobContext): Promise<void>`. `IdentityWorkerDeps` = `IdentityDeps` + `{ sender: EmailSender /* [inj] */ }`.
-- **Behaviour,** by kind. `origin = config.email.publicOrigin`, and dates are formatted in the recipient's zone and locale (P-F-312, `Intl.DateTimeFormat`, `dateStyle: "medium"`, plus `timeStyle: "short"` for deletion):
+- **Behaviour,** by kind. `origin = config.email.publicOrigin` (`email` is always set in worker-general, A-2), and dates are formatted in the recipient's zone and locale (P-F-312, `Intl.DateTimeFormat`, `dateStyle: "medium"`, plus `timeStyle: "short"` for deletion):
 
   | Kind | Loads (by `refId`) | Skips (completes without sending) when | Token | Link | Recipient, locale |
   | ---- | ------------------ | ------------------------------------- | ----- | ---- | ----------------- |
@@ -957,10 +1024,12 @@ export type ChallengeData =
   | `invitation_cap_failed` | invitation + inviter | there's no inviter | none | none | inviter (and, as a second send, the owner if different); recipient's locale |
   | `export_ready` | export + user | the export isn't `ready` | none | `<origin>/settings/data` | user |
   | `session_reuse_signed_out` | session + user | the user doesn't exist | none | `<origin>/settings/security` | user; `{device}` = device label |
-  | every other kind | user | the user doesn't exist | none | `<origin>/settings/security`, or `<origin>/sign-in` for `deletion_scheduled`/`account_closed` | user |
+  | every other kind (incl. `account_closed_owner`) | user | the user doesn't exist | none | per §7.2 | user |
+
+  `account_closed_ban` and `account_deleted` are never jobs: F-118 sends them itself, before deleting the user row.
 
   1. On a skip, it completes and logs `info("email_skipped", { reason: kind })`.
-  2. Otherwise it renders (F-31) and calls `sender.send`. Then, for `invitation`, F-13 `markSent`.
+  2. Otherwise it builds the `EmailContent` exactly as §7.2's table says for the kind (message IDs, values, link), renders it (F-31), and calls `sender.send`. Then, for `invitation`, F-13 `markSent`.
   3. On `EmailSendError(permanent)`: for `invitation`, F-13 `markSendFailed`. It logs `warn("email_failed", { reason: kind, errorCode })`, increments `identity_emails_total{error_key: "EMAIL_PERMANENT"}` and completes (no retry).
   4. On a transient error: on the last attempt (`ctx.attempt > identityJobs.emailSend.retryLimit`) it calls `markSendFailed` for invitations. It always rethrows (P-F-76 retries).
   5. On success: `identity_emails_total{error_key: "none"}`.
@@ -969,7 +1038,7 @@ export type ChallengeData =
 - **Calls:** F-2, F-8, F-9, F-13, F-14, F-17, F-11, F-30 [inj], F-31.
 
 #### F-33: job definitions
-- **File:** `identity/jobs.ts`
+- **File:** `identity/identityJobs.ts`
 - **Signature:** `export const identityJobs = { emailSend, exportBuild, erasureSweep, eraseUser, purge }` (P-F-70 `defineJob`, all role `general`):
 
   | Name | Payload (zod) | Policy | Retry | Cron |
@@ -983,7 +1052,7 @@ export type ChallengeData =
   `export function identityHandlers(deps: IdentityWorkerDeps): Map<string, Handler>` maps each name to F-32, F-111, F-119, F-118 and F-130.
 
 #### F-34: `createIdentityModule`
-- **File:** `identity/module.ts` · **Layer:** composition
+- **File:** `identity/identityModule.ts` · **Layer:** composition
 - **Signatures:**
   ```ts
   export interface IdentityModule { deps: IdentityDeps; authHook: AuthHook; events: IdentityEvents; ports: IdentityPorts;
@@ -996,11 +1065,20 @@ export type ChallengeData =
   - Builds `IdentityDeps`, `createAuthHook` (F-24), `createIdentityEvents` (F-21), the ports (defaults merged with `overrides.ports`, then sorted by `order`), and the reader, directory and owner services.
   - `erasureHandler = (userId) => eraseUser(deps, userId, { replay: true })` (P-F-146).
   - `onGeneralWorkerStarted` enqueues `identity.erasure-sweep` once with `singletonKey "startup"`, for missed cron runs while the laptop was off (HLD §5.5).
-  - **Platform wiring (P-F-96 modification):**
+  - **Sealed columns (P-4):** registers with the container's P-F-115 registry:
+    - `{ table: "two_step_credentials", idColumn: "user_id", column: "secret_envelope", purpose: "totp", provider: "api" }`
+    - `{ table: "two_step_credentials", idColumn: "user_id", column: "pending_secret_envelope", purpose: "totp", provider: "api" }`
+
+    P-F-117 (`secrets:rewrap-api`) then re-wraps TOTP secrets when the `api-secrets` key rotates. The `SealContext` it uses (`{ table, rowId: user_id, purpose: "totp" }`) is the one F-62/F-63/F-68 use (TP-4.16).
+  - **Platform wiring (PA-11):**
     - `createApiContainer` and `createWorkerContainer` each create the module and expose it as `identity`.
     - `ApiContainer.authHook = identity.authHook`.
     - `WorkerContainer.erasureHandler = identity.erasureHandler`.
+    - `ApiContainer.moduleRoutes` gains F-88's `registerGoogleCallbackRoute`.
+    - `WorkerContainer.onGeneralStarted` gains `onGeneralWorkerStarted`.
+    - `appRouter` gains `identityRouter`'s keys.
     - Other modules register ports and event subscriptions on `container.identity` before the server or workers start.
+  - Without `config.email` (a worker without the `general` role, or the API), `deps.sender` is `null`; only F-32 and F-118 use it, and both run only in worker-general.
 - **Errors:** duplicate port `module` names throw `TypeError`.
 
 #### F-35: identity contract
@@ -1008,10 +1086,12 @@ export type ChallengeData =
 - **Behaviour:** the procedures, schemas and errors in §5, built from P-F-342's `base` and P-F-343's `createRoute`. No `.transform()`. Every input with an email, password, code or token is a `POST` body (P-F-348's rule). Exports `authContract`, `meContract`, `invitationsContract`, `usersContract`, `exportsContract` and `deletionContract`, plus the wire types.
 
 #### F-36: identity router
-- **Files:** `identity/router/*.ts` · **Layer:** router
+- **Files:** `identity/*Router.ts` · **Layer:** router
 - **Signature:** `export const identityRouter = { auth: authRouter, me: meRouter, invitations: invitationsRouter, users: usersRouter, exports: exportsRouter, deletion: deletionRouter }`. Each handler is built from P-F-53's `publicProcedure` or `authedProcedure`, as §5 states.
 - **Behaviour:** for each procedure:
-  1. Build `ReqInfo` from the context.
+  1. Build `ReqInfo` from the context: `ip`, `clientKind`, `userAgent`, `origin = headers.origin ?? null`, `host = headers.host`, `cookies = parseCookies(headers.cookie)`, `deviceModel` from the body (≤ 100 characters), and `presentedDeviceToken`:
+     - for `tokenDelivery: "body"`, the body's `deviceToken`;
+     - for `tokenDelivery: "cookie"`, F-4 `readCookie("device", cookies, host)`. The `device` cookie's path is `/api/v1`, so it reaches every session-creating procedure (`auth.signIn`, `auth.verifyTwoStep`, `auth.googleComplete`, `auth.resetPassword`, `invitations.accept`) (P-9).
   2. For public cookie-setting procedures with `tokenDelivery: "cookie"`, require `ctx.clientKind === "web"`, else throw `FORBIDDEN` (login CSRF, HLD §7.1). P-F-62 already refuses bodies that aren't JSON.
   3. Call the service named in §5 and convert the domain result to wire output: instants to RFC 3339 strings; tokens and cookies through F-27.
   - Routers contain no business rules.
@@ -1022,7 +1102,7 @@ export type ChallengeData =
 - **Behaviour:** §3.3. Hashes with F-39 and is idempotent: it skips any user whose email exists.
 
 #### F-38: `checkPassword`
-- **File:** `identity/passwords/policy.ts` · **Layer:** domain
+- **File:** `identity/passwordPolicy.ts` · **Layer:** domain
 - **Signatures:** `export type PasswordProblem = "too_short" | "too_long" | "common" | "contains_email"`, `export function checkPassword(password: string, email: string, common: ReadonlySet<string>): PasswordProblem | null`, `export function loadCommonPasswords(gzPath?: string): ReadonlySet<string>`
 - **Behaviour:**
   - `p = password.normalize("NFC")`, and `n` = its length in code points (`[...p].length`). Rules apply in this order:
@@ -1035,7 +1115,7 @@ export type ChallengeData =
 - **Errors:** none.
 
 #### F-39: `PasswordHasher`
-- **File:** `identity/passwords/hasher.ts` · **Layer:** service
+- **File:** `identity/passwordHasher.ts` · **Layer:** service
 - **Signatures:** `export interface PasswordHasher { hash(p: string): Promise<string>; verify(phc: string | null, p: string): Promise<boolean>; needsRehash(phc: string): boolean }`, `export function createPasswordHasher(deps?: { hashSecret?: typeof hashSecret; verifySecret?: typeof verifySecret /* [inj] */; maxConcurrency?: number }): PasswordHasher`
 - **Behaviour:**
   - `hash` and `verify` call P-F-66 on the NFC-normalised password, through a semaphore of `ARGON2_MAX_CONCURRENCY` (4); extra callers wait.
@@ -1046,7 +1126,7 @@ export type ChallengeData =
 ### 4.2 Sign-up from an invitation (S-1)
 
 #### F-40: `previewInvitation`
-- **File:** `identity/services/invitationService.ts` · **Layer:** service
+- **File:** `identity/invitationService.ts` · **Layer:** service
 - **Signature:** `export async function previewInvitation(deps: IdentityDeps, input: { token: string }, req: ReqInfo): Promise<{ invitationId: string; email: string; inviterName: string | null; expiresAt: Temporal.Instant; origin: "direct" | "account_share" | "bootstrap" }>`
 - **Behaviour:**
   1. Limit `token.ip`.
@@ -1066,7 +1146,7 @@ export type ChallengeData =
 - **Errors:** `INVITATION_INVALID`, `INVITATION_EXPIRED`, `INVITATION_REVOKED`, `INVITATION_USED`, `RATE_LIMITED`.
 
 #### F-41: `acceptInvitation`
-- **File:** `identity/services/invitationService.ts` · **Layer:** service
+- **File:** `identity/invitationService.ts` · **Layer:** service
 - **Signature:**
   ```ts
   export async function acceptInvitation(deps: IdentityDeps, input: { token: string; displayName: string; locale: string; timeZone: string; baseCurrency: string;
@@ -1099,23 +1179,23 @@ export type ChallengeData =
 ### 4.3 Owner bootstrap (S-2)
 
 #### F-45: `bootstrapOwner`
-- **File:** `identity/services/bootstrapService.ts` · **Layer:** service
+- **File:** `identity/bootstrapService.ts` · **Layer:** service
 - **Signature:** `export async function bootstrapOwner(deps: IdentityDeps, input: { email: string; replace: boolean }): Promise<{ link: string; expiresAt: Temporal.Instant }>`
 - **Behaviour** (one transaction):
   1. Normalise and validate the email; invalid → `BootstrapError("invalid_email")`.
   2. F-8 `findOwner` exists → `BootstrapError("owner_exists")`.
   3. A user with that email exists → `BootstrapError("email_in_use")`.
   4. F-13 `findPendingBootstrap(lock)`:
-     - if it exists and hasn't expired: without `replace` → `BootstrapError("pending_exists", expiresAt)`; with `replace` → `revoke(id, null, now)`;
-     - if it exists and has expired → `expireIfDue`.
-  5. A pending invitation for that email from someone else is revoked (`revokePendingForEmail`).
+     - if it exists and hasn't expired: without `replace` → `BootstrapError("pending_exists", expiresAt)`; with `replace` → `revoke(id, null, now)` and publish `identity.invitation-ended { reason: "revoked" }` (P-15);
+     - if it exists and has expired → `expireIfDue`, publishing `invitation-ended { reason: "expired" }`.
+  5. A pending invitation for that email from someone else is revoked (`revokePendingForEmail`), publishing `invitation-ended { reason: "revoked" }` for each.
   6. Inserts an invitation: `origin "bootstrap"`, `inviterUserId null`, token from `generateToken("invitation")` stored as its hash with `tokenIssuedAt = now`, `expiresAt = now + INVITATION_TTL`.
   7. Returns `link = <api.publicOrigin>/invite#t=<token>`.
   - **No email job** (D-21).
 - **Errors:** `BootstrapError` (a plain `Error` subclass with `code: "invalid_email" | "owner_exists" | "email_in_use" | "pending_exists"` and `expiresAt?`).
 
 #### F-46: CLI command `identity:bootstrap-owner`
-- **File:** `main/cli.ts` (row, PA-6), handler `identity/cli/bootstrapOwner.ts`
+- **File:** `main/cli.ts` (row, A-6), handler `identity/bootstrapOwnerCli.ts`
 - **Signature:** `export async function runBootstrapOwner(c: ApiContainer, argv: readonly string[], out: { stdout: (s: string) => void; stderr: (s: string) => void }): Promise<number>`
 - **Behaviour:**
   - Config kind `api`. Parses `--email <address>` (required) and `--replace` (optional flag).
@@ -1139,19 +1219,13 @@ export type ChallengeData =
   - Missing or unknown arguments: usage on stderr, exit 64.
 - **Calls:** F-45.
 
-#### F-47: `budmon-local bootstrap-owner`
-- **File:** `infra/local/budmon-local`, `infra/local/lib/stack.sh` · **Layer:** owner CLI (bash)
-- **Signature:** `budmon-local bootstrap-owner --email <address> [--replace]`
-- **Behaviour:**
-  1. Refuses with exit 21 and "The Budmon stack isn't running. Start it with: budmon-local start" when the `api` service of project `budmon-main` isn't running.
-  2. Otherwise runs `docker compose -p budmon-main exec -T api node dist/main/cli.js identity:bootstrap-owner --email "$EMAIL" ${REPLACE:+--replace}`, passing the exit code through.
-  3. It never uses `compose run`, so no container's log captures the output (PA-6). Arguments are passed as separate words (no `eval`); the email must match `^[^[:space:]@]+@[^[:space:]@]+$` before execution, else exit 64.
-- **Development:** `pnpm --filter @budmon/server cli identity:bootstrap-owner --email …` runs the same handler (P-F-93).
+#### F-47: (platform) `budmon-local bootstrap-owner`
+Not identity's: the laptop wrapper is P-F-178's `bootstrap-owner` subcommand (A-6, platform S-15, TP-15.29). It refuses with exit 25 when the stack isn't running and runs F-46 through `docker compose exec -T api`. In development, the same handler runs through `pnpm --filter @budmon/server cli identity:bootstrap-owner --email …` (P-F-93).
 
 ### 4.4 Sign-in, sessions and step-up (S-3)
 
 #### F-50: `signInWithPassword`
-- **File:** `identity/services/signInService.ts` · **Layer:** service
+- **File:** `identity/signInService.ts` · **Layer:** service
 - **Signature:** `export async function signInWithPassword(deps: IdentityDeps, input: { email: string; password: string; delivery: "cookie" | "bearer"; presentedDeviceToken: string | null }, req: ReqInfo): Promise<SignInOutcome>`
 - **Behaviour:**
   1. `email = normaliseEmail(input.email)`.
@@ -1167,7 +1241,7 @@ export type ChallengeData =
 - **Calls:** F-3, F-8, F-9, F-29, F-39 [inj], F-51, F-57, F-20.
 
 #### F-51: `finishFirstFactor`
-- **File:** `identity/services/signInService.ts` · **Layer:** service
+- **File:** `identity/signInService.ts` · **Layer:** service
 - **Signature:** `export async function finishFirstFactor(deps: IdentityDeps, input: { user: UserRow; method: "password" | "google"; pendingLink: PendingGoogleLink | null; delivery: "cookie" | "bearer"; presentedDeviceToken: string | null; rehash?: string }, req: ReqInfo): Promise<SignInOutcome>`
 - **Behaviour** (one transaction):
   - **Two-step enabled** (F-10 `state = enabled`): insert an `auth_challenges` row:
@@ -1186,7 +1260,7 @@ export type ChallengeData =
 - **Errors:** database errors. A `23505` on `google_identities_sub_key` or `_user_key` while committing a pending link → `GOOGLE_ACCOUNT_IN_USE` (a race).
 
 #### F-52: `verifyTwoStepAtSignIn` and `completeSignIn`
-- **File:** `identity/services/signInService.ts` · **Layer:** service
+- **File:** `identity/signInService.ts` · **Layer:** service
 - **Signature:** `export async function verifyTwoStepAtSignIn(deps: IdentityDeps, input: { challengeToken: string | null; code: string | null; recoveryCode: string | null; delivery: "cookie" | "bearer"; presentedDeviceToken: string | null }, req: ReqInfo): Promise<Extract<SignInOutcome, { status: "signed_in" }>>`
 - **Behaviour:**
   1. Exactly one of `code` and `recoveryCode` must be set; otherwise `VALIDATION_FAILED` (path `code`).
@@ -1203,12 +1277,12 @@ export type ChallengeData =
 - **Calls:** F-12, F-62, F-51, F-20, F-10.
 
 #### F-53: `signOut`
-- **File:** `identity/services/sessionService.ts`
+- **File:** `identity/sessionService.ts`
 - **Signature:** `export async function signOut(deps, principal: Principal): Promise<void>`
 - **Behaviour:** F-26 revokes `principal.sessionId` with reason `sign_out`. The router then calls F-27 `clearSessionCookies`. It's idempotent.
 
 #### F-54: session management
-- **File:** `identity/services/sessionService.ts`
+- **File:** `identity/sessionService.ts`
 - **Signatures:** `export async function listSessions(deps, principal): Promise<readonly { id: string; deviceLabel: string; clientKind: ClientKind; createdAt: Temporal.Instant; lastUsedAt: Temporal.Instant; current: boolean }[]>`, `export async function revokeOwnSession(deps, principal, sessionId: string): Promise<void>`, `export async function revokeOtherSessions(deps, principal): Promise<{ revoked: number }>`
 - **Behaviour:**
   - `listSessions`: F-11 `listLive`, with the current session first and then by `lastUsedAt` descending.
@@ -1220,7 +1294,7 @@ export type ChallengeData =
 - **Errors:** `NOT_FOUND`, `CONFLICT`.
 
 #### F-55: `confirmIdentity` (`me.confirm`)
-- **File:** `identity/services/stepUpService.ts`
+- **File:** `identity/stepUpService.ts`
 - **Signature:** `export async function confirmIdentity(deps, principal: Principal, input: { password: string | null; code: string | null; recoveryCode: string | null }, req: ReqInfo): Promise<{ confirmedUntil: Temporal.Instant }>`
 - **Behaviour:**
   1. `factor = confirmationFactor(user)`. Exactly one input is allowed:
@@ -1231,7 +1305,7 @@ export type ChallengeData =
 - **Errors:** `INVALID_CREDENTIALS`, `TWO_STEP_CODE_INVALID`, `VALIDATION_FAILED`, `RATE_LIMITED`.
 
 #### F-56: `getMe`
-- **File:** `identity/services/profileService.ts`
+- **File:** `identity/profileService.ts`
 - **Signature:** `export async function getMe(deps, principal): Promise<Me>`, where
   ```ts
   export interface Me { id: string; email: string; displayName: string; locale: string; timeZone: string; baseCurrency: string;
@@ -1243,27 +1317,27 @@ export type ChallengeData =
 - **Behaviour:** reads the user, credentials, two-step row and session (no writes). `confirmedUntil = confirmedAt + CONFIRM_VALIDITY` when that's in the future, else `null`.
 
 #### F-57: known devices
-- **File:** `identity/services/knownDevices.ts`
+- **File:** `identity/knownDevicesService.ts`
 - **Signatures:** `export async function checkKnownDevice(deps, h, token: string | null, email: string): Promise<{ id: string; userId: string } | null>`, `export async function issueKnownDevice(deps, h, userId: string): Promise<string>`
 - **Behaviour:**
   - `checkKnownDevice` parses the token as `device`. It returns the F-18 `findValid` row when its user's email equals `email`, else `null`.
   - `issueKnownDevice` generates a `bmd` token, inserts the row (expires in `KNOWN_DEVICE_TTL`), trims the user's devices to `MAX_KNOWN_DEVICES`, and returns the token.
 
 #### F-58: `authMethods`
-- **File:** `identity/services/signInService.ts`
-- **Signature:** `export function authMethods(cfg: Config["api"]["identity"], origin: string | null): { password: true; google: "available" | "this_computer_only" | "unavailable" }`
+- **File:** `identity/signInService.ts`
+- **Signature:** `export function authMethods(googleSignIn: Config["api"]["googleSignIn"], origin: string | null): { password: true; google: "available" | "this_computer_only" | "unavailable" }`
 - **Behaviour:** pure.
-  - `unavailable` when `cfg.google` is null, or `origin` isn't in `appOrigins` (compared as serialised origins).
+  - `unavailable` when `googleSignIn` is `undefined`, or `origin` isn't in `appOrigins` (compared as serialised origins).
   - Otherwise `this_computer_only` when `callbackOrigin` matches `^http://localhost(:\d+)?$` and `origin !== callbackOrigin`.
   - Otherwise `available`.
 
 #### F-59: `signUpOptions`
-- **File:** `identity/services/signInService.ts`
+- **File:** `identity/signInService.ts`
 - **Signature:** `export async function signUpOptions(deps): Promise<{ currencies: { code: string; minorUnits: number }[]; locales: string[] }>`
 - **Behaviour:** reads active `currencies` (ordered by code), and returns the locales `validateProfile` accepts (F-90). It's cached in memory for 10 minutes. Public, because sign-up happens before there's a user.
 
 #### F-130: `runIdentityPurge`
-- **File:** `identity/services/purge.ts` · **Layer:** job handler
+- **File:** `identity/purgeService.ts` · **Layer:** job handler
 - **Signature:** `export async function runIdentityPurge(deps: IdentityDeps): Promise<Record<string, number>>`
 - **Behaviour:** each step runs in its own transaction, in batches of 5000 until fewer rows are affected. Logs `info("identity_purged", { step, count })` per step.
 
@@ -1282,7 +1356,7 @@ export type ChallengeData =
 ### 4.5 Two-step verification (S-4)
 
 #### F-60: TOTP and base32
-- **Files:** `identity/twoStep/base32.ts`, `identity/twoStep/totp.ts` · **Layer:** domain
+- **Files:** `identity/base32.ts`, `identity/totp.ts` · **Layer:** domain
 - **Signatures:**
   ```ts
   export function base32Encode(b: Uint8Array): string;                 // RFC 4648 alphabet, no padding, upper case
@@ -1301,7 +1375,7 @@ export type ChallengeData =
 - **Errors:** `base32Decode` throws `RangeError`.
 
 #### F-61: recovery codes
-- **File:** `identity/twoStep/recoveryCodes.ts` · **Layer:** domain
+- **File:** `identity/recoveryCodes.ts` · **Layer:** domain
 - **Signatures:** `export function generateRecoveryCodes(n: number, randomBytes?): string[]`, `export function formatRecoveryCode(raw12: string): string`, `export function normaliseRecoveryCode(input: string): string | null`, `export function recoveryCodeHmacs(normalised: string, keys: { current: string; keys: ReadonlyMap<string, Buffer> }): { keyId: string; hmac: Buffer }[]`, `export function currentKeyHmac(normalised: string, keys): { keyId: string; hmac: Buffer }`
 - **Behaviour:**
   - `generateRecoveryCodes` returns `n` distinct strings of 12 base32 characters from 60 random bits each (8 bytes drawn; the top 4 bits are discarded). They're formatted `XXXX-XXXX-XXXX`.
@@ -1310,18 +1384,18 @@ export type ChallengeData =
 - **Errors:** none.
 
 #### F-62: `checkSecondFactor`
-- **File:** `identity/services/twoStepService.ts` · **Layer:** service
+- **File:** `identity/twoStepService.ts` · **Layer:** service
 - **Signature:** `export async function checkSecondFactor(deps, h: DbHandle, userId: string, f: { code: string | null; recoveryCode: string | null }, req: ReqInfo): Promise<{ ok: true; method: "totp" | "recovery" } | { ok: false; method: "totp" | "recovery" }>`
 - **Behaviour** (in the caller's transaction):
   1. Hit `twostep.ip` (always).
-  2. **`code`:** hit `twostep.totp-user`, then `twostep.totp-user-day`. Lock the two-step row (must be `enabled`), unseal the secret (P-F-114, `SealContext { table: "two_step_credentials", row: userId, purpose: "totp" }`), and run `verifyTotp(…, lastUsedStep)`. A match → F-10 `setLastUsedStep(step)` → `ok`.
+  2. **`code`:** hit `twostep.totp-user`, then `twostep.totp-user-day`. Lock the two-step row (must be `enabled`), unseal the secret (P-F-114, `SealContext { table: "two_step_credentials", rowId: userId, purpose: "totp" }`, the same context for both envelope columns so F-68's swap moves bytes unchanged), and run `verifyTotp(…, lastUsedStep)`. A match → F-10 `setLastUsedStep(step)` → `ok`.
   3. **`recoveryCode`:** **no per-user limiter** (D-8). Normalise it (null → `ok: false`), compute `recoveryCodeHmacs`, and F-10 `findUnusedCode(lock)`. A hit → `markCodeUsed(now)` → `ok`.
   4. Metric `auth_two_step_total{method, error_key: "none" | "TWO_STEP_CODE_INVALID"}`.
 - **Errors:** `RATE_LIMITED` (limiters). Unseal errors propagate (`INTERNAL`).
 - **Calls:** F-10, F-60, F-61, F-29, P-F-114 [inj].
 
 #### F-63: `twoStepSetup`
-- **File:** `identity/services/twoStepService.ts`
+- **File:** `identity/twoStepService.ts`
 - **Signature:** `export async function twoStepSetup(deps, principal): Promise<{ secret: string; otpauthUri: string; expiresAt: Temporal.Instant }>`
 - **Behaviour:** `requireConfirmed`. Two-step already `enabled` → `TWO_STEP_ALREADY_ENABLED`. Otherwise generates a secret, seals it (purpose `totp`), and F-10 `upsertPending` with `expiresAt = now + TOTP_SETUP_TTL`, replacing any earlier pending secret. Returns the base32 secret grouped in 4s, the URI, and the expiry.
 - **Errors:** `CONFIRMATION_REQUIRED`, `TWO_STEP_ALREADY_ENABLED`.
@@ -1364,7 +1438,7 @@ export type ChallengeData =
 ### 4.6 Passwords (S-5)
 
 #### F-70: `requestPasswordReset`
-- **File:** `identity/services/passwordService.ts`
+- **File:** `identity/passwordService.ts`
 - **Signature:** `export async function requestPasswordReset(deps, input: { email: string }, req: ReqInfo): Promise<void>`
 - **Behaviour:**
   1. Normalise the email. Hit `reset.ip`, then `reset.email`. An invalid format still returns normally (no `VALIDATION_FAILED` beyond the contract's string schema), so the response is the same.
@@ -1411,7 +1485,7 @@ export type ChallengeData =
 ### 4.7 Google Sign-In (S-6)
 
 #### F-80: `GoogleOidc`
-- **File:** `identity/google/oidcClient.ts` · **Layer:** integration
+- **File:** `identity/googleOidc.ts` · **Layer:** integration
 - **Signatures:**
   ```ts
   export interface GoogleOidc {
@@ -1420,7 +1494,7 @@ export type ChallengeData =
     verifyIdToken(idToken: string, expect: { audience: string; authorizedParties: readonly string[] }): Promise<GoogleClaims & { nonce: string | null }>;
   }
   export class GoogleError extends Error { readonly reason: "invalid_grant" | "rejected" | "invalid_token" | "unavailable" }
-  export function createGoogleOidc(cfg: NonNullable<Config["api"]["identity"]["google"]>, deps?: { fetch?: typeof fetch; jwks?: JWTVerifyGetKey; clock?: Clock;
+  export function createGoogleOidc(cfg: NonNullable<Config["api"]["googleSignIn"]>, deps?: { fetch?: typeof fetch; jwks?: JWTVerifyGetKey; clock?: Clock;
     endpoints?: { authorization: URL; token: URL; jwks: URL } /* [inj]: tests and the e2e server point these at a fake Google */ }): GoogleOidc;
   export function pkcePair(randomBytes?): { verifier: string; challenge: string };   // 32-byte verifier (base64url), S256 challenge
   ```
@@ -1442,10 +1516,10 @@ export type ChallengeData =
 - **Errors:** `GoogleError`.
 
 #### F-81: `startGoogleWebFlow`
-- **File:** `identity/services/googleService.ts` · **Layer:** service
+- **File:** `identity/googleService.ts` · **Layer:** service
 - **Signature:** `export async function startGoogleWebFlow(deps, input: { intent: ChallengeIntent; invitationToken: string | null; returnTo: string }, req: ReqInfo, principal: Principal | null): Promise<{ authorizationUrl: string; bindingCookie: string }>`
 - **Behaviour:**
-  1. `config.api.identity.google` null → `GOOGLE_UNAVAILABLE`.
+  1. `config.api.googleSignIn` undefined → `GOOGLE_UNAVAILABLE`.
   2. Hit `google.ip`.
   3. `req.origin` must be in `appOrigins`; else → `GOOGLE_SIGNIN_FAILED`.
   4. `returnTo` must match `^/[A-Za-z0-9/_-]{0,200}$` and not start with `//`; else `VALIDATION_FAILED` (path `returnTo`).
@@ -1464,15 +1538,15 @@ export type ChallengeData =
      - `userId` and `sessionId` from `principal` (null for public intents);
      - `data { intent, appOrigin: req.origin, returnTo, codeVerifier, nonce, claims: null }`;
      - `expiresAt = now + GOOGLE_FLOW_TTL`.
-  8. Returns the URL and `bindingCookie = setCookie("binding", binding, GOOGLE_FLOW_TTL, req.origin)`; the router appends the cookie.
+  8. Returns the URL and `bindingCookie = setCookie("binding", binding, GOOGLE_FLOW_TTL, req.host)`; the router appends the cookie.
 - **Errors:** `GOOGLE_UNAVAILABLE`, `GOOGLE_SIGNIN_FAILED`, `GOOGLE_ACCOUNT_MISMATCH`, `CONFIRMATION_REQUIRED`, `INVITATION_*`, `VALIDATION_FAILED`, `RATE_LIMITED`.
 
 #### F-82: `handleGoogleCallback`
-- **File:** `identity/services/googleService.ts` · **Layer:** service (used by F-88)
+- **File:** `identity/googleService.ts` · **Layer:** service (used by F-88)
 - **Signature:** `export async function handleGoogleCallback(deps, q: { code: string | null; state: string | null; error: string | null }, req: { ip: string }): Promise<{ location: string }>`
 - **Behaviour:** it never throws to the route; every path returns a redirect `location`.
-  1. Hit `google.ip`. Over the limit → `<callbackOrigin>/auth/google#e=rate_limited`.
-  2. `state` must parse as `state` and an unconsumed, unexpired `google_web` challenge must exist (lock); else → `<callbackOrigin>/auth/google#e=failed`.
+  1. Hit `google.ip`. Over the limit → `/sign-in?error=rate_limited` (relative, so on the callback origin).
+  2. `state` must parse as `state` and an unconsumed, unexpired `google_web` challenge must exist (lock); else → `/sign-in?error=google_failed` (relative; HLD §5.1: an unknown or consumed `state` has no known app origin).
   3. Let `O = data.appOrigin`.
   4. `error` present (for example `access_denied`) → consume → `O/auth/google#e=cancelled`.
   5. Missing `code` → consume → `#e=failed`.
@@ -1488,8 +1562,8 @@ export type ChallengeData =
 - **Calls:** F-12, F-80 [inj], F-29.
 
 #### F-83: `completeGoogleWebFlow`
-- **File:** `identity/services/googleService.ts`
-- **Signature:** `export async function completeGoogleWebFlow(deps, input: { handoff: string; delivery: "cookie" }, req: ReqInfo, principal: Principal | null): Promise<GoogleOutcome>`, where
+- **File:** `identity/googleService.ts`
+- **Signature:** `export async function completeGoogleWebFlow(deps, input: { handoff: string; delivery: "cookie"; presentedDeviceToken: string | null /* = req.presentedDeviceToken */ }, req: ReqInfo, principal: Principal | null): Promise<GoogleOutcome>`, where
   ```ts
   export type GoogleOutcome =
     | (SignInOutcome & { returnTo: string })
@@ -1501,7 +1575,7 @@ export type ChallengeData =
   1. Hit `google.ip`. Parse the hand-off (`GOOGLE_SIGNIN_FAILED`).
   2. In one transaction: lock by `secondaryHash`. Each of these fails with `GOOGLE_SIGNIN_FAILED`:
      - the challenge is missing, consumed, or past `expiresAt`;
-     - `sha256(readCookie("binding")) ≠ bindingHash`;
+     - `sha256(readCookie("binding", req.cookies, req.host)) ≠ bindingHash`;
      - the intent doesn't match the procedure: public allows `sign_in`/`sign_up`, `me.googleComplete` allows `link`/`confirm`;
      - for `link`/`confirm`, `principal.sessionId ≠ challenge.sessionId`.
   3. Consume the challenge, then call F-86 with the claims, intent, invitation ID, delivery and `returnTo`.
@@ -1558,19 +1632,19 @@ export type ChallengeData =
 - **Behaviour:** `requireConfirmed`. No linked Google → `NOT_FOUND`. No password → `PASSWORD_REQUIRED`. Otherwise F-9 `deleteGoogleByUser`, then F-20 `google_unlinked` with email. No sessions are revoked.
 
 #### F-88: `registerGoogleCallbackRoute`
-- **File:** `identity/google/callbackRoute.ts` · **Layer:** http (non-contract)
+- **File:** `identity/googleCallbackRouter.ts` · **Layer:** http (non-contract)
 - **Signature:** `export function registerGoogleCallbackRoute(app: FastifyInstance, deps: IdentityDeps): void`
 - **Behaviour:**
   - `GET /api/v1/auth/google/callback`, registered before P-F-55's catch-all and excluded from OpenAPI.
   - Reads the `code`, `state` and `error` query parameters (strings ≤ 2048 characters; anything else is treated as missing).
   - Calls F-82 and replies `303` with `Location: <location>`, `Cache-Control: no-store` and `Referrer-Policy: no-referrer`, and an empty body. It never sets cookies.
-  - When Google isn't configured: `303` to `/auth/google#e=unavailable` (relative).
+  - When Google isn't configured: `303` to `/sign-in?error=unavailable` (relative).
   - P-F-38's request log records the route template only (no query string).
 
 ### 4.8 Profile and preferences (S-7)
 
 #### F-90: `updateProfile` and `validateProfile`
-- **File:** `identity/services/profileService.ts`
+- **File:** `identity/profileService.ts`
 - **Signatures:** `export async function validateProfile(deps, h, p: Partial<{ displayName: string; locale: string; timeZone: string; baseCurrency: string }>): Promise<{ value: typeof p; issues: Issue[] }>`, `export async function updateProfile(deps, principal, patch: Partial<{ displayName: string; locale: string; timeZone: string; baseCurrency: string }>): Promise<Me>`
 - **Behaviour:**
   - **`validateProfile`:**
@@ -1594,9 +1668,10 @@ export type ChallengeData =
 ### 4.9 Invitations (S-8)
 
 #### F-95: `createInvitation`
-- **File:** `identity/services/invitationService.ts`
+- **File:** `identity/invitationService.ts`
 - **Signature:** `export async function createInvitation(deps, h: DbHandle, input: { inviterId: string; email: string; origin: "direct" | "account_share" }): Promise<{ id: string; createdAt: Temporal.Instant }>`
 - **Behaviour** (inside the caller's transaction). Checks run in this exact order and the first failure throws:
+  0. Hit `invite.user` (20 a day per inviter, HLD D-18; F-29), before any other check, also for owners and for F-99. Over the limit → `RATE_LIMITED`.
   1. `email = normaliseEmail`; `!isValidEmail` → `VALIDATION_FAILED` (path `email`, code `invalid_email`).
   2. Lock the inviter (F-8). Missing, or `pending_deletion` → `INVITATIONS_DISABLED`.
   3. The inviter isn't the owner and `ports.invitePolicy.canSendInvitations` is false → `INVITATIONS_DISABLED`.
@@ -1646,7 +1721,7 @@ export type ChallengeData =
 ### 4.10 Finding a user (S-9)
 
 #### F-105: `UserDirectory.findByExactEmail`
-- **File:** `identity/services/directoryService.ts`
+- **File:** `identity/directoryService.ts`
 - **Signature:** `export interface UserDirectory { findByExactEmail(h: DbHandle, email: string, requesterId: string): Promise<{ kind: "user"; userId: string; displayName: string } | { kind: "unavailable" } | { kind: "none" }> }; export function createUserDirectory(deps): UserDirectory`; procedure handler `export async function lookupByEmail(deps, principal, input: { email: string }): Promise<same>`
 - **Behaviour:**
   - `lookupByEmail` hits `lookup.user`, then calls `findByExactEmail`.
@@ -1660,7 +1735,7 @@ export type ChallengeData =
 - **Errors:** `RATE_LIMITED` (procedure only).
 
 #### F-106: `UsersReader`
-- **File:** `identity/services/usersReader.ts`
+- **File:** `identity/usersReaderService.ts`
 - **Signature:** `export interface UsersReader { getProfile(h, userId): Promise<{ id; email; displayName; locale; timeZone; baseCurrency; status } | null>; getDisplayNames(h, ids: readonly string[]): Promise<Map<string, string | null>>; isActive(h, userId): Promise<boolean> }; export function createUsersReader(): UsersReader`
 - **Behaviour:**
   - `getDisplayNames` returns `null` for IDs with no user ("Deleted user" is a client string). It accepts up to 500 IDs; more → `RangeError`.
@@ -1670,7 +1745,7 @@ export type ChallengeData =
 ### 4.11 Data export (S-10)
 
 #### F-110: export procedures
-- **File:** `identity/services/exportService.ts`
+- **File:** `identity/exportService.ts`
 - **Signatures:** `export async function requestExport(deps, principal, tx: DbHandle): Promise<CreatedResult>` (called through P-F-102 `runIdempotentCreate`), `export async function listExports(deps, principal): Promise<ExportItem[]>`, `export async function exportDownloadUrl(deps, principal, exportId: string): Promise<{ url: string; expiresAt: Temporal.Instant }>`
 - **Behaviour:**
   - **`requestExport`:**
@@ -1683,7 +1758,7 @@ export type ChallengeData =
   - **`exportDownloadUrl`:**
     1. The row is missing or another user's → `NOT_FOUND`.
     2. `status ≠ ready` or `expiresAt ≤ now` → `EXPORT_NOT_READY`.
-    3. P-F-140 `presignGet("exports", objectKey, 900)`.
+    3. P-F-140 `presignGet("exports", objectKey, 900, { downloadName: "budmon-export-" + <completedAt as YYYY-MM-DD in the user's zone> + ".zip" })` (PA-7).
 - **Errors:** `CONFIRMATION_REQUIRED`, `EXPORT_IN_PROGRESS`, `EXPORT_LIMIT_REACHED`, `NOT_FOUND`, `EXPORT_NOT_READY`.
 
 #### F-111: `buildExport` (job handler)
@@ -1700,7 +1775,7 @@ export type ChallengeData =
   - Metric `identity_exports_total{error_key}`.
 
 #### F-112: identity's export section
-- **File:** `identity/export/identitySection.ts`
+- **File:** `identity/identityExportSection.ts`
 - **Signature:** `export const identityExportParticipant: ExportParticipant` (`module "identity"`, `order 0`)
 - **Behaviour:** returns these sections. No hashes, secrets, tokens, codes or IP addresses appear in any of them.
 
@@ -1714,7 +1789,7 @@ export type ChallengeData =
   | `identity.exports` | `requested_at`, `status` |
 
 #### F-113: `writeExportZip`
-- **File:** `identity/export/zip.ts`
+- **File:** `identity/exportZip.ts`
 - **Signature:** `export async function writeExportZip(sections: readonly ExportSection[], meta: { userId: string; generatedAt: Temporal.Instant; release: string }): Promise<Buffer>`
 - **Behaviour:** builds the archive with `yazl` (deflate) into a `Buffer`. Format: §7.4.
 - **Errors:** a duplicate section name → `TypeError`.
@@ -1722,7 +1797,7 @@ export type ChallengeData =
 ### 4.12 Account deletion (S-11)
 
 #### F-115: `deletionPrecheck`
-- **File:** `identity/services/deletionService.ts`
+- **File:** `identity/deletionService.ts`
 - **Signature:** `export async function deletionPrecheck(deps, principal): Promise<{ blockers: DeletionBlocker[]; isOwner: boolean }>`
 - **Behaviour:** concatenates every `DeletionPrecheck`'s blockers, sorted by `name`.
 
@@ -1744,19 +1819,24 @@ export type ChallengeData =
 
 #### F-117: `cancelDeletion`
 - **Signature:** `export async function cancelDeletion(deps, principal): Promise<void>`
-- **Behaviour:** the user isn't `pending_deletion` with `requestedBy = self` → `DELETION_NOT_PENDING`. Otherwise `setDeletion(null)`, F-20 `deletion_cancelled` with email, and publish `identity.deletion-cancelled`.
+- **Behaviour** (one transaction; the user row locked `FOR UPDATE`, the same lock F-118 takes):
+  1. The user isn't `pending_deletion` with `requestedBy = self` → `DELETION_NOT_PENDING`.
+  2. `deletionScheduledFor ≤ now` → `DELETION_IN_PROGRESS` (P-12): once the grace period has ended, erasure may already be running, and cancelling is refused even if the sweep hasn't picked the user up yet.
+  3. Otherwise `setDeletion(null)`, F-20 `deletion_cancelled` with email, and publish `identity.deletion-cancelled`.
+- **Errors:** `DELETION_NOT_PENDING`, `DELETION_IN_PROGRESS`.
 
 #### F-118: `eraseUser`
 - **Signature:** `export async function eraseUser(deps: IdentityWorkerDeps, userId: string, opts: { replay: boolean }): Promise<"erased" | "skipped" | "absent">`
 - **Behaviour:**
-  1. Read the user.
+  1. In a short transaction, read the user `FOR UPDATE` (the lock F-117 and F-125's cancel take).
      - Absent: delete the export prefix (P-F-140 `deletePrefix("exports", "users/<id>/")`) and return `absent`.
-     - Not replay, and not (`pending_deletion` ∧ `scheduledFor ≤ now`) → `skipped` (cancelled meanwhile).
+     - Not replay, and not (`pending_deletion` ∧ `scheduledFor ≤ now`) → `skipped` (cancelled before it was due).
+     - Because cancels are refused once `scheduledFor ≤ now` (F-117, F-125), a user that passes this check can't be reactivated during the remaining steps.
   2. Not replay: P-F-146 `erasureLog.append({ userId, erasedAt: now })`. A failure propagates (retry; nothing deleted).
   3. For each `ErasureParticipant` in order: `withTransaction(erase(h, userId, { requestedBy: user.deletionRequestedBy, replay }))`.
   4. F-17 `failActiveForUser(userId, "erased")`.
   5. `deletePrefix("exports", "users/<userId>/")`.
-  6. Not replay: send the final email synchronously with `sender.send` under a 10-second `Promise.race` timeout. The kind is `account_closed` when `requestedBy = "ban"`, else `account_deleted`. It's rendered in the user's locale. Any failure → `warn("final_email_failed")`, the metric, and continue.
+  6. Not replay: send the final email synchronously with `sender.send` under a 10-second `Promise.race` timeout. The kind is `account_closed_ban` when `requestedBy = "ban"`, else `account_deleted` (§7.2). It's rendered in the user's locale. Any failure → `warn("final_email_failed")`, the metric, and continue.
   7. F-8 `deleteById` (cascade).
   8. Returns `erased`. Metric `identity_erasures_total{error_key}`.
   - The job handler (`identity.erase-user`) calls it with the payload's `replay`.
@@ -1769,7 +1849,7 @@ export type ChallengeData =
 ### 4.13 Owner services for `admin` (S-12)
 
 #### F-125: `OwnerServices`
-- **File:** `identity/services/ownerService.ts`
+- **File:** `identity/ownerService.ts`
 - **Signature:**
   ```ts
   export interface OwnerServices {
@@ -1780,7 +1860,7 @@ export type ChallengeData =
     setInviteAllowance(owner: Principal, userId: string, allowance: number | null): Promise<void>;
     requestDeletionByOwner(owner: Principal, userId: string): Promise<{ deletionScheduledFor: Temporal.Instant }>;
     cancelDeletionByOwner(owner: Principal, userId: string): Promise<void>;
-    banEmail(owner: Principal, email: string): Promise<{ userId: string | null }>;
+    banEmail(owner: Principal, email: string): Promise<{ userId: string | null; alreadyBanned: boolean }>;
     liftBan(owner: Principal, email: string): Promise<void>;
     resetTwoStepByOwner(owner: Principal, userId: string): Promise<void>;
   }
@@ -1795,9 +1875,9 @@ export type ChallengeData =
   | `revokeInvitation` | Any pending invitation → `revoked` by the owner; publish `invitation-ended`. | `NOT_FOUND`; `CONFLICT { reason: "not_pending" }` |
   | `setUserCap` | `cap` is an integer 1..100000; settings locked; updated. | `VALIDATION_FAILED` |
   | `setInviteAllowance` | `allowance` is null or 0..100000. | `NOT_FOUND`, `VALIDATION_FAILED` |
-  | `requestDeletionByOwner` | Target is the owner → `CONFLICT { reason: "owner" }`; already pending → `DELETION_ALREADY_PENDING`. Otherwise `setDeletion({ scheduledFor: now + DELETION_GRACE, requestedBy: "owner" })`; revoke all sessions (`owner_deletion`); revoke the user's pending invitations; event `deletion_by_owner` with email `account_closed`; publish `deletion-requested { requestedBy: "owner" }`. | `NOT_FOUND`, `CONFLICT`, `DELETION_ALREADY_PENDING` |
-  | `cancelDeletionByOwner` | `requestedBy ∈ {self, owner}` → `setDeletion(null)`; event `deletion_cancelled_by_owner` with email `deletion_cancelled`; publish `deletion-cancelled`. `requestedBy = ban` → `CONFLICT { reason: "ban" }`. | `NOT_FOUND`, `DELETION_NOT_PENDING`, `CONFLICT` |
-  | `banEmail` | Normalised email; the owner's own email → `CONFLICT { reason: "owner" }`. Insert the ban (idempotent). Revoke pending invitations **to** that email. If a user has it: `setDeletion({ scheduledFor: now, requestedBy: "ban" })` (overriding any earlier pending deletion); revoke all sessions (`ban`); revoke their pending invitations; event `banned` (no email; the final email comes from F-118); publish `deletion-requested { requestedBy: "ban" }`; enqueue `identity.erase-user { userId, replay: false }`. Returns the user ID or null. | `VALIDATION_FAILED`, `CONFLICT` |
+  | `requestDeletionByOwner` | Target is the owner → `CONFLICT { reason: "owner" }`; already pending → `DELETION_ALREADY_PENDING`. Otherwise: `setDeletion({ scheduledFor: now + DELETION_GRACE, requestedBy: "owner" })`; revoke all sessions (`owner_deletion`); revoke the user's pending invitations and publish `invitation-ended { reason: "revoked" }` for each (P-15); event `deletion_by_owner` with email `account_closed_owner`; publish `deletion-requested { requestedBy: "owner" }`. | `NOT_FOUND`, `CONFLICT`, `DELETION_ALREADY_PENDING` |
+  | `cancelDeletionByOwner` | Locks the user row. `requestedBy = ban` → `CONFLICT { reason: "ban" }`. `deletionScheduledFor ≤ now` → `DELETION_IN_PROGRESS` (P-12). Otherwise (`requestedBy ∈ {self, owner}`): `setDeletion(null)`; event `deletion_cancelled_by_owner` with email `deletion_cancelled`; publish `deletion-cancelled`. | `NOT_FOUND`, `DELETION_NOT_PENDING`, `DELETION_IN_PROGRESS`, `CONFLICT` |
+  | `banEmail` | Normalised email; the owner's own email → `CONFLICT { reason: "owner" }`. Then, in order: (1) insert the ban (`ON CONFLICT DO NOTHING`; `alreadyBanned` = whether it existed); (2) revoke pending invitations **to** that email, publishing `invitation-ended { reason: "revoked" }` for each; (3) if a user has the email **and** isn't already `pending_deletion` with `requestedBy = ban`: `setDeletion({ requestedAt: now, scheduledFor: now, requestedBy: "ban" })` (overriding any earlier self or owner deletion); revoke all sessions (`ban`); revoke their pending invitations, publishing `invitation-ended` for each; event `banned` (no email: the final `account_closed_ban` email comes from F-118); publish `deletion-requested { requestedBy: "ban" }`; enqueue `identity.erase-user { userId, replay: false }` (`singletonKey` = user ID). **A second ban** of the same email changes nothing beyond step 2 and returns `{ userId: <user ID or null>, alreadyBanned: true }`; it never enqueues a second erasure. Returns `{ userId: string \| null, alreadyBanned: boolean }`. | `VALIDATION_FAILED`, `CONFLICT` |
   | `liftBan` | Delete the ban row. | `NOT_FOUND` |
   | `resetTwoStepByOwner` | Not enabled → `CONFLICT { reason: "two_step_off" }`. F-10 `remove`; revoke all sessions (`two_step_reset_by_owner`); event `two_step_reset_by_owner` with email (D-25). | `NOT_FOUND`, `CONFLICT` |
 
@@ -1830,6 +1910,7 @@ All web functions are under `apps/web/src/identity/`; §8.1 gives screens, state
 | F-170 | `PendingDeletionBanner`, `HomeFirstRun` (`components/*.tsx`) | components | S-15: rendered in the root layout when `me.status === "pending_deletion"`; **Keep my account** → `deletion.cancel` → refetch `me` → toast. `HomeFirstRun` replaces P-F-216's `HomePlaceholder` at `/`: `<h1>` `home.welcome` with the name and `home.firstRun` text; the **Add account** button appears only when `accounts` registers its route (`routeExists("/accounts/new")`). |
 | F-171 | identity catalog (`i18n/messages/en.json` additions) | data | §8.1 message table. |
 | F-172 | defaults (`identity/defaults.ts`) | `defaultCurrencyFor(locale: string, active: readonly string[]): string`; `deviceTimeZone(): string`; `timeZoneOptions(now: Temporal.Instant): { id: string; label: string; offset: string }[]` | `defaultCurrencyFor`: the region subtag via `new Intl.Locale(locale).maximize().region`, mapped through `regionCurrency.json` (generated from CLDR `currencyData.json`, committed). It falls back to `USD` when the region is unknown or the currency isn't active. `deviceTimeZone` = `Intl.DateTimeFormat().resolvedOptions().timeZone`. `timeZoneOptions` = `Intl.supportedValuesOf("timeZone")` with labels "Africa/Cairo (GMT+3)", sorted by name. |
+| F-173 | `PrivacyNoticePage` (`pages/PrivacyNoticePage.tsx`) | component | Renders §8.3's notice from the catalog IDs `privacy.*`, with an `<h1>`, one `<h2>` per section, and the "Last updated {date}" line (date constant `PRIVACY_NOTICE_DATE` in the file, bumped whenever the text changes). Public; no API calls. |
 
 ### 4.15 Android (S-0 to S-11)
 
@@ -1838,12 +1919,12 @@ Package `com.budmon.app.identity`. Hilt provides every dependency. §8.2 gives s
 | ID | Class / function (file) | Behaviour |
 | -- | ----------------------- | --------- |
 | F-200 | `TokenCipher` (`store/TokenCipher.kt`) | AES-256-GCM with an Android Keystore key, alias `budmon_tokens` (`KeyGenParameterSpec`, `PURPOSE_ENCRYPT or PURPOSE_DECRYPT`, `BLOCK_MODE_GCM`, `ENCRYPTION_PADDING_NONE`, no user authentication). `encrypt(plain: ByteArray): ByteArray` = IV(12) ‖ ciphertext ‖ tag; `decrypt` reverses it. A `KeyPermanentlyInvalidatedException` or `AEADBadTagException` → `TokenCipherException`. |
-| F-201 | `TokenStore` (`store/TokenStore.kt`) | DataStore Preferences file `identity_tokens` (excluded from backup, P-F-262). Values are encrypted with F-200 and base64-encoded. API: `suspend fun read(): StoredSession?` (`accessToken`, `refreshToken`, `accessExpiresAt`, `refreshExpiresAt`, `userId`); `suspend fun save(s: StoredSession)`; `suspend fun clear()`; `suspend fun deviceTokenFor(email: String): String?` / `saveDeviceToken(email, token)` (one entry, email normalised); `lastEmail`, `usedGoogleBefore: Boolean`, `outboxOwnerUserId: String?`. A `TokenCipherException` on read → `clear()` and returns `null` (signed out). |
+| F-201 | `TokenStore` (`store/TokenStore.kt`) | DataStore Preferences file `identity_tokens` (excluded from backup, P-F-262). Values are encrypted with F-200 and base64-encoded. API: `suspend fun read(): StoredSession?` (`accessToken`, `refreshToken`, `accessExpiresAt`, `refreshExpiresAt`, `userId`); `suspend fun save(s: StoredSession)`; `suspend fun clear()` removes **only** the session (`accessToken`, `refreshToken`, expiries, `userId`); it never touches `deviceTokenFor`, `lastEmail`, `usedGoogleBefore` or `outboxOwnerUserId` (P-9, P-10), so the phone stays a known device after sign-out or session expiry. `suspend fun deviceTokenFor(email: String): String?` / `saveDeviceToken(email, token)` (one entry, email normalised; replaced when another email signs in). `lastEmail`, `usedGoogleBefore: Boolean`, `outboxOwnerUserId: String?`. `suspend fun resetAll()` removes everything; it's called only when a `TokenCipherException` makes the stored values unreadable (then `read()` returns `null`, and the owner is unknown). |
 | F-202 | `AuthInterceptor` (`net/AuthInterceptor.kt`) | Adds `Authorization: Bearer <access>` to every request except paths under `/api/v1/auth/` other than `/auth/sign-out`. |
 | F-203 | `TokenRefreshAuthenticator` (`net/TokenRefreshAuthenticator.kt`) | OkHttp `Authenticator`. On 401 whose body code is `UNAUTHENTICATED`, inside a process-wide `Mutex`: if the stored access token differs from the one the failed request used, it retries with the stored one. Otherwise it calls `POST /api/v1/auth/refresh { tokenDelivery: "body", refreshToken }` with a plain client (no authenticator). 200 → `save` → retry the request. `REFRESH_INVALID` → `clear()`, emits `SessionEvents.Ended` → returns `null`. It gives up after 1 retry per request (`priorResponse` check). |
 | F-204 | `AuthRepository` (`AuthRepository.kt`) | Suspend wrappers over the generated client for every `auth.*`, `me.*`, `invitations.*`, `exports.*`, `deletion.*` and `users.*` procedure that Android uses, always with `tokenDelivery = "body"`, `deviceModel = Build.MODEL`, and `deviceToken = tokenStore.deviceTokenFor(email)` on sign-in. On `signed_in` it saves the tokens and any new `deviceToken`, sets `lastEmail`, runs F-205, then calls `OutboxRepository.kick()` (P-F-255). Errors → `ApiError` (P-F-252). |
-| F-205 | `OutboxOwnerGuard` (`OutboxOwnerGuard.kt`) | `suspend fun onSignedIn(userId: String): OwnerDecision`. With no pending outbox entries, or `outboxOwnerUserId` null or equal → sets the owner and returns `Proceed`. Otherwise → `AskDiscard(count)`: the UI shows the dialog (D-23). `discardAndProceed()` deletes the outbox entries (P-F-254 DAO `deleteAll`) and sets the owner; `cancel()` signs the new user out (`auth.signOut`, `clear()`). |
-| F-206 | `GoogleCredentialClient` (`google/GoogleCredentialClient.kt`) | `suspend fun signIn(activity, nonce: String, oneTap: Boolean): Result<String /* idToken */>`. `oneTap` → `GetGoogleIdOption(filterByAuthorizedAccounts = true, autoSelectEnabled = false, serverClientId = BuildConfig.GOOGLE_SERVER_CLIENT_ID, nonce)`; otherwise `GetSignInWithGoogleOption(serverClientId, nonce)`. `GetCredentialCancellationException` → `Cancelled`; `NoCredentialException` → `NoAccount`; others → `Failed`. |
+| F-205 | `OutboxOwnerGuard` (`OutboxOwnerGuard.kt`) | `suspend fun onSignedIn(userId: String): OwnerDecision`, using PA-8's `OutboxDao.countAll()`. No outbox entries (`countAll() == 0`) → sets `outboxOwnerUserId = userId`, `Proceed`. Entries exist and `outboxOwnerUserId == userId` → `Proceed`. Entries exist and `outboxOwnerUserId` is another user **or null** (unknown owner, for example after `resetAll()`) → `AskDiscard(count)`; the UI shows the D-23 dialog. `discardAndProceed()` → PA-8 `OutboxDao.deleteAll()`, then sets the owner, `Proceed`. `cancel()` signs the new user out (`auth.signOut`, `clear()`) and leaves the entries and the owner unchanged. Sign-out never changes `outboxOwnerUserId` (P-10). |
+| F-206 | `GoogleCredentialClient` (`google/GoogleCredentialClient.kt`) | `suspend fun signIn(activity, nonce: String, oneTap: Boolean): Result<String /* idToken */>`. `oneTap` → `GetGoogleIdOption(filterByAuthorizedAccounts = true, autoSelectEnabled = false, serverClientId = BuildConfig.GOOGLE_SERVER_CLIENT_ID (P-F-265), nonce)`; otherwise `GetSignInWithGoogleOption(serverClientId, nonce)`. `BuildConfig.GOOGLE_SERVER_CLIENT_ID` empty → `isAvailable = false`, and every Google button on Android is hidden. `GetCredentialCancellationException` → `Cancelled`; `NoCredentialException` → `NoAccount`; others → `Failed`. |
 | F-207 | `SessionViewModel` (`SessionViewModel.kt`) | App-scoped `StateFlow<SessionUiState>` (`Loading`, `SignedOut(reason)`, `SignedIn(me)`). On start: no stored session → `SignedOut`; otherwise `me.get` (refreshing through F-203). Collects `SessionEvents.Ended` → `SignedOut(Ended)`. The nav host switches graphs on this state. |
 | F-208 | `SignInScreen` + `SignInViewModel` | S-1 (§8.2). One-tap rule (J-3): on first composition, when `usedGoogleBefore` and Google is configured, it calls F-206 with `oneTap = true` once per process start. |
 | F-209 | `TwoStepScreen` | S-2. |
@@ -1995,7 +2076,7 @@ flowchart TD
 | `RATE_LIMITED` | 429 | Every procedure here (F-29). |
 | `VALIDATION_FAILED` | 400 | Shape errors; `verifyTwoStep`/`resetPassword` without exactly one factor; `body` refresh without `refreshToken`; bad `returnTo`. |
 
-**Non-contract route:** `GET /api/v1/auth/google/callback?code&state[&error]` (F-88) answers `303` only. The query string is the stated exception to P-D-24 rule 4 (PA-4).
+**Non-contract route:** `GET /api/v1/auth/google/callback?code&state[&error]` (F-88) answers `303` only. The query string is the stated exception to P-D-24 rule 4 (A-4).
 
 ### 5.3 `me.*`
 
@@ -2046,11 +2127,29 @@ flowchart TD
 | `exports.downloadUrl` | `POST /exports/{id}/download-url` | authed | F-110 | `{ id }` (path) | `{ url: z.url(), expiresAt }` | `NOT_FOUND`, `EXPORT_NOT_READY` |
 | `deletion.precheck` | `GET /deletion/precheck` | authed | F-115 | — | `{ blockers: { kind, id, name, memberCount }[], isOwner: boolean }` | — |
 | `deletion.request` | `POST /deletion/request` | authed+confirmed | F-116 | `{}` | `{ deletionScheduledFor }`; clears cookies | `CONFIRMATION_REQUIRED`, `OWNER_CANNOT_BE_DELETED`, `DELETION_ALREADY_PENDING`, `SOLE_ADMIN_HANDOVER_REQUIRED { accounts }` |
-| `deletion.cancel` | `POST /deletion/cancel` | authed | F-117 | `{}` | `{ ok: true }` | `DELETION_NOT_PENDING` |
+| `deletion.cancel` | `POST /deletion/cancel` | authed | F-117 | `{}` | `{ ok: true }` | `DELETION_NOT_PENDING`, `DELETION_IN_PROGRESS` |
 
 ### 5.6 Authorization across users (summary)
 
 Every `me.*`, `exports.*`, `deletion.*`, `invitations.list/allowance/create/resend/revoke` procedure acts on `principal.userId`. IDs of other users' sessions, invitations or exports return `NOT_FOUND` (P-§7.1). `users.lookupByEmail` exposes only `displayName` and `userId`. Owner services (F-125) aren't procedures here.
+
+### 5.7 Public surface for other modules
+
+`apps/server/src/identity/index.ts` is the only file other modules import from identity. The layering lint can't enforce that, so the code review checks it. It exports exactly:
+
+| Export | Kind | Contract |
+| ------ | ---- | -------- |
+| `Principal` (re-exported from P-F-53, with A-1's `sessionId`) | type | `{ userId, isOwner, sessionId }`, set by F-24 on every authenticated request. |
+| `requireConfirmed(ctx, maxAgeSeconds = 600)` | function (F-28) | Throws `CONFIRMATION_REQUIRED { factor }` unless the caller's session was confirmed within `maxAgeSeconds` (1..600). |
+| `UsersReader` (`container.identity.usersReader`) | service (F-106) | `getProfile`, `getDisplayNames` (≤ 500 IDs; missing → `null`), `isActive`. Usable with `budmon_app` and `budmon_capture` handles. |
+| `UserDirectory` (`container.identity.directory`) | service (F-105) | `findByExactEmail(h, email, requesterId)` → `user` / `unavailable` / `none`. |
+| `inviteForAccountShare(deps, h, { inviterId, email })` (`container.identity.invitations`) | service (F-99) | Runs in the caller's transaction; returns `{ invitationId, created }`; F-95's errors. |
+| `IdentityEvents.subscribe(event, jobDefinition)` (`container.identity.events`) | registration (F-21) | Events and payloads in F-21; each subscriber's job is enqueued in the publishing transaction (DV-6). Subscribe at composition, before the first publish. |
+| `DeletionPrecheck`, `ErasureParticipant`, `ExportParticipant`, `InvitePolicy`, `InvitationContextProvider` | port types (F-22) | Registered through `createIdentityModule`'s `overrides.ports` at composition (P-F-96, PA-11 c). Erasure participants must be idempotent and must not delete the `users` row. |
+| `OwnerServices` (`container.identity.owner`) | service (F-125) | For `admin` only; every method also checks `isOwner`. |
+| Error classes in §6 | classes | So other modules can map identity errors they surface (for example F-95's from F-99). |
+
+Nothing else (repos, tables, tokens, cookies) is exported. Other modules may read `users` in SQL joins only for the columns F-106 exposes (D-20).
 
 ## 6. Error catalog
 
@@ -2098,6 +2197,7 @@ All classes live in `identity/errors.ts`, extend P-F-50 `BudmonError`, and are d
 | `SoleAdminHandoverRequiredError` | `SOLE_ADMIN_HANDOVER_REQUIRED` | 409 | "Hand over shared accounts first" | `{ accounts: { id, name, memberCount }[] }` | F-116 |
 | `DeletionAlreadyPendingError` | `DELETION_ALREADY_PENDING` | 409 | "Deletion already pending" | — | F-116, F-125 |
 | `DeletionNotPendingError` | `DELETION_NOT_PENDING` | 409 | "Deletion not pending" | — | F-117, F-125 |
+| `DeletionInProgressError` | `DELETION_IN_PROGRESS` | 409 | "Deletion in progress" | — | F-117, F-125 |
 | `OwnerCannotBeDeletedError` | `OWNER_CANNOT_BE_DELETED` | 409 | "The owner cannot be deleted" | — | F-116 |
 
 Platform errors used: `VALIDATION_FAILED`, `UNAUTHENTICATED`, `FORBIDDEN`, `NOT_FOUND`, `CONFLICT` (with `{ reason }`), `RATE_LIMITED`, `IDEMPOTENCY_KEY_REUSED`.
@@ -2115,10 +2215,10 @@ Platform errors used: `VALIDATION_FAILED`, `UNAUTHENTICATED`, `FORBIDDEN`, `NOT_
 | Authorization endpoint | `https://accounts.google.com/o/oauth2/v2/auth`. Parameters: F-80. |
 | Token endpoint | `POST https://oauth2.googleapis.com/token`, form-encoded. 10 s timeout; no retries (the user retries); `redirect: "manual"`. |
 | JWKS | `https://www.googleapis.com/oauth2/v3/certs` through `jose.createRemoteJWKSet`, which caches keys and refetches on an unknown `kid` (30 s cooldown); 10 s timeout. |
-| Client | The "Budmon sign-in" Web client (scopes `openid email profile`); its secret is only in the API's secret file (PA-3). Android: an Android OAuth client per signing key; its ID is listed in `GOOGLE_SIGNIN_ANDROID_CLIENT_IDS` and arrives as `azp`. |
+| Client | The "Budmon sign-in" Web client (scopes `openid email profile`); its secret is only in the API's secret file (A-3). Android: an Android OAuth client per signing key; its ID is listed in `GOOGLE_SIGNIN_ANDROID_CLIENT_IDS` and arrives as `azp`. |
 | Redirect URI | `<GOOGLE_SIGNIN_CALLBACK_ORIGIN>/api/v1/auth/google/callback`. Stage 0: `http://localhost:8080/...`. Stage 1: `https://budmon.com/...`. |
-| Egress | PA-5. In stage 0 the API reaches Google directly; P-F-122's proxy support applies unchanged. |
-| Failures | §4.7 (F-80, F-82). The rehearsal (P-F-196's fake Google) gains `/o/oauth2/v2/auth` (not called), a `/token` returning a signed ID token for the canary email, and `/oauth2/v3/certs`, so the rehearsal exercises sign-in end to end (S-6 AC). |
+| Egress | A-5. In stage 0 the API reaches Google directly; P-F-122's proxy support applies unchanged. |
+| Failures | §4.7 (F-80, F-82). The rehearsal's sign-in path needs PA-9 (fake Google `id_token`, JWKS, sign-in vs Gmail by `client_id`); TP-6.13 runs once PA-9 is applied. |
 | Idempotency | Codes, nonces, states and hand-offs are single-use (consumed in the same transaction that uses them). |
 
 ### 7.2 SMTP email (S-0)
@@ -2129,31 +2229,28 @@ Platform errors used: `VALIDATION_FAILED`, `UNAUTHENTICATED`, `FORBIDDEN`, `NOT_
 | Timeouts | Connection 10 s, greeting 10 s, socket 15 s. |
 | Retries | The `identity.email-send` job: 5 retries, 60 s delay, exponential backoff (about 31 minutes in total). Permanent 5xx: no retry. |
 | From | `EMAIL_FROM`, for example `Budmon <no-reply@budmon.com>` (stage 1) or `Budmon <budmon@localhost>` (stage 0). |
-| Privacy | Addresses, links and bodies are never logged (P-D-24). The Mailpit container logs nothing (PA-2). |
+| Privacy | Addresses, links and bodies are never logged (P-D-24). The Mailpit container logs nothing (A-2). |
 
-**Server catalog additions** (`apps/server/src/i18n/messages/en.json`). Each kind has `.subject`, `.body`, and `.button` where a link exists. Bodies are ICU strings with plain-text paragraphs separated by blank lines; `{link}` stands alone on its own line.
+**Server catalog additions** (`apps/server/src/i18n/messages/en.json`). Each kind has `email.<kind>.subject`, `email.<kind>.intro`, optionally `email.<kind>.outro`, and `email.<kind>.button` when it has a link. Values are passed to `renderMessage` (bidi-isolated); the link is inserted by F-31 verbatim and never appears in a message.
 
-| Kind | Subject | Body (summary of the exact text the software-engineer writes; the test checks the subject, the presence of `{link}` and the named values) | Button |
-| ---- | ------- | --- | ------ |
-| `invitation` | "{inviter} invited you to Budmon" (bootstrap: "Your Budmon owner invitation") | Who invited whom; one line about Budmon; `{contextLine}` when present; `{link}`; "This invitation expires on {date}." | "Accept invitation" |
-| `password_reset` | "Reset your Budmon password" | `{link}`; "This link expires in 30 minutes. If you didn't ask for this, you can ignore this email." | "Choose a new password" |
-| `password_set` | "Set a password for Budmon" | "Your account uses Google sign-in. You can also set a password:" `{link}`; expiry line | "Set a password" |
-| `password_changed` | "Your Budmon password was changed" | When and what to do if it wasn't you: `{link}` to security settings | "Review your security settings" |
-| `password_added` | "A password was added to your Budmon account" | Same pattern | same |
-| `two_step_enabled` / `two_step_disabled` | "Two-step verification was turned on" / "…turned off" | Same pattern | same |
-| `two_step_reset_by_owner` | "Two-step verification was turned off by the administrator" | "If you didn't ask for this, contact the administrator now." | same |
-| `authenticator_replaced` | "Your two-step verification app was changed" | Same pattern | same |
-| `recovery_codes_regenerated` | "New recovery codes were created" | "Your old codes no longer work." | same |
-| `recovery_code_used` | "A recovery code was used to sign in" | "If it wasn't you, change your password." | same |
-| `two_step_failed` | "Someone tried to sign in to Budmon and didn't pass two-step verification" | "Someone got past the first sign-in step but not your two-step code. If it wasn't you, change your password." | same |
-| `google_linked` / `google_unlinked` | "Google sign-in was connected to your Budmon account" / "…disconnected" | Same pattern | same |
-| `session_reuse_signed_out` | "We signed you out of Budmon on {device}" | "For your security, we signed that device out because its sign-in was used twice. Sign in again on it if it was you." | same |
-| `export_ready` | "Your Budmon export is ready" | "Download it before {date}." `{link}` | "Go to your data" |
-| `deletion_scheduled` | "Your Budmon account will be deleted on {date}" | "Sign in before then to keep it, or to download your data." `{link}` | "Sign in" |
-| `deletion_cancelled` | "Your Budmon account won't be deleted" | "Reconnect your Gmail and SMS in Sources." | — |
-| `account_closed` | "Your Budmon account has been closed" | "The Budmon administrator closed your account." For an owner deletion: "Your data will be erased on {date}." For a ban: "Your data has been erased." | — |
-| `account_deleted` | "Your Budmon account has been deleted" | "Everything you owned in Budmon has been erased. Copies in backups are gone within 14 days." | — |
-| `invitation_cap_failed` | "{name} couldn't join Budmon" | "Budmon has reached its user limit, so {email} couldn't create an account. The administrator has been told." | — |
+Value sources: dates are formatted with `Intl.DateTimeFormat(<recipient locale>, { dateStyle: "medium", timeZone: <recipient zone> })` (plus `timeStyle: "short"` where marked). "Recipient" is the user the email goes to. For invitations, the recipient has no profile, so the inviter's locale and zone are used (A-4), or `en`/UTC when there's no inviter.
+
+| Kind | Subject (English) | Intro / outro (English, exact) | Values and where they come from | Link (button) |
+| ---- | ----------------- | ------------------------------ | ------------------------------- | ------------- |
+| `invitation` (inviter present) | "{inviter} invited you to Budmon" | Intro: "{inviter} invited {email} to Budmon, an app for keeping track of your money.{contextLine}" Outro: "This invitation expires on {date}." | `inviter` = inviter's `display_name`; `email` = `invitations.email`; `contextLine` = `" " + InvitationContextProvider.contextLine(…)` or `""`; `date` = `invitations.expires_at` | `<origin>/invite#t=<token>` ("Accept invitation") |
+| `invitation` (bootstrap or erased inviter) | "Your Budmon invitation" (`email.invitation.subjectNoInviter`) | Intro: "You've been invited to Budmon as {email}." Outro as above | as above, without `inviter` | as above |
+| `password_reset` | "Reset your Budmon password" | Intro: "Someone asked to reset the password for {email}." Outro: "This link expires in 30 minutes. If you didn't ask for this, you can ignore this email." | `email` = user's email | `<origin>/reset-password#t=<token>` ("Choose a new password") |
+| `password_set` | "Set a password for Budmon" | Intro: "Your account uses Google sign-in. You can also set a password." Outro: as `password_reset` | — | as above ("Set a password") |
+| `password_changed`, `password_added`, `two_step_enabled`, `two_step_disabled`, `authenticator_replaced`, `recovery_codes_regenerated`, `recovery_code_used`, `two_step_failed`, `google_linked`, `google_unlinked` | HLD §4.9 subjects, exactly | Intro: "{event} on {date}." where `event` is the kind's own message `email.<kind>.event` (for example "Your password was changed"); outro: "If this wasn't you, change your password and review your security settings." `two_step_failed`'s intro: "Someone got past the first sign-in step for your account but not your two-step code, on {date}." | `date` = the security event's `created_at` (`timeStyle: "short"` too) | `<origin>/settings/security` ("Review your security settings") |
+| `two_step_reset_by_owner` | "Two-step verification was turned off by the administrator" | Intro: "The Budmon administrator turned off two-step verification for {email} on {date}." Outro: "If you didn't ask for this, contact the administrator now." | `email`, `date` (event time) | as above |
+| `session_reuse_signed_out` | "We signed you out of Budmon on {device}" | Intro: "For your security, we signed {device} out on {date}, because its sign-in was used twice." Outro: "If that was you, sign in again on that device." | `device` = `sessions.device_label` (refId = session ID); `date` = `sessions.revoked_at` | as above |
+| `export_ready` | "Your Budmon export is ready" | Intro: "Your export is ready. Download it before {date}." | `date` = `data_exports.expires_at` | `<origin>/settings/data` ("Go to your data") |
+| `deletion_scheduled` | "Your Budmon account will be deleted on {date}" | Intro: "Your account and everything you own in Budmon will be erased on {date}." Outro: "Sign in before then to keep your account or to download your data." | `date` = `users.deletion_scheduled_for` (`timeStyle: "short"` too) | `<origin>/sign-in` ("Sign in") |
+| `deletion_cancelled` | "Your Budmon account won't be deleted" | Intro: "Your account won't be deleted. Reconnect your Gmail and SMS in Sources." | — | none |
+| `account_closed_owner` | "Your Budmon account has been closed" | Intro: "The Budmon administrator closed your account on {now}. Your data will be erased on {date}." | `now` = `deletion_requested_at`; `date` = `deletion_scheduled_for` | none |
+| `account_closed_ban` (sent by F-118) | "Your Budmon account has been closed" | Intro: "The Budmon administrator closed your account. Your data has been erased." | — | none |
+| `account_deleted` (sent by F-118) | "Your Budmon account has been deleted" | Intro: "Everything you owned in Budmon has been erased. Copies in backups are gone within 14 days." | — | none |
+| `invitation_cap_failed` | "{email} couldn't join Budmon" | Intro: "Budmon has reached its user limit, so {email} couldn't create an account. The administrator has been told." | `email` = `invitations.email` (the invitee has no name yet) | none |
 
 ### 7.3 Object storage (S-10)
 
@@ -2167,9 +2264,9 @@ P-F-140 `exports` bucket. Key: `users/<userId>/exports/<exportId>.zip`. `put` on
 | ----- | ------- |
 | `README.txt` | English text: what each file is; that amounts are minor units plus `currency_code` and `minor_units` columns in JSON, and decimal strings in CSV; dates ISO 8601; instants UTC; the generation time and release. |
 | `data.json` | `{ "format": "budmon-export", "version": 1, "generatedAt": "<RFC 3339>", "release": "<tag>", "userId": "<uuid>", "sections": { "<module>.<entity>": [ { <column>: <value>, … }, … ] } }`, with canonical key order (P-F-306). |
-| `csv/<module>.<entity>.csv` | UTF-8 with BOM, RFC 4180 (CRLF line ends; fields quoted when they contain `,`, `"`, CR or LF; `"` doubled); header row = `columns`; `null` → empty field; booleans `true`/`false`. **CSV-injection guard:** a text value starting with `=`, `+`, `-`, `@`, tab or CR is prefixed with `'`. |
+| `csv/<module>-<entity>.csv` (HLD D-16) | UTF-8 with BOM, RFC 4180 (CRLF line ends; fields quoted when they contain `,`, `"`, CR or LF; `"` doubled); header row = `columns`; `null` → empty field; booleans `true`/`false`. **CSV-injection guard:** a text value starting with `=`, `+`, `-`, `@`, tab or CR is prefixed with `'`. |
 
-Section names must match `^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$`.
+Section names must match `^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$`. In `data.json` they're used as given; the CSV file name replaces the `.` with `-` (`identity.profile` → `csv/identity-profile.csv`).
 
 ## 8. Frontend
 
@@ -2193,6 +2290,7 @@ Section names must match `^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$`.
 | `/settings/invitations` | `InvitationsPage` (F-167) | signed in | |
 | `/settings/data` | `YourDataPage` (F-168) | signed in | |
 | `/settings/data/delete` | `DeleteAccountPage` (F-169) | signed in | |
+| `/privacy` | `PrivacyNoticePage` (F-173) | none | Linked from S-1, S-6 and Settings; §8.3. |
 
 **Component tree** (additions to P-§8.1's tree):
 
@@ -2392,6 +2490,7 @@ App (P-F-200)
 | `delete.checking` / `delete.checkFailed` | Checking shared accounts… / Couldn't check your shared accounts. Try again. |
 | `delete.ack` / `delete.submit` | I understand my data will be erased after 7 days / Delete my account |
 | `delete.ownerBlocked` | The Budmon owner's account can't be deleted. |
+| `error.DELETION_IN_PROGRESS` | Your account is already being deleted. |
 | `pending.banner` / `pending.keep` / `pending.kept` | Your account will be deleted on {date}. / Keep my account / Your account won't be deleted. Reconnect your Gmail and SMS in Sources. |
 | `home.welcome` / `home.firstRun` | Welcome to Budmon, {name}. / Add your first account to start. |
 | `deletedUser` | Deleted user |
@@ -2418,30 +2517,47 @@ App (P-F-200)
 
 **Accessibility and RTL:** touch targets ≥ 48 dp; TalkBack labels on the show-password toggle ("Show password"), the copy buttons and the QR image (`twostep_qr_alt`); codes and emails wrapped with `BidiFormatter.unicodeWrap` and shown in LTR; Compose RTL test variants for S-1 and S-6 (P-§10.1).
 
+### 8.3 Privacy notice (HLD §7.5, P-D-29 gate item 15)
+
+- **Route:** `/privacy` on the web (F-173), public. Android's sign-in, set-up and settings screens open `<API base URL origin>/privacy` in a Custom Tab. The set-up screen's "By continuing you agree to the privacy notice." links it.
+- **Content:** catalog IDs `privacy.<section>.title` and `privacy.<section>.body`, English exact text below. ICU; `{date}` is `PRIVACY_NOTICE_DATE`.
+
+| Section | Title | Body |
+| ------- | ----- | ---- |
+| `intro` | Privacy notice | Budmon is run by one person for a small invited group. This notice says what Budmon keeps about you, why, and what you can do about it. Last updated {date}. |
+| `collected` | What we keep | Your email address, your name, your language, time zone and base currency; how you sign in (a password stored only as a secure hash, and the Google account you connect, if any); whether two-step verification is on (its secret is encrypted); the devices you're signed in on (a label such as "Chrome on Windows", never your IP address); and a 90-day history of security events such as sign-ins and password changes. Everything you record in Budmon (accounts, transactions, budgets) is kept so the app can show it to you. |
+| `google` | Signing in with Google | If you sign in with Google, Budmon receives your Google account's ID, email address and name, and uses them only to sign you in. It keeps no Google access tokens for sign-in. Connecting a Gmail inbox for capture is separate and asks for its own permission. |
+| `emails` | Emails we send | Only about your account: invitations, password resets, security notices and deletion notices. No newsletters or tracking. |
+| `export` | Your data is yours | You can download everything as CSV and JSON at any time from Settings > Your data. |
+| `deletion` | Deleting your account | You can delete your account from Settings. You have 7 days to change your mind; after that everything you own is erased. Entries you added to shared accounts stay, shown as "Deleted user". Backups that still contain your data are gone within 14 days of the erasure. |
+| `bans` | If an address is banned | If the administrator bans an email address, Budmon keeps that address (and nothing else) so it can't be invited again, until the ban is lifted. |
+| `admin` | What the administrator sees | Your name, email, account status, when you were last active and how many sources you've connected. Never your financial data. |
+| `contact` | Questions | Contact the person who invited you, or the Budmon administrator. |
+
 ## 9. Slices
 
 Each slice is built end to end: server, contract, web and Android. Order and dependencies:
 
 | Slice | Story | Depends on |
 | ----- | ----- | ---------- |
-| S-0 Foundations | (shared) | platform S-0 to S-13, PA-1 to PA-6 |
-| S-1 Sign-up from an invitation with a password | US-1 | S-0 |
+| S-0 Foundations | (shared) | platform S-0 to S-13 with A-1 to A-6; PA-11 |
+| S-1 Sign-up from an invitation with a password | US-1 | S-0; PA-10 (rehearsal case TP-1.36 only) |
 | S-2 Owner bootstrap | US-11 | S-1 |
-| S-3 Sign-in, sessions and step-up | US-2 | S-1 |
+| S-3 Sign-in, sessions and step-up | US-2 | S-1; PA-8 (Android outbox guard) |
 | S-4 Two-step verification | US-4 | S-3 |
 | S-5 Password reset and password changes | US-5 | S-4 |
-| S-6 Google Sign-In | US-3 | S-4 |
+| S-6 Google Sign-In | US-3 | S-4; PA-9 (rehearsal case TP-6.13 only) |
 | S-7 Profile and preferences | US-6 | S-3 |
 | S-8 Invitations | US-7 | S-3 |
 | S-9 Finding a user | US-8 | S-3 |
-| S-10 Data export | US-9 | S-3 |
+| S-10 Data export | US-9 | S-3; PA-7 |
 | S-11 Account deletion | US-10 | S-8, S-10 |
 | S-12 Owner services for `admin` | (US-7, US-10; ADM dependencies) | S-11, S-4 |
 
 Status for all: not started.
 
 ### S-0: Foundations
-- **Depends on:** the platform build, with PA-1 to PA-6 applied.
+- **Depends on:** the platform build (LLD v0.12) with A-1 to A-6, and PA-11.
 - **Functions:** F-1 to F-5, F-7 to F-18 (repos; exercised fully by later slices), F-20 to F-24, F-26, F-27, F-29 to F-35 (contract skeleton with shared schemas), F-36 (router skeleton), F-37 to F-39, F-57 (known devices, used by F-23); web F-150 to F-154; Android F-200 to F-203, F-207.
 - **Scenarios:**
 
@@ -2456,7 +2572,8 @@ Status for all: not started.
 | Contract rules and default deny | unhappy | Every non-public identity procedure rejects anonymous callers | TP-0.25, TP-0.26 |
 | Web session plumbing | happy and unhappy | F-150 to F-154 | TP-0.27, TP-0.28 |
 | Android token storage and refresh | happy and unhappy | F-200 to F-203 | TP-0.29 |
-| Cookie spike on `http://localhost` (LD-2) | happy | Chromium (and Firefox, indicative) store and send `Secure` cookies from `http://localhost` | TP-0.30 |
+| Cookie spike on `http://localhost` (LD-2) | happy | Chromium (and Firefox, indicative) store and send `Secure` cookies from `http://localhost` | TP-0.30, TP-M.6 |
+| SMTP TLS rule; PA-11 wiring | happy and unhappy | F-30 table; container wiring | TP-0.31, TP-0.32 |
 
 - **Acceptance criteria:**
   1. `pnpm check` passes with identity's tables pushed.
@@ -2481,13 +2598,14 @@ Status for all: not started.
 | Sign-up options and defaults | happy | Active currencies; locale and zone defaults | TP-1.12, TP-1.13, TP-1.33 |
 | Web: fragment cleared, full path, problem states, signed in as someone else | happy and unhappy | §8.1 | TP-1.30 to TP-1.32 |
 | Android: pasted link and set-up | happy and unhappy | F-211, F-212 | TP-1.34 |
-| Privacy | unhappy | No canary in telemetry | TP-1.35 |
+| Privacy | unhappy | No canary in telemetry; the rehearsal email path is clean (PA-10) | TP-1.35, TP-1.36 |
+| Privacy notice page | happy | §8.3 | TP-1.37 |
 
 - **Acceptance criteria:** an invitation inserted by a factory and emailed through the email job can be opened from the Mailpit message in development, completed on web and on Android, and lands on the first-run home.
 
 ### S-2: Owner bootstrap (US-11)
 - **Depends on:** S-1.
-- **Functions:** F-45 to F-47.
+- **Functions:** F-45, F-46 (the laptop wrapper is the platform's P-F-178).
 - **Scenarios:**
 
 | Scenario | Happy / unhappy | Expected | Tests |
@@ -2495,7 +2613,7 @@ Status for all: not started.
 | Bootstrap and accept | happy | An owner with unlimited invitations; no email job | TP-2.1, TP-2.3 |
 | Owner exists, pending exists, `--replace`, expired pending, email in use, invalid email | unhappy and happy | F-45 codes; CLI messages and exit codes | TP-2.2, TP-2.5 |
 | A second owner through a forged second bootstrap invitation | unhappy | `INVITATION_REVOKED` (partial unique index) | TP-2.4 |
-| `budmon-local bootstrap-owner` | happy and unhappy | `exec -T`, exit codes, no `compose run` | TP-2.6 |
+| `budmon-local bootstrap-owner` | happy and unhappy | The platform's P-F-178 (TP-15.29) | TP-2.6 |
 | The token stays out of Docker logs | unhappy | The rehearsal canary scan is clean | TP-2.7 |
 
 - **Acceptance criteria:**
@@ -2514,7 +2632,8 @@ Status for all: not started.
 | LD-1 limits (a stranger can't block known devices) | unhappy | Per-pair and per-email limits; known device passes | TP-3.4 |
 | Rehash on parameter change | happy | Stored hash upgraded | TP-3.5 |
 | Two-step required hands back a challenge | happy | Challenge row and cookie or token | TP-3.6 |
-| Refresh R1 to R4 including both 60 s windows and the active-device case | happy and unhappy | F-25 table | TP-3.8 to TP-3.18 |
+| Refresh R1 to R4 including both 60 s windows, the active-device case, and option (a) races in each response order | happy and unhappy | F-25 table | TP-3.8 to TP-3.18, TP-3.50 to TP-3.52 |
+| Web device cookie (P-9); `requireConfirmed(ctx, maxAgeSeconds)` | happy and unhappy | F-36, F-28 | TP-3.28, TP-3.29 |
 | Sign-out; sessions list and revocation; step-up with a password | happy and unhappy | F-53 to F-55 | TP-3.19 to TP-3.22 |
 | `me.get`; `auth.methods`; purge | happy | F-56, F-58, F-130 | TP-3.23 to TP-3.25 |
 | Login CSRF | unhappy | `FORBIDDEN` | TP-3.26 |
@@ -2541,7 +2660,7 @@ Status for all: not started.
 | Per-user TOTP limiter; recovery codes still work when it's exhausted | unhappy and happy | D-8 | TP-4.8 |
 | Replay of a code | unhappy | Refused | TP-4.9 |
 | Disable, acknowledge, regenerate, replace | happy and unhappy | F-65 to F-68 | TP-4.10 to TP-4.13 |
-| Key ring rotation | happy | Old-key codes accepted | TP-4.14 |
+| Key ring rotation (recovery codes); `api-secrets` re-wrap of TOTP envelopes | happy | Old-key codes accepted; codes verify after the re-wrap | TP-4.14, TP-4.16 |
 | Privacy | unhappy | Codes and secrets never in telemetry | TP-4.15 |
 | Web and Android screens | happy and unhappy | §8 | TP-4.30 to TP-4.34 |
 
@@ -2615,7 +2734,7 @@ Status for all: not started.
 | List, allowance | happy | F-96 | TP-8.5, TP-8.6 |
 | Resend (new token kills the old link), revoke | happy and unhappy | F-97, F-98 | TP-8.7, TP-8.8 |
 | Sharing invitations | happy | F-99 | TP-8.9 |
-| Context line; purge expiry; privacy | happy; unhappy | F-32, F-130 | TP-8.10, TP-8.11, TP-8.13 |
+| Context line; purge expiry; `invite.user` limit; privacy | happy; unhappy | F-32, F-130, F-95 step 0 | TP-8.10 to TP-8.13 |
 | Web and Android | happy and unhappy | §8 | TP-8.30, TP-8.31 |
 
 - **Acceptance criteria:** a user invites someone, the invitee receives the email (Mailpit) and joins, and the allowance drops by one.
@@ -2660,6 +2779,7 @@ Status for all: not started.
 | Sweep and erasure (order, log first, participants, exports, email, cascade) | happy | F-118, F-119 | TP-11.5, TP-11.6, TP-11.14 |
 | Erasure-log failure, participant failure, cancelled meanwhile, replay, email timeout, absent user | unhappy | F-118 | TP-11.7 to TP-11.12 |
 | Every table referencing `users` is erased | unhappy | Guard test | TP-11.13 |
+| Cancel once due, and against a running erasure | unhappy | `DELETION_IN_PROGRESS`; lock order | TP-11.15 |
 | Web and Android | happy and unhappy | §8 | TP-11.30 to TP-11.32 |
 
 - **Acceptance criteria:** a user deletes their account, can cancel within 7 days, and after 7 days (fixed clock) no row references them and their export objects are gone.
@@ -2698,7 +2818,7 @@ The platform's tooling (P-§10.1) applies unchanged: Vitest projects, Testcontai
 - **e2e server:** `e2e:serve` sets `E2E_FAKE_GOOGLE=1`, which overrides `createGoogleOidc`'s `endpoints` to a local fake Google route served by the e2e server. Its authorization page auto-submits to the callback with a code for a configurable test account. Emails go to the memory sender, exposed to Playwright through a test-only route `GET /__test/emails` registered only when `APP_ENV=test`.
 - **Android:** a fake `CredentialManager` wrapper (F-206 behind an interface), `MockWebServer` for F-203, and Robolectric for Keystore-backed code (F-200 uses an in-memory key provider in tests through an injected `KeyProvider`).
 - **What the build environment can and can't test** (as in P-§10.1):
-  - **Testable there:** everything server-side (Postgres, Fastify inject, jobs, fake Google, memory email); web flows in Chromium; the cookie spike on Chromium (TP-0.30); bats for F-47; the stage-0 rehearsal including the bootstrap wrapper and the email canary path (PA-2, PA-6).
+  - **Testable there:** everything server-side (Postgres, Fastify inject, jobs, fake Google, memory email); web flows in Chromium; the cookie spike on Chromium (TP-0.30); the stage-0 rehearsal including the bootstrap wrapper and the email canary path (A-2, A-6).
   - **Not testable there, checked by the owner (manual cases in §10.2, marked "M") or indicative only:**
     - real Google sign-in, including the `localhost` callback from the tailnet origin and Android Credential Manager on a device;
     - Android builds, Keystore on a real device, `FLAG_SECURE` behaviour, App Links;
@@ -2715,7 +2835,7 @@ Types: **U** unit, **I** integration (real Postgres, in-process HTTP), **E** end
 | -- | ----- | ---- | ------ | ----- | -------------- | -------- |
 | TP-0.1 | S-0 | U | F-2 | seeded `randomBytes` | `generateToken` for each kind; `parseToken("access", "bmr_…")`; `parseToken` of a 42-character body; `hashToken("x")` twice | Prefix and 47-character length; `null`; `null`; equal 32-byte buffers |
 | TP-0.2 | S-0 | U | F-3 | none | `" Mona@Example.COM "`; `"a@b"`; `"a@b.co"`; 255-character address; address with `\u0007` | `"mona@example.com"`; invalid; valid; invalid; invalid |
-| TP-0.3 | S-0 | U | F-4 | none | `cookieNameFor("access", "http://localhost:8080")`, `("access", "https://x.ts.net")`, `(…, null)`; `setCookie("refresh", "v", 30 days, "https://x")`; `readCookie` with both names present; `parseCookies("a=1; b; c=2=3; a=9")` | `budmon_at`; `__Secure-budmon_at` ×2; `__Secure-budmon_rt=v; Path=/api/v1/auth/refresh; Max-Age=2592000; HttpOnly; Secure; SameSite=Strict`; the prefixed value; `{ a: "1", c: "2=3" }` |
+| TP-0.3 | S-0 | U | F-4 | none | `cookieNameFor("access", "localhost:8080")`, `("access", "127.0.0.1:5173")`, `("access", "laptop.tail.ts.net")`, `("access", undefined)`; `setCookie("refresh", "v", 30 days, "x.ts.net")`; `readCookie("access", { budmon_at: "a", "__Secure-budmon_at": "b" }, host)` for host `localhost:8080` and `x.ts.net`; `readCookie` of only `budmon_at` with host `x.ts.net`; only `__Secure-budmon_at` with host `localhost`; `parseCookies("a=1; b; c=2=3; a=9")` | `budmon_at`, `budmon_at`, `__Secure-budmon_at`, `__Secure-budmon_at` (missing host = not localhost); `__Secure-budmon_rt=v; Path=/api/v1/auth/refresh; Max-Age=2592000; HttpOnly; Secure; SameSite=Strict`; `"a"` and `"b"`; `null`; `null`; `{ a: "1", c: "2=3" }` |
 | TP-0.4 | S-0 | U | F-5 | UA strings | Edge on Windows, Chrome on Linux, Firefox on macOS, Safari on iPhone, unknown; Android with model "Pixel 8"; Android with empty model; `other` | "Edge on Windows", "Chrome on Linux", "Firefox on macOS", "Safari on iOS", "A browser on an unknown system", "Android · Pixel 8", "Android", "Another app" |
 | TP-0.5 | S-0 | U | F-38 | common set with "password1234" | 11 code points; 12; 129; "Password1234" ; email `mona@x.com` + "xxmonaxxxxxx"; email `al@x.com` + "xxalxxxxxxxx"; "é" as NFD ×12 | too_short; null; too_long; common; contains_email; null; null |
 | TP-0.6 | S-0 | U | F-39 | `hashSecret`/`verifySecret` spies with a deferred promise | 5 parallel `hash`; `verify(null, "x")`; `needsRehash` with `m=4096` and with the platform's PHC | 4 running, the 5th waits; returns false and `verifySecret` called once; true; false |
@@ -2724,11 +2844,11 @@ Types: **U** unit, **I** integration (real Postgres, in-process HTTP), **E** end
 | TP-0.9 | S-0 | U | F-7 + P-F-16 | copy of `identityGrants` with `sessions.capture = ["SELECT"]` | `applyTableGrants` | `SchemaStepError("credential_table_granted_to_capture", "sessions")` |
 | TP-0.10 | S-0 | I | §3.2 | user + idempotency record | Delete the user | Record gone |
 | TP-0.11 | S-0 | I | F-23 | fixed clock; user with 20 live sessions | `createSession` with no device token; then with the returned device token | 21st created, LRU revoked `limit`; expiries exact (`absolute = now + 90 d`, `idle = now + 30 d`); `deviceToken` non-null then null |
-| TP-0.12 | S-0 | I | F-24 | sessions: bearer, cookie; users active, self-pending, owner-pending | Each row of F-24 step 4; bearer + cookie together; `Bearer garbage`; cookie with `X-Budmon-Client: android/5` | Principal only for the valid cases (incl. self-pending), with `sessionId`; bearer chosen over cookie; `null` otherwise |
+| TP-0.12 | S-0 | I | F-24 | sessions: bearer, cookie; users active, self-pending, owner-pending | Each row of F-24 step 4; bearer + cookie together; `Bearer garbage`; cookie with `X-Budmon-Client: android/5`; an unprefixed access cookie with `Host: x.ts.net`; a prefixed one with `Host: localhost:8080` | Principal only for the valid cases (incl. self-pending), with `sessionId`; bearer chosen over cookie; `null` for the rest (including both host mismatches) |
 | TP-0.13 | S-0 | I | F-26 | 3 sessions | `revokeAllSessionsTx(except one)`; revoke an already revoked one | 2; `false` |
-| TP-0.14 | S-0 | U | F-27 | fake ctx with `origin: https://x` | `deliverSession` cookie with a device token; bearer; `clearSessionCookies` | 3 `Set-Cookie` values with exact attributes, returns `null`; the token object; 3 clearing cookies, none for `device` |
+| TP-0.14 | S-0 | U | F-27 | fake ctx with `host: x.ts.net`; then `host: localhost:8080` | `deliverSession` cookie with a device token; bearer; `clearSessionCookies` | 3 `Set-Cookie` values (`__Secure-` names; `device` with `Path=/api/v1`) with exact attributes, returns `null`; unprefixed names for the localhost host; the token object; 3 clearing cookies, none for `device` |
 | TP-0.15 | S-0 | U | F-29 | fake limiter denying the 2nd rule | `hitLimits([a, b, c])` | `RATE_LIMITED` with the limiter's `retryAfterSeconds`; `c` not hit; `rate_limited_total{limiter=b}` +1 |
-| TP-0.16 | S-0 | U | F-31 | catalog | `renderEmail("invitation", "en", { inviter: "Ahmed", link, date })`; locale `ar-XB` | Subject "Ahmed invited you to Budmon"; text contains the link line; HTML has one `<a href=link>` and escaped text; `<html lang="ar-XB" dir="rtl">` |
+| TP-0.16 | S-0 | U | F-31 | catalog | `renderEmail` for `invitation` with `inviter: "Ahmed"`, `link.url = "https://x.ts.net/invite#t=bmi_…"`; the same with locale `ar-XB` | Subject "⁨Ahmed⁩ invited you to Budmon" (values isolated); the text contains the URL on its own line **with no U+2068/U+2069 around or inside it**; the HTML has exactly one `<a href="https://x.ts.net/invite#t=bmi_…">` and escaped text; `<html lang="ar-XB" dir="rtl">` |
 | TP-0.17 | S-0 | I | F-32 invitation | pending invitation; memory sender | Run the job; run it again (a retry); job for a revoked invitation; sender `failNext(permanent)`; `failNext(transient)` on attempt 6 and on attempt 2 | Email sent, token hash stored equals `hashToken` of the link token; second token differs and the first no longer matches; skipped (nothing sent); `send_failed_at` set and the job completes; `send_failed_at` set and rethrows; rethrows without marking |
 | TP-0.18 | S-0 | I | F-32 reset | resets for users with and without a password; a used reset | Run each | `password_reset` vs `password_set` subjects; the used one skipped |
 | TP-0.19 | S-0 | U | F-21 | fake queue | `publish` with 0 subscribers; with 2; inside a rolled-back transaction (I); `subscribe` after `publish` | Nothing; 2 jobs; no jobs; `Error` |
@@ -2742,7 +2862,9 @@ Types: **U** unit, **I** integration (real Postgres, in-process HTTP), **E** end
 | TP-0.27 | S-0 | U (web) | F-150 | fake fetch, fake locks | 401 `UNAUTHENTICATED` on `/api/v1/me` with refresh → true; → false; 401 on `/api/v1/auth/sign-in`; 403; two concurrent 401s | Retried once with the same body; `onSessionEnded` + original response; untouched; untouched; one refresh call |
 | TP-0.28 | S-0 | U (web) | F-152 to F-154 | MSW | `me.get` 200; 401 then refresh false; guard with `next=//evil.com`; `location.hash = "#t=abc"` → `readFragmentToken("t")` | `signed_in` and `setLocale`; `signed_out`; redirect to `/sign-in?next=/`; returns `abc` and `location.hash` empty |
 | TP-0.29 | S-0 | A | F-200 to F-203 | Robolectric, in-memory key, MockWebServer | Round trip; corrupted value read; interceptor on `/api/v1/me` and `/api/v1/auth/refresh`; two parallel 401s; refresh → `REFRESH_INVALID` | Equal bytes; `clear()` and `null`; header added / not added; one refresh, both retried; tokens cleared and `SessionEvents.Ended` emitted |
-| TP-0.30 | S-0 | E | LD-2 spike | test page on `http://localhost:<port>` setting `budmon_at` with `Secure; HttpOnly; SameSite=Strict` | Chromium (required), Firefox (indicative): navigate, fetch an echo endpoint | Cookie stored and sent; Firefox result recorded in the report |
+| TP-0.30 | S-0 | E | LD-2 spike (DV-7) | test page on `http://localhost:<port>` setting `budmon_at` with `Secure; HttpOnly; SameSite=Strict` | Chromium (required), Firefox (indicative here; required on release candidates) | Cookie stored and sent; Firefox result recorded in the report |
+| TP-0.31 | S-0 | U | F-30 `SMTP_URL` rule | fake `createTransport` recording options | `smtps://u@smtp.example.com`; `smtps://u@smtp.example.com:2465`; `smtp://u@smtp.example.com`; `smtp://u@smtp.example.com:2525`; `smtp://mailpit:1025` with `APP_ENV` production; `smtp://localhost:1025` with development and with test; `smtp://127.0.0.1:1025` with test; `smtp://localhost:1025` with production and with rehearsal; password empty vs set | `secure: true`, port 465; port 2465; `requireTLS: true`, port 587; port 2525, `requireTLS: true`; `ignoreTLS: true`; `ignoreTLS: true` ×2; `ignoreTLS: true`; `EmailSendError(permanent, "smtp_plaintext_refused")` ×2; no `auth.pass` vs `auth.pass` set |
+| TP-0.32 | S-0 | U | PA-11 wiring | test container with identity | Build the API container; `appRouter` keys; `moduleRoutes`; the sealed-column registry | `authHook` is identity's; `auth`, `me`, `invitations`, `users`, `exports`, `deletion` present; F-88's route registered; the two `two_step_credentials` columns registered with `provider "api"`, `purpose "totp"`, `idColumn "user_id"` |
 | TP-1.1 | S-1 | I | F-40 | invitation (factory) | `invitations.preview` | Email, inviter name, expiry, origin |
 | TP-1.2 | S-1 | I | F-40 | none | Token `"x"`; well-formed unknown token | `INVITATION_INVALID` ×2 |
 | TP-1.3 | S-1 | I | F-40 | invitation with `expires_at = now`; one with `now + 1 ms` | Preview each | `INVITATION_EXPIRED { expiredAt }`, row stored `expired`, `invitation-ended` job; second previews fine |
@@ -2762,13 +2884,15 @@ Types: **U** unit, **I** integration (real Postgres, in-process HTTP), **E** end
 | TP-1.33 | S-1 | U (web) | F-172 | active list without EGP; with EGP | `defaultCurrencyFor("en-EG")` ×2; `("en")`; `timeZoneOptions` label for Africa/Cairo on 2026-10-07 | "USD"; "EGP"; "USD"; "Africa/Cairo (GMT+3)" |
 | TP-1.34 | S-1 | A | F-211, F-212 | api base `https://budmon.com` | Parse: full link; link with text around; bare token; `https://other.ts.net/invite#t=…`; `https://budmon.com/x`; set-up VM submit | Token; token; token; `OtherServer`; `NotAnInvitation`; accept called with `tokenDelivery: "body"` |
 | TP-1.35 | S-1 | I | privacy | canaries | Accept with canary email (invitation), canary password and name | Scan clean |
+| TP-1.36 | S-1 | E | PA-10 rehearsal email canary flows | stage-0 rehearsal with identity built | Run the sub-step (accept owner invitation, invite `canaries.email`, request a reset), then step 8 | Two messages in Mailpit; their `bmi_`/`bmp_` tokens and `canaries.email` absent from every scanned source |
+| TP-1.37 | S-1 | E | F-173 | none | Open `/privacy`; follow the set-up screen's privacy link | `<h1>` "Privacy notice", nine sections with §8.3's titles; the link opens `/privacy` |
 | TP-2.1 | S-2 | I | F-45 | empty database | `bootstrapOwner("Owner@X.com")` | Invitation `bootstrap`, no inviter, token hash matches the link's token, no email job |
-| TP-2.2 | S-2 | I | F-45 | owner exists; pending bootstrap; expired pending; user with the email; `"x"` | Call; call with `replace` | `owner_exists`; `pending_exists` / old revoked and new created; old expired and new created; `email_in_use`; `invalid_email` |
+| TP-2.2 | S-2 | I | F-45 | owner exists; pending bootstrap; expired pending; user with the email; `"x"`; a pending direct invitation for the email | Call; call with `replace` | `owner_exists`; `pending_exists` / old revoked with an `invitation-ended { revoked }` job and new created; old expired (with an `invitation-ended { expired }` job) and new created; `email_in_use`; `invalid_email`; the direct invitation revoked with its event |
 | TP-2.3 | S-2 | I | F-41 | bootstrap invitation | Accept | `is_product_owner = true`, `invite_allowance = null` |
 | TP-2.4 | S-2 | I | F-41 | owner exists; a second bootstrap invitation inserted by the repo directly | Accept it | `INVITATION_REVOKED`; no user created |
 | TP-2.5 | S-2 | U | F-46 | memory output, log capture | Success; each refusal; no `--email` | Exact stdout text and exit 0; stderr lines and exit 1; usage and 64; the log capture has no `bmi_` |
-| TP-2.6 | S-2 | U (bats) | F-47 | stub `docker` | Stack down; valid call with `--replace`; email with a space | Exit 21; `docker compose -p budmon-main exec -T api node dist/main/cli.js identity:bootstrap-owner --email a@b.c --replace` recorded as separate words; exit 64; `compose run` never called |
-| TP-2.7 | S-2 | E | PA-6 | stage-0 rehearsal | Run the wrapper, then the canary scan over Docker logs | No `bmi_` token found |
+| TP-2.6 | S-2 | S | P-F-178 (platform) | — | — | Covered by the platform's TP-15.29 (exit 25 when the stack isn't running; `exec -T`; never `compose run`). Listed so the slice's coverage is complete; no identity test. |
+| TP-2.7 | S-2 | E | A-6 rehearsal sub-step (platform P-F-195 step 7, TP-16.13) | stage-0 rehearsal with identity built | Run steps 7 and 8 | The bootstrap sub-step is no longer `skipped`; its `bmi_` token is absent from every scanned source |
 | TP-3.1 | S-3 | I | F-50 | user with password | `auth.signIn` cookie (web header) and body | `signed_in`; cookies vs tokens; `deviceToken` issued; event `sign_in_succeeded` |
 | TP-3.2 | S-3 | I | F-50 | users: with password, Google-only; hasher spy | Wrong password; unknown email; Google-only user | `INVALID_CREDENTIALS` ×3; `sign_in_failed` event only for existing users; `verify` called exactly once each |
 | TP-3.3 | S-3 | I | F-50 | owner-pending user; banned email; self-pending user | Correct password ×3; wrong password for the owner-pending one | `ACCOUNT_CLOSED` ×2, `signed_in`; `INVALID_CREDENTIALS` |
@@ -2780,13 +2904,13 @@ Types: **U** unit, **I** integration (real Postgres, in-process HTTP), **E** end
 | TP-3.9 | S-3 | I | F-25 | variants | Malformed; unknown; revoked session; idle passed; absolute passed; a cookie session's token sent as `body` | `REFRESH_INVALID` each; the session's current token still refreshes where the session is live |
 | TP-3.10 | S-3 | I | F-25 R2 | T1 → T2 (T2 unpresented) | Refresh with T1 | 200; T2 `discarded`; T3 `parentId = T1` |
 | TP-3.11 | S-3 | I | F-25 R4 | T1 → T2 → T3 (T2 presented) | Refresh with T1 | 401; session revoked `reuse_detected`; event; `session_reuse_signed_out` email job |
-| TP-3.12 | S-3 | I | F-25 R3 inside | T2 issued at t, discarded at t + 30 s | Present T2 at discard + 60 s exactly | 401; session not revoked; no event |
-| TP-3.13 | S-3 | I | F-25 R3 outside (presentation window) | as TP-3.12 | Present T2 at discard + 60.001 s | Revoked; event; email |
-| TP-3.14 | S-3 | I | F-25 R3 outside (issue window: "redeemed long after issue, device active") | T2 issued at t; a thief presents T1 at t + 20 min (benign path discards T2); the device presents T2 1 s later | Both refreshes | Thief's 200; the device's 401 with the session revoked, event and email |
-| TP-3.15 | S-3 | I | F-25 R3 boundary | T2 issued at t, discarded at t + 60 s exactly; presented 1 s later | Present T2 | 401, not revoked |
-| TP-3.16 | S-3 | I | F-25 R4 | T1 → T2 → T3 → T4 normal rotations | Present T1 | Revoked |
-| TP-3.17 | S-3 | I | F-25 race | T1 current | Two concurrent refreshes with T1; then present the losing response's token within 60 s | Both 200 (R1 then R2); session live; no event; the discarded token → 401, not revoked |
-| TP-3.18 | S-3 | I | F-29 | session | 31 refreshes of the same token within 10 min | 31st `RATE_LIMITED` |
+| TP-3.12 | S-3 | I | F-25 R3 (inside both windows, current unpresented) | T1 → R1 issues T2 at t; a concurrent R2 with T1 at t + 1 s issues T3 and discards T2 | Present T2 at t + 1 s + 60 s exactly | 200, new token T4 (parent T2); T3 discarded; session live; no event, no email |
+| TP-3.13 | S-3 | I | F-25 R3 presentation window boundary | as TP-3.12 | Present T2 at discard + 60.001 s | Revoked `reuse_detected`; event; email |
+| TP-3.14 | S-3 | I | F-25 "redeemed long after issue, device active" | T2 issued at t (device holds it, unpresented) | A thief presents T1 at t + 20 min (R2: T3 to the thief, T2 discarded); the device, whose access token died, presents T2 1 s later | Thief's 200; the device's 401 with the session revoked, event and email (T2 was discarded 20 min after issue, outside R3) |
+| TP-3.15 | S-3 | I | F-25 R3 issue window boundary | T2 issued at t; discarded at t + 60 s exactly, and in a second fixture at t + 60.001 s | Present T2 1 s after the discard | First: 200 (R3); second: revoked |
+| TP-3.16 | S-3 | I | F-25 R4 and R3b | (a) T1 → T2 → T3 → T4 normal rotations; (b) TP-3.12's state after T3 was presented once | (a) present T1; (b) present T2 within both windows | (a) revoked; (b) 401, not revoked, no event (R3b) |
+| TP-3.17 | S-3 | I | F-25 race | T1 current | Two concurrent refreshes with T1; then present the losing response's token within 60 s | Both 200 (R1 then R2); then 200 again (R3), session live, no event |
+| TP-3.18 | S-3 | I | F-29 `refresh.session` | session | 31 refreshes of the session within 10 min, each with the current token (so every token differs) | 31st `RATE_LIMITED` (the limit is per session, not per token) |
 | TP-3.19 | S-3 | I | F-53 | signed in (cookie) | `auth.signOut` twice; then `me.get` | Cookies cleared; second call → `UNAUTHENTICATED` (no session); `me.get` 401 |
 | TP-3.20 | S-3 | I | F-54 | user A with 3 sessions; user B's session | List; revoke B's ID; revoke the current one; revoke another; revoke others | Current first; `NOT_FOUND`; `CONFLICT { current_session }`; revoked + event; count 1 |
 | TP-3.21 | S-3 | I | F-55 | users: password; two-step; Google-only | Correct password; wrong; two-step user with a password; Google-only with a password field; 11 wrong in 15 min | `confirmedUntil = now + 10 min`; `INVALID_CREDENTIALS`; `VALIDATION_FAILED factor_not_accepted` ×2; `RATE_LIMITED` |
@@ -2796,6 +2920,8 @@ Types: **U** unit, **I** integration (real Postgres, in-process HTTP), **E** end
 | TP-3.25 | S-3 | I | F-130 | rows on each side of every boundary | Run purge | Only rows past their boundary removed or flipped; counts returned |
 | TP-3.26 | S-3 | I | F-36 | user | `auth.signIn`, `auth.verifyTwoStep`, `auth.refresh` with cookie delivery and no web header | `FORBIDDEN` ×3 |
 | TP-3.27 | S-3 | I | privacy | canaries | Sign in with a canary email and password (wrong and right); refresh | Scan clean |
+| TP-3.28 | S-3 | I + E | P-9 web device cookie | user U signed in once on a browser (device cookie set, `Path=/api/v1`) | (I) 30 wrong attempts for U's email from IPs without the cookie, then U's correct password with the cookie; with a cookie belonging to another user; (E) the same from the browser after signing out | (I) unknown-device bucket exhausted; with U's cookie → `signed_in` (counted on `signin.email-device`); another user's cookie → `RATE_LIMITED`; (E) sign-out keeps the device cookie and the next sign-in succeeds |
+| TP-3.29 | S-3 | U | F-28 `requireConfirmed(ctx, maxAgeSeconds)` | session confirmed 5 min ago | `maxAgeSeconds` 600; 240; 0; 601 | passes; `CONFIRMATION_REQUIRED`; `RangeError`; `RangeError` |
 | TP-3.40 | S-3 | E | F-152 | signed-out browser | Open `/settings` | Wordmark screen, then `/sign-in?next=/settings` |
 | TP-3.41 | S-3 | E | F-150 | signed in; server clock advanced past idle expiry | Click a settings link | `/sign-in?reason=ended…` with "Your session ended. Sign in again." |
 | TP-3.42 | S-3 | E | §8.1 | none | Open `/sign-in?reason=reuse` | "For your security, you've been signed out. Sign in again." |
@@ -2804,7 +2930,10 @@ Types: **U** unit, **I** integration (real Postgres, in-process HTTP), **E** end
 | TP-3.45 | S-3+ | E | axe | same routes | Run axe | Report attached (not failing, P-D-39) |
 | TP-3.46 | S-3+ | E | pseudo-RTL | `ar-XB` | S-1, S-2, S-6, S-10, S-11 | Probes at the right sides; codes and emails LTR |
 | TP-3.47 | S-3 | E | F-155, F-162 | user | Sign in at `/sign-in?next=/settings`; sign out from the menu; sign in with `next=//evil.com` | `/settings`; `/sign-in`; `/` |
-| TP-3.48 | S-3 | A | F-204, F-205, F-208, F-218 | fakes | Sign in; outbox with 3 entries of user X then sign in as Y; discard; one-tap on second launch after a Google sign-in; sign-out with 2 pending | Tokens and device token saved, `kick()` called; `AskDiscard(3)`; entries deleted; one-tap requested once; dialog with count 2 |
+| TP-3.50 | S-3 | E | F-25 R3, order A-then-B | signed-in page; Playwright routes on `/api/v1/auth/refresh` | From `page.evaluate`, send two refreshes with the same cookie (bypassing F-150's lock); release response B first and A last, so the cookie jar ends with A's token, which the server discarded | The next `me.get` → 401 → F-150 refreshes with A's token within 60 s → 200 (R3); the user stays signed in; no reuse email |
+| TP-3.51 | S-3 | E | F-25, order B-then-A | as TP-3.50 | Release A first, B last (the jar ends with the current token) | The next refresh is R1; signed in; no email |
+| TP-3.52 | S-3 | E | F-25 boundary | as TP-3.50 with the server clock controllable | As TP-3.50, but advance the clock 60.001 s after the discard before the next refresh | Session revoked; `/sign-in?reason=ended`; a `session_reuse_signed_out` email in `/__test/emails` |
+| TP-3.48 | S-3 | A | F-201, F-204, F-205, F-208, F-218 | fakes; PA-8 DAO | Sign in; sign out; sign in again with the same email; outbox with 3 entries owned by X then sign in as Y; owner null with 2 entries then sign in as X; no entries and owner null; discard; cancel; one-tap on second launch after a Google sign-in; sign-out with 2 pending | Tokens and device token saved, `kick()` called; after `clear()` the device token, `lastEmail` and `outboxOwnerUserId` remain; the second sign-in sends the stored `deviceToken`; `AskDiscard(3)`; `AskDiscard(2)`; `Proceed` and owner set; `deleteAll()` called and owner Y; entries and owner X unchanged; one-tap requested once; dialog with count 2 and `outboxOwnerUserId` unchanged after sign-out |
 | TP-3.49 | S-3 | A | F-207 | no stored session; stored session with `me` 200; `Ended` event | Start | `SignedOut`; `SignedIn`; `SignedOut(Ended)` |
 | TP-4.1 | S-4 | U | F-60 | secret `12345678901234567890` | `totpAt` at times 59, 1111111109, 1111111111, 1234567890, 2000000000, 20000000000 | 287082, 081804, 050471, 005924, 279037, 353130 |
 | TP-4.2 | S-4 | U | F-60 | secret; now step s | Codes for s−2, s−1, s, s+1, s+2; code for s with `lastUsedStep = s`; `"12345"`; `"123 456"` | null, s−1, s, s+1, null; null; null; parsed |
@@ -2821,6 +2950,7 @@ Types: **U** unit, **I** integration (real Postgres, in-process HTTP), **E** end
 | TP-4.13 | S-4 | I | F-68 | enabled with secret S1 | Start (step-up); confirm with an S1 code; with an S2 code; confirm after 15 min + 1 ms | `TWO_STEP_CODE_INVALID`; swapped (S1 codes now fail, recovery codes unchanged); `TWO_STEP_SETUP_EXPIRED` |
 | TP-4.14 | S-4 | I | key ring | codes created under k1; config ring `{ current: k2, keys: k1, k2 }` | Sign in with a k1 code | Accepted |
 | TP-4.15 | S-4 | I | privacy | canaries | Enable, verify, regenerate | No codes or secrets in telemetry |
+| TP-4.16 | S-4 | I | P-4 key rotation | two-step user enrolled under `api-secrets` key `k1`; a pending replacement secret also sealed under `k1` | Configure the ring `{ current: k2, keys: k1, k2 }`; run P-F-117 `rewrapApiSecrets` with the container's registry; then sign in with a TOTP code for the current secret, and confirm the replacement with a code for the pending one | `rewrapped: 2`; both envelopes now carry key id `k2`; the sign-in code is accepted; the replacement succeeds |
 | TP-4.30 | S-4 | E | F-156 | two-step user | Sign in, enter the code (computed from the known secret) | Home |
 | TP-4.31 | S-4 | E | F-166 | two-step user, unconfirmed (clock +11 min) | Click **Create new codes** | Dialog asks for a code; after it, the codes view appears without clicking again |
 | TP-4.32 | S-4 | E | F-165 | enabling | Reload on the codes step | Codes gone; S-10 banner "You may not have saved your recovery codes." |
@@ -2840,7 +2970,7 @@ Types: **U** unit, **I** integration (real Postgres, in-process HTTP), **E** end
 | TP-5.12 | S-5 | I | privacy | canaries | Request and reset with canary email and password | Scan clean |
 | TP-6.1 | S-6 | U | F-80 | fake fetch, local JWKS | URL params; PKCE `challenge = base64url(sha256(verifier))`; token 200 / 400 `invalid_grant` / 400 other / 500 / timeout; ID token valid, wrong `aud`, `azp` not allowed, wrong `iss`, expired by 61 s, `email_verified: "true"` (string) | Exact; equal; `idToken` / `invalid_grant` / `rejected` / `unavailable` ×2; claims / `invalid_token` ×4 / `emailVerified: false` |
 | TP-6.2 | S-6 | I | F-81 | config with app origins | Google null; `Origin` not listed; `returnTo: "//x"`; `sign_up` with an expired invitation; valid `sign_in` | `GOOGLE_UNAVAILABLE`; `GOOGLE_SIGNIN_FAILED`; `VALIDATION_FAILED`; `INVITATION_EXPIRED`; URL with state/nonce/S256 challenge, challenge row, `Set-Cookie` binding with `Path=/api/v1; SameSite=Strict` |
-| TP-6.3 | S-6 | I | F-82, F-88 | started flow | Callback with an unknown state; `error=access_denied`; exchange `unavailable`; nonce mismatch; success; 61 callbacks from one IP | 303 to `<callback>/auth/google#e=failed`; `O/auth/google#e=cancelled` and consumed; `#e=unavailable`; `#e=failed`; `O/auth/google#h=bmh_…`, no `Set-Cookie`, `Cache-Control: no-store`; `#e=rate_limited`; logs contain no `code` or `state` value |
+| TP-6.3 | S-6 | I | F-82, F-88 | started flow | Callback with an unknown state; `error=access_denied`; exchange `unavailable`; nonce mismatch; success; 61 callbacks from one IP; Google not configured | 303 to `/sign-in?error=google_failed` (relative); `O/auth/google#e=cancelled` and consumed; `O/auth/google#e=unavailable`; `O/auth/google#e=failed`; `O/auth/google#h=bmh_…`, no `Set-Cookie`, `Cache-Control: no-store`; `/sign-in?error=rate_limited`; `/sign-in?error=unavailable`; logs contain no `code` or `state` value |
 | TP-6.4 | S-6 | I | F-83 | callback done | Complete without the binding cookie; with a wrong one; after 2 min + 1 ms; twice; a `link` hand-off on `auth.googleComplete` | `GOOGLE_SIGNIN_FAILED` each; the binding cookie cleared in every response |
 | TP-6.5 | S-6 | I | F-86 sign_in | users: linked; linked but owner-closed; U with email e (no Google); U2 with another Google | Claims: linked sub; closed sub; unverified e; unverified unknown address; verified unknown; verified e; verified U2's email; banned email | Signed in; `ACCOUNT_CLOSED`; `GOOGLE_EMAIL_UNVERIFIED` with **byte-identical** bodies for the two unverified cases; `GOOGLE_ACCOUNT_UNKNOWN { email }`; linked + signed in + event + email; `GOOGLE_OTHER_ACCOUNT_LINKED`; `GOOGLE_ACCOUNT_NOT_ALLOWED` |
 | TP-6.6 | S-6 | I | D-7 rule 2 | U with two-step, email e, no Google | Google sign-in with verified e; then 5 wrong codes; then a new flow with the right code | `two_step_required` and no `google_identities` row; still none after the failures; row created on success with event `google_linked_auto` and email |
@@ -2870,6 +3000,7 @@ Types: **U** unit, **I** integration (real Postgres, in-process HTTP), **E** end
 | TP-8.9 | S-8 | I | F-99 | U with allowance 1; another user's pending invitation for e2 | Share-invite e1; share-invite e2 | Created, allowance used, `origin account_share`; `created: false`, no email job, allowance unchanged |
 | TP-8.10 | S-8 | I | F-32 + port | fake context provider returning "to share the account House money" | Run the email job | Email body contains the line |
 | TP-8.11 | S-8 | I | F-130 | pending invitations at `now` and `now + 1 ms` | Purge | The first expired with an event; the second pending |
+| TP-8.12 | S-8 | I | `invite.user` (HLD D-18) | owner (unlimited allowance); user with allowance 100 | 21 creates in a day from each; a 21st via `inviteForAccountShare` | 21st `RATE_LIMITED` for both; the share path is limited too |
 | TP-8.13 | S-8 | I | privacy | canary invitee email | Create, list, email job | Scan clean |
 | TP-8.30 | S-8 | E | F-167 | user | Empty state; send; resend; cancel; allowance exhausted; cap reached (server setting) | Texts per §8.1 |
 | TP-8.31 | S-8 | A | F-217 | fake repository | Send with an error `INVITATION_PENDING` | Message with **Resend** when own |
@@ -2877,10 +3008,10 @@ Types: **U** unit, **I** integration (real Postgres, in-process HTTP), **E** end
 | TP-9.2 | S-9 | I | F-29 | user | 31 lookups in an hour | 31st `RATE_LIMITED` |
 | TP-9.3 | S-9 | I | F-106 | `budmon_capture` connection | `getProfile`; `getDisplayNames` with a missing ID; 501 IDs; `isActive` for a pending user | Profile; `null` for the missing ID; `RangeError`; false |
 | TP-10.1 | S-10 | I | F-110 request | user | Without step-up; with it; while queued; 3 within 24 h then a 4th at +24 h − 1 ms and at +24 h; replay with the same key | `CONFIRMATION_REQUIRED`; 201 + job + event; `EXPORT_IN_PROGRESS`; `EXPORT_LIMIT_REACHED`, then allowed; same `{ id }` |
-| TP-10.2 | S-10 | I | F-111, F-112 | user with sessions, events, invitations; a fake participant with 2 sections | Run the job | ZIP with `README.txt`, `data.json` (all sections), `csv/identity.profile.csv` …; no `$argon2id$`, `bma_`, `bmr_`, `bmi_`, `bmp_`, recovery codes or TOTP secret anywhere; row `ready`, expiry +7 d; `export_ready` email job |
+| TP-10.2 | S-10 | I | F-111, F-112 | user with sessions, events, invitations; a fake participant with 2 sections | Run the job | ZIP with `README.txt`, `data.json` (all sections), `csv/identity-profile.csv` …; no `$argon2id$`, `bma_`, `bmr_`, `bmi_`, `bmp_`, recovery codes or TOTP secret anywhere; row `ready`, expiry +7 d; `export_ready` email job |
 | TP-10.3 | S-10 | I | F-111 failures | variants | User deleted before running; participant returning > 200 MiB; participant throwing on attempt 4; running the job again on a `ready` export | `failed erased`; `failed too_large`; `failed build_failed`; no-op |
 | TP-10.4 | S-10 | U | F-113 | sections with `a,b`, `"q"`, multi-line text, `=SUM(1)`, `null`, `true` | Build | CSV fields quoted per RFC 4180, BOM present, `'=SUM(1)`, empty field, `true`; duplicate section → `TypeError`; `data.json` keys canonical |
-| TP-10.5 | S-10 | I | F-110 download | U's ready, U's queued, U's expired, V's | `exports.downloadUrl` | URL (memory store); `EXPORT_NOT_READY` ×2; `NOT_FOUND` |
+| TP-10.5 | S-10 | I | F-110 download (PA-7) | U's ready (completed 2026-10-07 in U's zone), U's queued, U's expired, V's | `exports.downloadUrl` | URL whose memory-store `n` is `budmon-export-2026-10-07.zip`; `EXPORT_NOT_READY` ×2; `NOT_FOUND` |
 | TP-10.6 | S-10 | I | F-110 list | 12 exports | `exports.list` | 10 newest |
 | TP-10.30 | S-10 | E | F-168 | user | Request export (step-up) → wait for the worker → Download | Status changes to Ready; download navigates to the presigned URL |
 | TP-11.1 | S-11 | I | F-115 | two fake prechecks returning blockers "Zeta", "Alpha" | Precheck | Blockers sorted "Alpha", "Zeta"; `isOwner` |
@@ -2897,14 +3028,15 @@ Types: **U** unit, **I** integration (real Postgres, in-process HTTP), **E** end
 | TP-11.12 | S-11 | I | F-118 | no user; objects under the prefix | Run | `absent`; objects deleted |
 | TP-11.13 | S-11 | I | guard | database catalog | For every FK referencing `users`, check `ON DELETE` is `CASCADE` or `SET NULL`, or the owning module registered an `ErasureParticipant` | Pass (fails when a module adds a `RESTRICT` FK without a participant) |
 | TP-11.14 | S-11 | I | F-34 | worker started twice | `onGeneralWorkerStarted` | One sweep job (singleton `startup`) |
+| TP-11.15 | S-11 | I | P-12 | self-pending user U due at `t`; owner-pending user W due at `t` | At `t` (before the sweep): `deletion.cancel` as U; `cancelDeletionByOwner(W)`; and, concurrently, `eraseUser(U)` holding the user row lock while a cancel at `t − 1 ms` waits | `DELETION_IN_PROGRESS` ×2; the waiting cancel succeeds only if it took the lock first, otherwise it finds no user (`DELETION_NOT_PENDING`); erasure never deletes an active user |
 | TP-11.30 | S-11 | E | F-170 | self-pending user | Sign in | Banner on every page; **Keep my account** → toast; banner gone |
 | TP-11.31 | S-11 | E | F-169 | user; fake blockers; then none | Open delete; blockers shown, button disabled; remove blockers; tick, delete, step-up | Sign-in page with the deletion date message |
 | TP-11.32 | S-11 | A | F-217 | fake repository with blockers | Open delete | Button disabled; blockers listed |
 | TP-12.1 | S-12 | U | F-125 | principal `isOwner: false` | Each method | `FORBIDDEN` |
 | TP-12.2 | S-12 | I | F-125 lists | 60 users; invitations in every state | `listUsers` pages; `listInvitations` with filters | Keyset pages, fields present, expired flipped |
 | TP-12.3 | S-12 | I | F-125 settings | none | `setUserCap(0)`, `(100001)`, `(50)`; `setInviteAllowance(unknown, 1)`, `(u, -1)`, `(u, null)` | `VALIDATION_FAILED` ×2, ok; `NOT_FOUND`, `VALIDATION_FAILED`, ok |
-| TP-12.4 | S-12 | I | owner deletion | user U signed in; the owner | Delete the owner; delete U; U signs in; cancel U; delete U again, ban U, then cancel | `CONFLICT { owner }`; pending owner, sessions revoked, `account_closed` email; `ACCOUNT_CLOSED`; active again; `CONFLICT { ban }` |
-| TP-12.5 | S-12 | I | ban | U with sessions, a refresh token, pending invitations sent, a pending invitation to their email from V, Google linked | `banEmail(U.email)`; then U's refresh; password sign-in; Google sign-in; reset request; run the erase job; ban the owner's email; ban the same email again; ban an email with no user | Ban row; U `pending_deletion` `ban` `scheduled now`; sessions revoked; invitations revoked; erase job queued; refresh `REFRESH_INVALID`; `ACCOUNT_CLOSED`; `GOOGLE_ACCOUNT_NOT_ALLOWED`; no email; erased with the `account_closed` final email; `CONFLICT { owner }`; idempotent; `{ userId: null }` |
+| TP-12.4 | S-12 | I | owner deletion | user U signed in, with 2 pending invitations sent; the owner | Delete the owner; delete U; U signs in; cancel U; delete U again and advance the clock past the grace period, then cancel; ban U, then cancel | `CONFLICT { owner }`; pending owner, sessions revoked, invitations revoked with 2 `invitation-ended` jobs, `account_closed_owner` email job; `ACCOUNT_CLOSED`; active again; `DELETION_IN_PROGRESS`; `CONFLICT { ban }` |
+| TP-12.5 | S-12 | I | ban | U (self-pending deletion) with sessions, a refresh token, 2 pending invitations sent, a pending invitation to their email from V, Google linked | `banEmail(U.email)`; then U's refresh; password sign-in; Google sign-in; reset request; run the erase job; ban the same email again (before and after erasure); ban the owner's email; ban an email with no user | Ban row; U `pending_deletion` `ban` scheduled now (overriding self); sessions revoked; all 3 invitations revoked with 3 `invitation-ended` jobs; one erase job; `REFRESH_INVALID`; `ACCOUNT_CLOSED`; `GOOGLE_ACCOUNT_NOT_ALLOWED`; no email; erased with the `account_closed_ban` final email; second ban `{ alreadyBanned: true }` with no new erase job or events (and `userId: null` after erasure); `CONFLICT { owner }`; `{ userId: null, alreadyBanned: false }` |
 | TP-12.6 | S-12 | I | liftBan | banned email; unknown email | Lift | Removed; `NOT_FOUND` |
 | TP-12.7 | S-12 | I | resetTwoStepByOwner | two-step user with sessions; user without | Reset | Two-step removed, sessions revoked, email; `CONFLICT { two_step_off }` |
 | TP-12.8 | S-12 | I | revokeInvitation | V's pending invitation; accepted one | Revoke as owner | Revoked + event; `CONFLICT` |
@@ -2913,6 +3045,7 @@ Types: **U** unit, **I** integration (real Postgres, in-process HTTP), **E** end
 | TP-M.3 | S-4 | M | phone | real authenticator | Enrol via QR (web) and via **Open in authenticator app** (Android) | Codes accepted |
 | TP-M.4 | S-2 | M | laptop | fresh install | `budmon-local bootstrap-owner --email …` | Link printed; owner created |
 | TP-M.5 | S-0 | M | laptop | Mailpit | Trigger an invitation and a reset | Emails visible at `http://127.0.0.1:8025`; links work |
+| TP-M.6 | S-0 | M | DV-7 | the laptop's Edge | Sign in on `http://localhost:8080` and on the tailnet origin | Signed in on both; devices listed |
 
 ## 11. Open questions
 
