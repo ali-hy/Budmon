@@ -1,7 +1,7 @@
 ---
 module: platform
 doc: lld-brief
-summarises: lld.md v0.15
+summarises: lld.md v0.16
 ---
 
 # Platform: LLD brief
@@ -52,6 +52,7 @@ The code stage 1 needs is built now (the HLD's rule: moving off the laptop must 
 | 3d | **Fixes from the first slice's QA (planner decisions A-27 to A-32).** Lint errors for the layering rules and for `parseFloat` now say what to use instead (A-27). CI runs the migration-file check without pnpm in between, so its exit codes reach CI as designed (A-28). That check's messages are tidied and say how to fix the problem (A-29). The server and web apps get their TypeScript settings in the slices that create them (S-2, S-11a) (A-30). CI runs the database tests from S-2 on, as `pnpm check` does locally (A-31). pnpm's "ignored build scripts: esbuild" notice is silenced: esbuild's install script isn't needed, so it stays off (A-32). | Developer experience only. | §Amendments A-27 to A-32 |
 | 3e | **Questions from the money-library tests (planner decisions A-34 to A-37).** Dates and times always use the same Temporal library everywhere, even where a browser or Node ships its own, so behaviour is identical (A-34). The "every branch of the money code is tested" rule is now enforced: a coverage check runs in `pnpm check` and in CI and fails below 100 % (A-35). An amount from the network that isn't a whole number in the safe range is rejected the same way everywhere (A-36). Money-formatting tests check only formats that don't change between Unicode data releases (English-US and German, currency codes rather than symbols), and a mismatch fails the build rather than being skipped (A-37). | Exact money handling; no product change. | §Amendments A-34 to A-37 |
 | 3f | **Small behaviours pinned during the money-library build (planner decisions A-38 to A-42).** The canonical JSON writer refuses "undefined" values in lists instead of quietly writing `null`, so signed or hashed data can't change meaning (A-38). Language matching: a phone set to plain "English" picks "English (US)" if that's what Budmon offers (A-39). The right-to-left test language needs no special case (A-40). ID checking follows the UUID standard exactly (A-41). A time zone must be a real named zone; fixed offsets like "+02:00" are refused because they ignore daylight saving (A-42). | No product change. | §Amendments A-38 to A-42 |
+| 3g | **How the server is packaged for running (planner decision A-43), plus two safety checks (A-44, A-45).** The server is shipped as one bundled program built by `esbuild` in S-2: Budmon's own shared code is built into it, and outside libraries are installed alongside. Nothing else changes for development or tests, and Android has nothing to build. Money maths now cleans up or refuses malformed fractions (a zero bottom number is refused; a negative one is flipped to an equal value) (A-44). The canonical JSON writer refuses a structure that contains itself instead of crashing (A-45). | Without A-43 the server image couldn't start. | §Amendments A-43 to A-45 |
 | 4 | **Q-1, decided: exchange rates before 2 March 2024 show "no rate".** The free backup rate source has no data before that date, so conversions dated earlier say "no rate" instead of guessing. This was the recommended default and went ahead with your go-ahead. | Matters only if you import old history. It can be extended later by an amendment, for example fetching older rates from Open Exchange Rates if its free plan includes them (not confirmed). | §11, F-132 |
 | 5 | **Q-2, deferred: an approval click on every release.** It belonged to the release-signing chain, which now starts at stage 1. In stage 0 nothing deploys from CI: a merged release PR only gets a tag, and you run `budmon-local upgrade` yourself, which is the approval. | Nothing to decide now; it comes back with the stage-1 design. | §11 Q-2 |
 | 6 | **One-time laptop setup by hand**, following `infra/runbooks/stage0-laptop.md`: WSL2 with Ubuntu (your user needs `sudo`), Docker Desktop (WSL2 backend, start at login), Tailscale on the laptop and phone (MagicDNS and HTTPS certificates switched on), two Backblaze B2 buckets for exports and the erasure log (free tier), a Sentry project and a Google OAuth client. Then `budmon-local install <tag>`: it creates the secret files, asks for a few settings (Tailscale name, bucket names, Sentry address, OAuth client id) and stops with a list of what's still missing. You run the Google Cloud script, paste each missing secret with `budmon-local secret set …`, and run `install` again; it finishes and prints the `tailscale serve` command. | No agent can or should do these. The install is resumable, and it refuses to start Budmon while anything is missing, so a skipped step shows up at once. `secret set` gives each file to the one container that reads it. | §2.2 runbook, F-175, F-178, F-179, F-191 |
@@ -128,7 +129,7 @@ The LLD's catalog has about 180 functions. They're grouped by area here; the rig
 | ---- | --------- | -------------- | ------------ |
 | Repository tooling | 11 (F-1 to F-9, with F-3b) | Lint rules, CI checks, root commands (§2.2.2). | F-1: lint bans on float money maths (including `parseFloat` in any form and `+value`), bypassing the layers, raw logging. F-6/F-6b: migrations only on release branches. |
 | Shared money, time, IDs | 11 (F-300 to F-313) | Exact money in code shared by server and web; Android mirrors it. | F-302 `allocate` (splits always add up exactly); F-303 conversion (rounds once, half-to-even); test vectors shared with Android. |
-| Configuration and database | 14 (F-10 to F-23) | Settings checked at start-up, database roles and grants, building dev databases, `db:reset`. | F-11: a wrong setting stops the process and never prints secret values. F-15/F-16: roles, passwords and grants. F-20: `db:reset` refuses anything but a local database. |
+| Configuration and database | 16 (F-10 to F-25) | Settings checked at start-up, database roles and grants, building dev databases, `db:reset`. | F-11: a wrong setting stops the process and never prints secret values. F-15/F-16: roles, passwords and grants. F-20: `db:reset` refuses anything but a local database. |
 | Observability and privacy | 12 (F-30 to F-42) | Logging, error reports, traces, metrics. | F-30/F-31: logs accept only a fixed list of safe fields. F-33: errors reported without their message. F-35/F-40: Sentry and trace scrubbing. |
 | API server and errors | 10 (F-50 to F-59) | The HTTP server, error mapping, login hooks, health checks, the list of API routes (F-59). | F-52: maps every failure to the error format, never leaking internals. F-53: every call needs login unless explicitly public. |
 | Security baseline | 6 (F-61 to F-66) | Headers, size limits, rate limits, password hashing. | F-63: rate limits shared by all servers. F-66: Argon2id password hashing. |
@@ -171,14 +172,14 @@ The LLD's catalog has about 180 functions. They're grouped by area here; the rig
 
 ## 7. Testing
 
-About 258 test cases:
+About 261 test cases:
 
 | Type | Count | Notes |
 | ---- | ----- | ----- |
-| Unit | ~135 | Including 5 for the `budmon-local` and Google Cloud scripts. |
+| Unit | ~137 | Including 5 for the `budmon-local` and Google Cloud scripts. |
 | Integration | ~93 | Against a real Postgres database. |
 | End-to-end | 16 | Browser, Android emulator, and the rehearsal. |
-| Static checks | 20 | Configuration, workflow (including action pinning), dependency pins, root commands, line-ending and Android build checks. |
+| Static checks | 21 | Configuration, workflow (including action pinning), dependency pins, root commands, line-ending and Android build checks. |
 | Manual | 2 | First install and phone access; the Sentry test e-mail. |
 
 **What's covered:**
