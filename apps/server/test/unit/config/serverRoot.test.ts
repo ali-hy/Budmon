@@ -73,7 +73,7 @@ describe("TP-2.28: serverRoot", () => {
     expect(serverRoot(pathToFileURL(file2).href)).toBe(root2);
   });
 
-  it("TP-2.30x: a not-found result isn't cached", async () => {
+  it("TP-2.34x: a not-found result isn't cached", async () => {
     const later = path.join(dir, "later");
     const file = touch(path.join(later, "src/x/y.ts"));
     const serverRoot = await freshServerRoot();
@@ -83,7 +83,7 @@ describe("TP-2.28: serverRoot", () => {
     expect(serverRoot(pathToFileURL(file).href)).toBe(later);
   });
 
-  it("TP-2.30x: with no argument it finds apps/server from its own location", async () => {
+  it("TP-2.34x: with no argument it finds apps/server from its own location", async () => {
     const serverRoot = await freshServerRoot();
 
     expect(serverRoot()).toBe(

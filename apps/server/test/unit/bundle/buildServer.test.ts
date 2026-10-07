@@ -96,13 +96,21 @@ describe("TP-2.27: buildServer", () => {
     expect(problems).toEqual([]);
   });
 
+  it("TP-2.27 (A-68): no output file contains drizzle-kit", () => {
+    const offending = jsFiles(outdir).filter((file) =>
+      readFileSync(file, "utf8").includes("drizzle-kit"),
+    );
+
+    expect(offending.map((file) => path.relative(outdir, file))).toEqual([]);
+  });
+
   it("TP-2.27: external is the dependencies' names plus their /* forms", () => {
     const keys = dependencyKeys();
 
     expect([...result.external].sort()).toEqual([...keys, ...keys.map((k) => `${k}/*`)].sort());
   });
 
-  it("TP-2.30x: the entry points are the S-2 main/ files except the development-only ones", () => {
+  it("TP-2.34x: the entry points are the S-2 main/ files except the development-only ones", () => {
     expect([...result.entryPoints].map((e) => e.replaceAll("\\", "/")).sort()).toEqual(
       ENTRY_NAMES.map((n) => `src/main/${n}.ts`).sort(),
     );

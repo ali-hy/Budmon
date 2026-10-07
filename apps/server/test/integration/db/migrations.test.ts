@@ -1,5 +1,5 @@
 // F-18 applyCommittedMigrations and readJournal. TP-2.13 (fresh container, fixture folder
-// test/fixtures/migrations with two migrations), plus extra cases TP-2.40x.
+// test/fixtures/migrations with two migrations), plus extra cases TP-2.44x.
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -87,8 +87,8 @@ describe("TP-2.13: applyCommittedMigrations", () => {
   });
 });
 
-describe("TP-2.40x: readJournal", () => {
-  it("TP-2.40x: lists tag, when and the SHA-256 hex of each migration file", () => {
+describe("TP-2.44x: readJournal", () => {
+  it("TP-2.44x: lists tag, when and the SHA-256 hex of each migration file", () => {
     expect(readJournal(FIXTURE)).toEqual([
       { tag: "0000_first", when: 1760000000000, hash: sha256("0000_first.sql") },
       { tag: "0001_second", when: 1760000100000, hash: sha256("0001_second.sql") },

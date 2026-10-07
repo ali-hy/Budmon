@@ -1,5 +1,5 @@
 // F-20 guards. TP-2.16 (a) (the refusals; (b) is integration/db/reset.test.ts) and TP-2.24 (a)
-// to (d) for seedDevelopmentDatabase, plus extra cases TP-2.31x for the rest of step 1's guard.
+// to (d) for seedDevelopmentDatabase, plus extra cases TP-2.35x for the rest of step 1's guard.
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import {
   ResetRefusedError,
@@ -69,7 +69,7 @@ describe("TP-2.16 (a): resetDevelopmentDatabase refuses before any connection", 
     },
   );
 
-  it.each([["rehearsal"]])("TP-2.31x: appEnv %s is refused", async (appEnv) => {
+  it.each([["rehearsal"]])("TP-2.35x: appEnv %s is refused", async (appEnv) => {
     const deps = fakeResetDeps();
 
     const error = await rejection(
@@ -122,7 +122,7 @@ describe("TP-2.24: seedDevelopmentDatabase", () => {
   });
 
   it.each([["127.0.0.1"], ["[::1]"], ["host.docker.internal"]])(
-    "TP-2.31x: the local host %s is allowed in test",
+    "TP-2.35x: the local host %s is allowed in test",
     async (host) => {
       const seed = vi.fn(() => Promise.resolve());
 
@@ -132,7 +132,7 @@ describe("TP-2.24: seedDevelopmentDatabase", () => {
     },
   );
 
-  it("TP-2.31x: TESTCONTAINERS=1 allows another host", async () => {
+  it("TP-2.35x: TESTCONTAINERS=1 allows another host", async () => {
     vi.stubEnv("TESTCONTAINERS", "1");
     const seed = vi.fn(() => Promise.resolve());
 
@@ -141,7 +141,7 @@ describe("TP-2.24: seedDevelopmentDatabase", () => {
     expect(seed).toHaveBeenCalledTimes(1);
   });
 
-  it("TP-2.31x: TESTCONTAINERS=1 doesn't allow production", async () => {
+  it("TP-2.35x: TESTCONTAINERS=1 doesn't allow production", async () => {
     vi.stubEnv("TESTCONTAINERS", "1");
     const seed = vi.fn(() => Promise.resolve());
 

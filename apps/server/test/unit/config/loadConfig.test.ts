@@ -1,5 +1,5 @@
 // F-10 / F-11 loadConfig. TP-2.1 to TP-2.5, TP-2.21 to TP-2.23, TP-2.30 (config part), plus extra
-// cases TP-2.29x.
+// cases TP-2.33x.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { describe, expect, it } from "vitest";
 import { ConfigError, loadConfig } from "../../../src/platform/config/loadConfig.js";
@@ -112,14 +112,28 @@ describe("TP-2.1: a valid development configuration per process kind", () => {
     ]);
   });
 
-  it("TP-2.29x: a *_FILE value has one trailing newline trimmed, no more", () => {
+  it("TP-2.1 (A-71): migrate with DB_PASSWORD_PREVIOUS_FILE has migrate.previousPassword as a Secret", () => {
+    const f = devMigrate();
+    withFile(f, "DB_PASSWORD_PREVIOUS_FILE", "previous-password\n");
+
+    const previous = load(f).migrate?.previousPassword;
+
+    expect(previous).toBeInstanceOf(Secret);
+    expect(previous?.reveal()).toBe("previous-password");
+  });
+
+  it("TP-2.1 (A-71): migrate without DB_PASSWORD_PREVIOUS_FILE has no previousPassword", () => {
+    expect(load(devMigrate()).migrate?.previousPassword).toBeUndefined();
+  });
+
+  it("TP-2.33x: a *_FILE value has one trailing newline trimmed, no more", () => {
     const f = devApi();
     withFile(f, "DB_PASSWORD_FILE", "pw\n\n");
 
     expect(load(f).db.password.reveal()).toBe("pw\n");
   });
 
-  it("TP-2.29x: a Config doesn't reveal secrets when serialised", () => {
+  it("TP-2.33x: a Config doesn't reveal secrets when serialised", () => {
     const text = JSON.stringify(load(devApi()));
 
     expect(text).not.toContain("db-password");
@@ -142,7 +156,7 @@ describe("TP-2.2: missing and invalid variables", () => {
     expect(JSON.stringify(error.problems)).not.toContain("S3NT1NEL");
   });
 
-  it("TP-2.29x: one problem per failing variable", () => {
+  it("TP-2.33x: one problem per failing variable", () => {
     const f = devApi();
     delete f.env["DB_HOST"];
     delete f.env["DB_NAME"];
@@ -154,7 +168,7 @@ describe("TP-2.2: missing and invalid variables", () => {
   });
 
   it.each([["__FILL_ME__\n"], ["__FILL_ME__"]])(
-    'TP-2.29x: a file holding the placeholder %j is "placeholder not filled"',
+    'TP-2.33x: a file holding the placeholder %j is "placeholder not filled"',
     (content) => {
       const f = devApi();
       withFile(f, "CURSOR_KEY_FILE", content);
@@ -166,7 +180,7 @@ describe("TP-2.2: missing and invalid variables", () => {
     },
   );
 
-  it('TP-2.29x: a plain variable set to __FILL_ME__ is "placeholder not filled"', () => {
+  it('TP-2.33x: a plain variable set to __FILL_ME__ is "placeholder not filled"', () => {
     const f = devApi();
     f.env["DB_HOST"] = "__FILL_ME__";
 
@@ -177,7 +191,7 @@ describe("TP-2.2: missing and invalid variables", () => {
 describe("TP-2.3: production-only rules, each separately", () => {
   const RULES = ["not allowed in production", "required"];
 
-  it("TP-2.29x: the production fixtures are valid as they are", () => {
+  it("TP-2.33x: the production fixtures are valid as they are", () => {
     for (const f of [prodApi(), prodWorkerGeneral(), prodWorkerCapture(), prodMigrate()]) {
       expect(problemsOf(f)).toEqual([]);
     }
@@ -290,7 +304,7 @@ describe("TP-2.21: GOOGLE_OAUTH_REDIRECT_ORIGIN (production)", () => {
     expect(load(f).api?.googleOAuthRedirectOrigin.origin).toBe("https://a.ts.net");
   });
 
-  it("TP-2.29x: a capture worker's origin is in capture.oauth.redirectOrigin", () => {
+  it("TP-2.33x: a capture worker's origin is in capture.oauth.redirectOrigin", () => {
     expect(load(prodWorkerCapture()).capture?.oauth?.redirectOrigin.origin).toBe(
       "http://localhost:8080",
     );
@@ -357,7 +371,7 @@ describe("TP-2.22: SMTP_URL, SMTP_PASSWORD_FILE, EMAIL_FROM and the worker's PUB
       "smtps://smtp.example.com:2465",
       { security: "implicit_tls", host: "smtp.example.com", port: 2465 },
     ],
-  ])("TP-2.29x: SMTP_URL %s gives smtpTransport %o", (url, transport) => {
+  ])("TP-2.33x: SMTP_URL %s gives smtpTransport %o", (url, transport) => {
     const f = prodWorkerGeneral();
     f.env["SMTP_URL"] = url;
 
@@ -399,7 +413,7 @@ describe("TP-2.22: SMTP_URL, SMTP_PASSWORD_FILE, EMAIL_FROM and the worker's PUB
     expect(problemsOf(f)).toEqual([{ variable, rule: "required" }]);
   });
 
-  it("TP-2.29x: plain SMTP to localhost is accepted in development, without TLS", () => {
+  it("TP-2.33x: plain SMTP to localhost is accepted in development, without TLS", () => {
     const f = devWorker();
     f.env["SMTP_URL"] = "smtp://localhost:1025";
 

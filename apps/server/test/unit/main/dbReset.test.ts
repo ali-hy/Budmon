@@ -2,7 +2,9 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
-import { runDbResetCli } from "../../../src/main/dbReset.js";
+import { runDbResetCli, seedAll } from "../../../src/main/dbReset.js";
+import { createWorkerContainer } from "../../../src/platform/container.js";
+import { seeders } from "../../../src/platform/db/seed.js";
 import { ResetRefusedError, seedDevelopmentDatabase } from "../../../src/platform/db/reset.js";
 
 const SERVER_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -14,6 +16,12 @@ const ROLES_JSON = JSON.stringify({
   budmon_queue: { password: "q" },
   budmon_monitor: { password: "mo" },
   budmon_migrator: { password: "m" },
+});
+
+// TP-2.29 (g): a spy in place of the composition root's createWorkerContainer.
+vi.mock("../../../src/platform/container.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../src/platform/container.js")>();
+  return { ...actual, createWorkerContainer: vi.fn(actual.createWorkerContainer) };
 });
 
 type Deps = Parameters<typeof runDbResetCli>[1];
@@ -162,11 +170,19 @@ describe("TP-2.29: runDbResetCli arguments and environment", () => {
     expect(await runDbResetCli([], h.deps)).toBe(1);
   });
 
-  it("TP-2.45x: ROLE_SECRETS_FILE, when set, is the file read", async () => {
+  it("TP-2.49x: ROLE_SECRETS_FILE, when set, is the file read", async () => {
     const h = harness({ DEV_SUPERUSER_URL: SUPERUSER_URL, ROLE_SECRETS_FILE: "/tmp/roles.json" });
 
     await runDbResetCli([], h.deps);
 
     expect(h.readFile).toHaveBeenCalledWith("/tmp/roles.json");
+  });
+
+  it("TP-2.29 (g): the real seedAll with an empty seeder list resolves without building a worker container (A-72)", async () => {
+    expect(seeders).toEqual([]);
+
+    await expect(seedAll({})).resolves.toBeUndefined();
+
+    expect(vi.mocked(createWorkerContainer)).not.toHaveBeenCalled();
   });
 });

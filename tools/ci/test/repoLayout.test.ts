@@ -204,11 +204,11 @@ describe("TP-0.16x: CI runs steps 1 to 3 on pull requests (S-0 AC-2, HLD D-27)",
   });
 });
 
-// TP-2.44x (test-architect addition, not an LLD ID): S-2 acceptance criterion 2. Development and
+// TP-2.48x (test-architect addition, not an LLD ID): S-2 acceptance criterion 2. Development and
 // test databases are pushed from the schema (D-12); apps/server/drizzle stays empty until the
 // first release migration (F-180).
-describe("TP-2.44x: no migration files before the first release", () => {
-  it("TP-2.44x: nothing under apps/server/drizzle/ is in the repository except a placeholder", () => {
+describe("TP-2.48x: no migration files before the first release", () => {
+  it("TP-2.48x: nothing under apps/server/drizzle/ is in the repository except a placeholder", () => {
     const files = repositoryFiles().filter((file) => file.startsWith("apps/server/drizzle/"));
 
     expect(files.filter((file) => !/\/\.gitkeep$/.test(file))).toEqual([]);

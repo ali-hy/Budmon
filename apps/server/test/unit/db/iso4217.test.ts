@@ -1,5 +1,5 @@
 // TP-2.14 (U): invariants of apps/server/src/platform/fx/iso4217.json (§3.3), plus extra cases
-// TP-2.32x for the rest of §3.3's rules.
+// TP-2.36x for the rest of §3.3's rules.
 import { describe, expect, it } from "vitest";
 import iso4217 from "../../../src/platform/fx/iso4217.json" with { type: "json" };
 
@@ -16,6 +16,19 @@ const byCode = new Map(entries.map((e) => [e.code, e]));
 describe("TP-2.14 (U): iso4217.json", () => {
   it("TP-2.14: codes are unique", () => {
     expect(new Set(entries.map((e) => e.code)).size).toBe(entries.length);
+  });
+
+  it("TP-2.14 (A-69): every entry has a non-empty name and minor units in 0..4", () => {
+    const bad = entries.filter(
+      (e) =>
+        typeof e.name !== "string" ||
+        e.name.trim() === "" ||
+        !Number.isInteger(e.minorUnits) ||
+        e.minorUnits < 0 ||
+        e.minorUnits > 4,
+    );
+
+    expect(bad).toEqual([]);
   });
 
   it.each([
@@ -49,11 +62,11 @@ describe("TP-2.14 (U): iso4217.json", () => {
     ["USN"],
     ["UYI"],
     ["UYW"],
-  ])("TP-2.32x: the excluded code %s isn't in the file (§3.3)", (code) => {
+  ])("TP-2.36x: the excluded code %s isn't in the file (§3.3)", (code) => {
     expect(byCode.has(code)).toBe(false);
   });
 
-  it("TP-2.32x: every entry fits the currencies table (code ^[A-Z]{3}$, minor units 0 to 4, a name, a boolean)", () => {
+  it("TP-2.36x: every entry fits the currencies table (code ^[A-Z]{3}$, minor units 0 to 4, a name, a boolean)", () => {
     const bad = entries.filter(
       (e) =>
         !/^[A-Z]{3}$/.test(e.code) ||
@@ -69,13 +82,15 @@ describe("TP-2.14 (U): iso4217.json", () => {
   });
 
   it.each([["EGP"], ["USD"], ["EUR"], ["GBP"], ["JPY"], ["KWD"], ["SAR"]])(
-    "TP-2.32x: the seeded currency %s is active",
+    "TP-2.36x: the seeded currency %s is active",
     (code) => {
       expect(byCode.get(code)?.active).toBe(true);
     },
   );
 
-  it("TP-2.32x: English ISO names, e.g. EGP is Egyptian Pound", () => {
-    expect(byCode.get("EGP")?.name).toBe("Egyptian Pound");
+  it("TP-2.36x: names are CLDR English display names (A-69), e.g. EGP", () => {
+    expect(byCode.get("EGP")?.name).toBe(
+      new Intl.DisplayNames("en", { type: "currency" }).of("EGP"),
+    );
   });
 });

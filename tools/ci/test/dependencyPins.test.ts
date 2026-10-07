@@ -64,14 +64,25 @@ describe("TP-0.20: ESLint 10 dependency pins (A-13)", () => {
     });
   });
 
-  it("TP-0.20 (a): ignoredBuiltDependencies is exactly [esbuild] and there's no onlyBuiltDependencies (A-32)", () => {
+  it("TP-0.20 (a): ignoredBuiltDependencies is exactly [cpu-features, esbuild, protobufjs, ssh2] and there's no onlyBuiltDependencies (A-32, A-65)", () => {
     const workspace = parse(readFileSync(path.join(ROOT, "pnpm-workspace.yaml"), "utf8")) as {
       ignoredBuiltDependencies?: unknown;
       onlyBuiltDependencies?: unknown;
     };
 
-    expect(workspace.ignoredBuiltDependencies).toEqual(["esbuild"]);
+    expect(workspace.ignoredBuiltDependencies).toEqual([
+      "cpu-features",
+      "esbuild",
+      "protobufjs",
+      "ssh2",
+    ]);
     expect(workspace).not.toHaveProperty("onlyBuiltDependencies");
+  });
+
+  it("TP-0.20 (a): the root package.json has no pnpm field (A-65)", () => {
+    const pkg = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8")) as object;
+
+    expect(pkg).not.toHaveProperty("pnpm");
   });
 
   it.each([
