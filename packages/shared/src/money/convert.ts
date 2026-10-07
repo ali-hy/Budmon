@@ -11,14 +11,17 @@ export function convertWithRates(
   if (m.currency === to.currency) {
     return m;
   }
-  if (from.unitsPerUsd.num <= 0n || to.unitsPerUsd.num <= 0n) {
+  // Normalise hand-built rationals (negative or zero denominators) before using them as rates.
+  const fromRate = rational(from.unitsPerUsd.num, from.unitsPerUsd.den);
+  const toRate = rational(to.unitsPerUsd.num, to.unitsPerUsd.den);
+  if (fromRate.num <= 0n || toRate.num <= 0n) {
     throw new RangeError("Rates must be positive");
   }
   const fromScale = 10n ** BigInt(from.minorUnits);
   const toScale = 10n ** BigInt(to.minorUnits);
   const converted = rational(
-    m.minor * to.unitsPerUsd.num * from.unitsPerUsd.den * toScale,
-    to.unitsPerUsd.den * from.unitsPerUsd.num * fromScale,
+    m.minor * toRate.num * fromRate.den * toScale,
+    toRate.den * fromRate.num * fromScale,
   );
   return Money.of(roundHalfEven(converted), to.currency);
 }

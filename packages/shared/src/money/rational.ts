@@ -36,11 +36,12 @@ export function parseDecimal(text: string): Rational {
 }
 
 export function roundHalfEven(value: Rational): bigint {
-  const negative = value.num < 0n;
-  const abs = negative ? -value.num : value.num;
-  let quotient = abs / value.den;
-  const twiceRemainder = (abs % value.den) * 2n;
-  if (twiceRemainder > value.den || (twiceRemainder === value.den && quotient % 2n === 1n)) {
+  const { num, den } = rational(value.num, value.den);
+  const negative = num < 0n;
+  const abs = negative ? -num : num;
+  let quotient = abs / den;
+  const twiceRemainder = (abs % den) * 2n;
+  if (twiceRemainder > den || (twiceRemainder === den && quotient % 2n === 1n)) {
     quotient += 1n;
   }
   return negative ? -quotient : quotient;

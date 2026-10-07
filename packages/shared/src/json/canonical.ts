@@ -17,7 +17,7 @@ export function canonicalJson(value: unknown): string {
 
 function canonicalObject(value: object): string {
   if (Array.isArray(value)) {
-    return `[${(value as unknown[]).map((item) => canonicalJson(item)).join(",")}]`;
+    return `[${Array.from(value as unknown[], (item) => canonicalJson(item)).join(",")}]`;
   }
   const prototype: unknown = Object.getPrototypeOf(value);
   if (prototype !== Object.prototype && prototype !== null) {
