@@ -20,15 +20,19 @@ export class ResetRefusedError extends Error {
 
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]", "host.docker.internal"]);
 
-/** Whether pg would connect to a local server with this URL. `pg` lets `?host=` and
- * `?hostaddr=` override the URL's host, so those parameters are refused outright, and the host
- * is the one pg-connection-string reports. */
-function isLocalUrl(superuserUrl: string): boolean {
+/** Whether pg would connect to an acceptable server with this URL. `pg` lets `?host=` and
+ * `?hostaddr=` override the URL's host, so those parameters, host lists and socket paths are
+ * always refused; the host is the one pg-connection-string reports. `allowNonLocalHost` skips
+ * only the allowlist of local hosts. */
+function isAcceptableUrl(superuserUrl: string, allowNonLocalHost: boolean): boolean {
   try {
     const query = new URL(superuserUrl).searchParams;
     if (query.has("host") || query.has("hostaddr")) return false;
     const { host } = parseConnectionString(superuserUrl);
-    return typeof host === "string" && LOCAL_HOSTS.has(host);
+    if (typeof host !== "string" || host === "" || host.includes(",") || host.startsWith("/")) {
+      return false;
+    }
+    return allowNonLocalHost || LOCAL_HOSTS.has(host);
   } catch {
     return false;
   }
@@ -38,10 +42,12 @@ function assertLocalDevelopment(
   command: "db:reset" | "db:seed",
   appEnv: AppEnv,
   superuserUrl: string,
+  allowNonLocalHost: boolean,
 ): void {
   const allowedEnv = appEnv === "development" || appEnv === "test";
-  const allowedHost = isLocalUrl(superuserUrl) || process.env["TESTCONTAINERS"] === "1";
-  if (!allowedEnv || !allowedHost) throw new ResetRefusedError(command);
+  if (!allowedEnv || !isAcceptableUrl(superuserUrl, allowNonLocalHost)) {
+    throw new ResetRefusedError(command);
+  }
 }
 
 export async function resetDevelopmentDatabase(
@@ -52,10 +58,17 @@ export async function resetDevelopmentDatabase(
     migratorPassword: string;
     roleSecrets: Record<DbLoginRole, { verifier: string } | { password: string }>;
     seed: boolean;
+    /** Skips only the allowlist of local hosts (for test containers). Default false. */
+    allowNonLocalHost?: boolean;
   },
   deps: { runSchemaStep: typeof runSchemaStep; seed: () => Promise<void> },
 ): Promise<void> {
-  assertLocalDevelopment("db:reset", input.appEnv, input.superuserUrl);
+  assertLocalDevelopment(
+    "db:reset",
+    input.appEnv,
+    input.superuserUrl,
+    input.allowNonLocalHost === true,
+  );
 
   const superuser = new pg.Client({ connectionString: input.superuserUrl });
   await superuser.connect();
@@ -107,9 +120,14 @@ export async function resetDevelopmentDatabase(
 }
 
 export async function seedDevelopmentDatabase(
-  input: { appEnv: AppEnv; superuserUrl: string },
+  input: { appEnv: AppEnv; superuserUrl: string; allowNonLocalHost?: boolean },
   deps: { seed: () => Promise<void> },
 ): Promise<void> {
-  assertLocalDevelopment("db:seed", input.appEnv, input.superuserUrl);
+  assertLocalDevelopment(
+    "db:seed",
+    input.appEnv,
+    input.superuserUrl,
+    input.allowNonLocalHost === true,
+  );
   await deps.seed();
 }
