@@ -2,6 +2,7 @@
 import { readFileSync, realpathSync, existsSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { parseEnv } from "node:util";
 import { loadConfig } from "../platform/config/loadConfig.js";
 import { serverRoot } from "../platform/config/serverRoot.js";
 import type { AppEnv, DbLoginRole } from "../platform/config/schema.js";
@@ -120,13 +121,18 @@ if (
   // Relative paths in .env are relative to the repository root (A-73).
   process.chdir(repoRoot());
   const dotenv = path.join(repoRoot(), ".env");
-  if (existsSync(dotenv)) process.loadEnvFile(dotenv);
+  // The shell wins over .env, and process.env is never changed: a .env line must not be able to
+  // switch off a guard that reads process.env (A-64).
+  const env: Record<string, string | undefined> = {
+    ...(existsSync(dotenv) ? parseEnv(readFileSync(dotenv, "utf8")) : {}),
+    ...process.env,
+  };
   process.exitCode = await runDbResetCli(process.argv.slice(2), {
-    env: process.env,
+    env,
     readFile: (file) => readFileSync(file, "utf8"),
     resetDevelopmentDatabase,
     seedDevelopmentDatabase,
-    seedAll: () => seedAll(process.env),
+    seedAll: () => seedAll(env),
     stderr: (line) => process.stderr.write(`${line}\n`),
   });
 }
