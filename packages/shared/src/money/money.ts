@@ -1,16 +1,19 @@
 // F-301: Money and arithmetic. Amounts never appear in strings, logs or JSON.
-import type { CurrencyCode } from "./currency.js";
+import { asCurrencyCode, type CurrencyCode } from "./currency.js";
 import { rational, roundHalfEven, type Rational } from "./rational.js";
 
 const REDACTED = "[redacted]";
 
 export class Money {
-  readonly minor: bigint;
-  readonly currency: CurrencyCode;
+  declare readonly minor: bigint;
+  declare readonly currency: CurrencyCode;
 
   private constructor(minor: bigint, currency: CurrencyCode) {
-    this.minor = minor;
-    this.currency = currency;
+    // Non-enumerable, so Object.keys, spread and JSON.stringify of a spread copy show nothing (A-47).
+    Object.defineProperties(this, {
+      minor: { value: minor, enumerable: false, writable: false },
+      currency: { value: currency, enumerable: false, writable: false },
+    });
     Object.freeze(this);
   }
 
@@ -18,7 +21,7 @@ export class Money {
     if (typeof minor !== "bigint") {
       throw new TypeError("Money amounts are bigint minor units");
     }
-    return new Money(minor, currency);
+    return new Money(minor, asCurrencyCode(currency));
   }
 
   toString(): string {

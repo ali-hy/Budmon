@@ -11,6 +11,13 @@ export function convertWithRates(
   if (m.currency === to.currency) {
     return m;
   }
+  if (
+    [from.minorUnits, to.minorUnits].some(
+      (units) => !Number.isInteger(units) || units < 0 || units > 4,
+    )
+  ) {
+    throw new RangeError("Invalid minor units");
+  }
   // Normalise hand-built rationals (negative or zero denominators) before using them as rates.
   const fromRate = rational(from.unitsPerUsd.num, from.unitsPerUsd.den);
   const toRate = rational(to.unitsPerUsd.num, to.unitsPerUsd.den);

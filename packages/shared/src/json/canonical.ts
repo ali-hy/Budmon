@@ -3,6 +3,8 @@ export function canonicalJson(value: unknown): string {
   return write(value, new Set());
 }
 
+const MAX_DEPTH = 100;
+
 function write(value: unknown, ancestors: Set<object>): string {
   if (value === null) return "null";
   switch (typeof value) {
@@ -22,6 +24,9 @@ function write(value: unknown, ancestors: Set<object>): string {
 function canonicalObject(value: object, ancestors: Set<object>): string {
   if (ancestors.has(value)) {
     throw new TypeError("Circular structure");
+  }
+  if (ancestors.size >= MAX_DEPTH) {
+    throw new TypeError("Structure too deep");
   }
   ancestors.add(value);
   try {

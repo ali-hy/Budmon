@@ -2,6 +2,9 @@
 import { Money } from "./money.js";
 
 export function allocate(m: Money, weights: readonly bigint[]): Money[] {
+  if (weights.some((w) => typeof w !== "bigint")) {
+    throw new TypeError("Weights must be bigints");
+  }
   if (weights.length === 0 || weights.some((w) => w < 0n)) {
     throw new RangeError("Invalid allocation weights");
   }
