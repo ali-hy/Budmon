@@ -8,4 +8,7 @@ peerDependencyRules:
   allowedVersions:
     "eslint-plugin-jsx-a11y>eslint": "10"
 ignoredBuiltDependencies:
+  - cpu-features
   - esbuild
+  - protobufjs
+  - ssh2
