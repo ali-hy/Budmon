@@ -112,6 +112,17 @@ describe("TP-2.10: roles and passwords", () => {
   });
 
   it("TP-2.10 (a): the canary password is in no pg_stat_statements query", async () => {
+    // Positive control (code review N-2): an ordinary query is recorded, so an empty view can't
+    // make the check below pass.
+    await query(
+      connectionString(pg, "budmon_migrator", MIGRATOR_PASSWORD, DATABASE),
+      "SELECT count(*) FROM pg_class AS pgss_control_7f3a",
+    );
+    const control = await superuserQuery(
+      "SELECT count(*)::int AS n FROM pg_stat_statements WHERE query LIKE '%pgss_control_7f3a%'",
+    );
+    expect(control).toEqual([{ n: 1 }]);
+
     const rows = await superuserQuery(
       "SELECT count(*)::int AS n FROM pg_stat_statements WHERE query LIKE '%' || $1 || '%'",
       [CANARY_TOKEN],

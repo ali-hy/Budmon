@@ -399,6 +399,18 @@ describe("TP-2.22: SMTP_URL, SMTP_PASSWORD_FILE, EMAIL_FROM and the worker's PUB
     expect(JSON.stringify(error.problems)).not.toContain("Pw7f3aSECRET");
   });
 
+  // TP-2.54x (code review B-5): decoding the user name must not escape as a URIError.
+  it("TP-2.54x: a malformed percent-escape in SMTP_URL's user is a ConfigError naming SMTP_URL, without the value", () => {
+    const f = prodWorkerGeneral();
+    f.env["SMTP_URL"] = "smtp://%E0%A4%A@smtp.example.com";
+
+    const error = caughtConfigError(f);
+
+    expect(error.problems.map((p) => p.variable)).toEqual(["SMTP_URL"]);
+    expect(error.message).not.toContain("%E0%A4%A");
+    expect(JSON.stringify(error.problems)).not.toContain("%E0%A4%A");
+  });
+
   it("TP-2.22: an empty SMTP_PASSWORD_FILE means no authentication", () => {
     const f = prodWorkerGeneral();
     withFile(f, "SMTP_PASSWORD_FILE", "");
