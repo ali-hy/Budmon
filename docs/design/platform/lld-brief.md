@@ -1,7 +1,7 @@
 ---
 module: platform
 doc: lld-brief
-summarises: lld.md v0.22
+summarises: lld.md v0.23
 ---
 
 # Platform: LLD brief
@@ -57,6 +57,7 @@ The code stage 1 needs is built now (the HLD's rule: moving off the laptop must 
 | 3i | **Answers to the S-2 test questions (planner decisions A-49 to A-63).** Mostly sequencing and precision: what the database set-up step does in S-2 and what S-6 adds (A-49); the "push" set-up only works on an empty database, as designed (A-50); logging and trace checks land in the slices that build them (A-51, A-55: the "server answers healthy" check moves to S-4); exact error fields (A-52); the test rule on administrator database access reworded to match reality (A-53); the reset tool's inputs and test entry point defined (A-54, A-58, A-59); the server bundle builds whichever entry points exist yet (A-56, A-62); configuration gains explicit fields for Gmail's return address and the e-mail encryption mode (A-57); the test database image and the production database image are pinned to the same exact version, with a check (A-61). On a fresh clone, `pnpm dev` creates your `.env` from the example file the first time, so it works with no manual setup (A-63). | No product change. | §Amendments A-49 to A-63 |
 | 3j | **The engineer's S-2 choices, confirmed or settled (planner decisions A-64 to A-72).** The database reset tool reads your `.env` itself (A-64). Build-script exceptions for test tools sit in one settings file (A-65). Two small configuration-file fixes are confirmed (A-66, A-67). The server bundle never includes the development-only schema tool (A-68). The currency list's sources are named: ISO 4217 for codes and decimals, Unicode's English names for display (A-69). The mail catcher's image is pinned to the same exact version in development and on the laptop, and a test checks it (A-70). Smaller confirmations: the previous-password setting (A-71); seeding skips work while there's nothing to seed (A-72). | No product change. | §Amendments A-64 to A-72 |
 | 3k | **Code-review fixes for S-2 (planner decisions A-73 to A-79).** `pnpm dev` and the reset tool always run from the repository root, so the settings file's paths work; in production every secret-file path must be absolute (A-73). The reset tool's "only a local database" check can no longer be fooled by extra parameters in the database address (A-74). No environment setting can switch that check off any more; only one test can relax it, explicitly (A-79). The database set-up script keeps the password out of the process list and lets the database tool quote it (A-75). Test runs accept the same local addresses as development (A-76). The set-up step refuses database accounts that have more powers than designed, instead of silently keeping them (A-77). Currency names stay exactly as Unicode publishes them (A-78). | A-74 and A-77 protect real data. | §Amendments A-73 to A-79 |
+| 3l | **S-2 QA fixes (planner decisions A-80 to A-88).** `pnpm db:migrate` works before the first release, when there are no migrations yet (A-80). Failures print a short, safe reason (an error type and code, never passwords or addresses) instead of a bare "failed" (A-81). The mail-server setting is checked more strictly (A-82). `pnpm db:migrate` has a development recipe that needs no manual setup (A-83). "Refused to reset" messages say why (A-84). The README gets real first-run, configuration, database and test instructions (A-85). `pnpm dev` waits for the database properly instead of sometimes crashing on first start (A-86). CI runs on Node 24 (A-87). One development stack per machine stays the rule (A-88). | A-86 fixes a crash on fresh starts. | §Amendments A-80 to A-88 |
 | 4 | **Q-1, decided: exchange rates before 2 March 2024 show "no rate".** The free backup rate source has no data before that date, so conversions dated earlier say "no rate" instead of guessing. This was the recommended default and went ahead with your go-ahead. | Matters only if you import old history. It can be extended later by an amendment, for example fetching older rates from Open Exchange Rates if its free plan includes them (not confirmed). | §11, F-132 |
 | 5 | **Q-2, deferred: an approval click on every release.** It belonged to the release-signing chain, which now starts at stage 1. In stage 0 nothing deploys from CI: a merged release PR only gets a tag, and you run `budmon-local upgrade` yourself, which is the approval. | Nothing to decide now; it comes back with the stage-1 design. | §11 Q-2 |
 | 6 | **One-time laptop setup by hand**, following `infra/runbooks/stage0-laptop.md`: WSL2 with Ubuntu (your user needs `sudo`), Docker Desktop (WSL2 backend, start at login), Tailscale on the laptop and phone (MagicDNS and HTTPS certificates switched on), two Backblaze B2 buckets for exports and the erasure log (free tier), a Sentry project and a Google OAuth client. Then `budmon-local install <tag>`: it creates the secret files, asks for a few settings (Tailscale name, bucket names, Sentry address, OAuth client id) and stops with a list of what's still missing. You run the Google Cloud script, paste each missing secret with `budmon-local secret set …`, and run `install` again; it finishes and prints the `tailscale serve` command. | No agent can or should do these. The install is resumable, and it refuses to start Budmon while anything is missing, so a skipped step shows up at once. `secret set` gives each file to the one container that reads it. | §2.2 runbook, F-175, F-178, F-179, F-191 |
@@ -133,7 +134,7 @@ The LLD's catalog has about 180 functions. They're grouped by area here; the rig
 | ---- | --------- | -------------- | ------------ |
 | Repository tooling | 11 (F-1 to F-9, with F-3b) | Lint rules, CI checks, root commands (§2.2.2). | F-1: lint bans on float money maths (including `parseFloat` in any form and `+value`), bypassing the layers, raw logging. F-6/F-6b: migrations only on release branches. |
 | Shared money, time, IDs | 11 (F-300 to F-313) | Exact money in code shared by server and web; Android mirrors it. | F-302 `allocate` (splits always add up exactly); F-303 conversion (rounds once, half-to-even); test vectors shared with Android. |
-| Configuration and database | 16 (F-10 to F-25) | Settings checked at start-up, database roles and grants, building dev databases, `db:reset`. | F-11: a wrong setting stops the process and never prints secret values. F-15/F-16: roles, passwords and grants. F-20: `db:reset` refuses anything but a local database. |
+| Configuration and database | 17 (F-10 to F-26) | Settings checked at start-up, database roles and grants, building dev databases, `db:reset`. | F-11: a wrong setting stops the process and never prints secret values. F-15/F-16: roles, passwords and grants. F-20: `db:reset` refuses anything but a local database. |
 | Observability and privacy | 12 (F-30 to F-42) | Logging, error reports, traces, metrics. | F-30/F-31: logs accept only a fixed list of safe fields. F-33: errors reported without their message. F-35/F-40: Sentry and trace scrubbing. |
 | API server and errors | 10 (F-50 to F-59) | The HTTP server, error mapping, login hooks, health checks, the list of API routes (F-59). | F-52: maps every failure to the error format, never leaking internals. F-53: every call needs login unless explicitly public. |
 | Security baseline | 6 (F-61 to F-66) | Headers, size limits, rate limits, password hashing. | F-63: rate limits shared by all servers. F-66: Argon2id password hashing. |
@@ -176,14 +177,14 @@ The LLD's catalog has about 180 functions. They're grouped by area here; the rig
 
 ## 7. Testing
 
-About 271 test cases:
+About 277 test cases:
 
 | Type | Count | Notes |
 | ---- | ----- | ----- |
-| Unit | ~142 | Including 5 for the `budmon-local` and Google Cloud scripts. |
-| Integration | ~95 | Against a real Postgres database. |
+| Unit | ~145 | Including 5 for the `budmon-local` and Google Cloud scripts. |
+| Integration | ~96 | Against a real Postgres database. |
 | End-to-end | 17 | Browser, Android emulator, and the rehearsal. |
-| Static checks | 24 | Configuration, workflow (including action pinning), dependency pins, root commands, line-ending and Android build checks. |
+| Static checks | 26 | Configuration, workflow (including action pinning), dependency pins, root commands, line-ending and Android build checks. |
 | Manual | 2 | First install and phone access; the Sentry test e-mail. |
 
 **What's covered:**
