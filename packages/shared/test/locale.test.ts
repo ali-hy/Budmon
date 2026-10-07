@@ -19,6 +19,7 @@ describe("F-312 resolveLocale", () => {
     ["pt", ["pt-BR", "pt-PT"], undefined, "pt-BR"],
     ["EN-us", ["en-US"], undefined, "en-US"],
     [null, ["en"], "ar", "ar"],
+    ["", ["en-US"], "ar", "ar"],
   ])(
     "TP-1.13 (A-39): resolveLocale(%j, %j, %j) is %j",
     (requested, supported, fallback, expected) => {

@@ -63,19 +63,13 @@ describe("F-300 roundHalfEven", () => {
   });
 });
 
-describe("F-300 roundHalfEven with a hand-built Rational", () => {
-  // The LLD doesn't say whether a hand-built Rational with a negative denominator is rejected or
-  // normalised; either is accepted, but a result must be the normalised value's (-5/2 -> -2).
-  it("TP-1.16x: roundHalfEven({ num: 5n, den: -2n }) throws or returns -2n", () => {
-    let result: bigint | undefined;
-    let threw = false;
-    try {
-      result = roundHalfEven({ num: 5n, den: -2n });
-    } catch {
-      threw = true;
-    }
+describe("F-300 roundHalfEven with a hand-built Rational (A-44)", () => {
+  it("TP-1.2 (A-44): roundHalfEven({ num: 5n, den: -2n }) is -2n, the value of -5/2", () => {
+    expect(roundHalfEven({ num: 5n, den: -2n })).toBe(-2n);
+  });
 
-    expect(threw || result === -2n).toBe(true);
+  it('TP-1.2 (A-44): roundHalfEven({ num: 1n, den: 0n }) throws RangeError("Zero denominator")', () => {
+    expect(() => roundHalfEven({ num: 1n, den: 0n })).toThrow(new RangeError("Zero denominator"));
   });
 });
 
@@ -89,8 +83,8 @@ describe("F-300 rational", () => {
     expect(rational(num, den)).toEqual({ num: n, den: d });
   });
 
-  it("TP-1.16x: rational with a zero denominator throws RangeError", () => {
-    expect(() => rational(1n, 0n)).toThrow(RangeError);
+  it('TP-1.16x: rational with a zero denominator throws RangeError("Zero denominator")', () => {
+    expect(() => rational(1n, 0n)).toThrow(new RangeError("Zero denominator"));
   });
 });
 

@@ -47,6 +47,26 @@ describe("F-306 canonicalJson", () => {
     expect(canonicalJson({ a: undefined })).toBe("{}");
   });
 
+  it('TP-1.9 (A-45): an object containing itself throws TypeError("Circular structure")', () => {
+    const a: Record<string, unknown> = {};
+    a["self"] = a;
+
+    expect(() => canonicalJson(a)).toThrow(new TypeError("Circular structure"));
+  });
+
+  it('TP-1.9 (A-45): an array containing itself throws TypeError("Circular structure")', () => {
+    const arr: unknown[] = [];
+    arr.push(arr);
+
+    expect(() => canonicalJson(arr)).toThrow(new TypeError("Circular structure"));
+  });
+
+  it("TP-1.9 (A-45): the same object reached by two non-cyclic paths is written twice", () => {
+    const x = { v: 1 };
+
+    expect(canonicalJson({ p: x, q: x })).toBe('{"p":{"v":1},"q":{"v":1}}');
+  });
+
   it.each([
     ["Infinity", Number.POSITIVE_INFINITY],
     ["-Infinity", Number.NEGATIVE_INFINITY],
