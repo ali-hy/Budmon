@@ -1,7 +1,7 @@
 // F-1 rule 3, money (A-15). TP-0.4, plus the extra cases TP-0.10x.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { describe, expect, it } from "vitest";
-import { errorRuleIds, lintFixture } from "./support/lintFixture.js";
+import { errorRuleIds, errorsIn, lintFixture } from "./support/lintFixture.js";
 
 const SERVER_FILE = "apps/server/src/x/money.ts";
 const REQUIRE_DESCRIPTION = /(^|\/)eslint-comments\/require-description$/;
@@ -39,6 +39,17 @@ describe("F-1 money", () => {
       const messages = await lintFixture({ [SERVER_FILE]: source });
 
       expect(errorRuleIds(messages, SERVER_FILE)).toContain(ruleId);
+    });
+
+    it("TP-0.4: parseFloat(a)'s message says to use the money helpers (A-27)", async () => {
+      const messages = await lintFixture({ [SERVER_FILE]: PARSE_FLOAT });
+
+      const texts = errorsIn(messages, SERVER_FILE)
+        .filter((m) => m.ruleId === "no-restricted-globals")
+        .map((m) => m.message);
+      expect(texts.some((m) => m.includes("parseFloat is forbidden; use the money helpers"))).toBe(
+        true,
+      );
     });
 
     it.each([

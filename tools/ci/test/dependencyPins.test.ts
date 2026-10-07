@@ -1,4 +1,5 @@
-// TP-0.20: ESLint 10 dependency pins and the single declared peer exception (A-13, A-19).
+// TP-0.20: ESLint 10 dependency pins, the single declared peer exception and the ignored build
+// script (A-13, A-19, A-32).
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -63,6 +64,16 @@ describe("TP-0.20: ESLint 10 dependency pins (A-13)", () => {
     });
   });
 
+  it("TP-0.20 (a): ignoredBuiltDependencies is exactly [esbuild] and there's no onlyBuiltDependencies (A-32)", () => {
+    const workspace = parse(readFileSync(path.join(ROOT, "pnpm-workspace.yaml"), "utf8")) as {
+      ignoredBuiltDependencies?: unknown;
+      onlyBuiltDependencies?: unknown;
+    };
+
+    expect(workspace.ignoredBuiltDependencies).toEqual(["esbuild"]);
+    expect(workspace).not.toHaveProperty("onlyBuiltDependencies");
+  });
+
   it.each([
     ["eslint-plugin-formatjs", "8.1.1"],
     ["eslint-plugin-jsx-a11y", "6.10.2"],
@@ -82,9 +93,10 @@ describe("TP-0.20: ESLint 10 dependency pins (A-13)", () => {
     expect(output).not.toContain("unmet peer");
   }, 300_000);
 
-  it("TP-0.20 (c): pnpm install --frozen-lockfile in a fresh clone exits 0", () => {
+  it("TP-0.20 (c): pnpm install --frozen-lockfile in a fresh clone exits 0 without an ignored-build-scripts notice", () => {
     const { status, output } = installInCleanClone(["--frozen-lockfile"]);
 
     expect(status, output).toBe(0);
+    expect(output).not.toContain("Ignored build scripts");
   }, 300_000);
 });

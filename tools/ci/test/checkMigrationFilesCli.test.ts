@@ -1,8 +1,7 @@
-// F-6's CLI (A-7): `parseCheckMigrationFilesArgs`, `parseChangedFiles`,
-// `runCheckMigrationFilesCli` and the entry guard. TP-0.17, plus the extra case TP-0.20x
-// (test-architect addition, not an LLD ID).
+// F-6's CLI (A-7, A-29): `parseCheckMigrationFilesArgs`, `parseChangedFiles`,
+// `runCheckMigrationFilesCli` and the entry guard (TP-0.17), and the direct `tsx` invocation
+// (TP-0.24, A-28).
 import { spawnSync } from "node:child_process";
-import { createRequire } from "node:module";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -17,11 +16,13 @@ import {
 const USAGE =
   "Usage: checkMigrationFiles.ts --branch <head ref> --changed-files <file> [--hotfix-merge-back]";
 const MIGRATION_MESSAGE =
-  "Migration files may only change on release/* and hotfix/* branches (D-12): apps/server/drizzle/0001.sql";
+  "Migration files may only change on release/* and hotfix/* branches (D-12): apps/server/drizzle/0001.sql. " +
+  "Move these changes to a release/* or hotfix/* branch, or remove them from this pull request.";
 
 const FILES: Readonly<Record<string, string>> = {
   "/c.txt": "apps/server/drizzle/0001.sql\nREADME.md\n",
   "/empty.txt": "",
+  "/one.txt": "README.md\n",
 };
 
 interface CliRun {
@@ -83,6 +84,14 @@ describe("TP-0.17: F-6 CLI", () => {
 
     expect(run.code).toBe(0);
     expect(run.stdout).toEqual(["checkMigrationFiles: ok (0 changed files)"]);
+    expect(run.stderr).toEqual([]);
+  });
+
+  it("TP-0.17 (o): exactly one changed file prints the singular form", () => {
+    const run = runCli(["--branch", "feat/x", "--changed-files", "/one.txt"]);
+
+    expect(run.code).toBe(0);
+    expect(run.stdout).toEqual(["checkMigrationFiles: ok (1 changed file)"]);
     expect(run.stderr).toEqual([]);
   });
 
@@ -198,10 +207,9 @@ describe("TP-0.17: F-6 CLI", () => {
   });
 });
 
-// TP-0.20x (test-architect addition, not an LLD ID): the documented invocation,
-// `tsx checkMigrationFiles.ts …` from `tools/ci/`, runs the CLI through the entry guard and
-// reports through the real exit code and streams.
-describe("TP-0.20x: the CLI run as a process", () => {
+// TP-0.24: F-6's exit codes come through the direct `tsx` invocation CI uses (A-28):
+// `./node_modules/.bin/tsx checkMigrationFiles.ts …` with working directory `tools/ci`.
+describe("TP-0.24: F-6 invoked through tools/ci's tsx", () => {
   const TOOLS_CI = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
   let dir = "";
 
@@ -210,48 +218,49 @@ describe("TP-0.20x: the CLI run as a process", () => {
     dir = "";
   });
 
-  function runTsx(args: readonly string[]): {
-    status: number | null;
-    stdout: string;
-    stderr: string;
-  } {
-    const tsxCli = createRequire(path.join(TOOLS_CI, "package.json")).resolve("tsx/cli");
-    const result = spawnSync(process.execPath, [tsxCli, "checkMigrationFiles.ts", ...args], {
+  async function changedFile(): Promise<string> {
+    dir = await mkdtemp(path.join(tmpdir(), "budmon-cmf-"));
+    const file = path.join(dir, "c.txt");
+    await writeFile(file, "apps/server/drizzle/0001.sql\n");
+    return file;
+  }
+
+  function runTsx(args: readonly string[]): { status: number | null; output: string } {
+    const result = spawnSync("./node_modules/.bin/tsx", ["checkMigrationFiles.ts", ...args], {
       cwd: TOOLS_CI,
       encoding: "utf8",
     });
-    return { status: result.status, stdout: result.stdout, stderr: result.stderr };
+    return { status: result.status, output: `${result.stdout}${result.stderr}` };
   }
 
-  it("TP-0.20x: a migration file on a feature branch exits 1 and prints F-6's message", async () => {
-    dir = await mkdtemp(path.join(tmpdir(), "budmon-cmf-"));
-    const changed = path.join(dir, "changed-files.txt");
-    await writeFile(changed, "apps/server/drizzle/0001.sql\nREADME.md\n");
+  it("TP-0.24 (a): no arguments exits 64", () => {
+    const { status, output } = runTsx([]);
 
-    const result = runTsx(["--branch", "feat/x", "--changed-files", changed]);
-
-    expect(result.status).toBe(1);
-    expect(result.stderr).toBe(`${MIGRATION_MESSAGE}\n`);
-    expect(result.stdout).toBe("");
+    expect(status, output).toBe(64);
+    expect(output).not.toContain("ERR_PNPM");
   });
 
-  it("TP-0.20x: a release branch exits 0 and prints the ok line", async () => {
-    dir = await mkdtemp(path.join(tmpdir(), "budmon-cmf-"));
-    const changed = path.join(dir, "changed-files.txt");
-    await writeFile(changed, "apps/server/drizzle/0001.sql\nREADME.md\n");
+  it("TP-0.24 (b): a migration file on a feature branch exits 1", async () => {
+    const { status, output } = runTsx([
+      "--branch",
+      "feat/x",
+      "--changed-files",
+      await changedFile(),
+    ]);
 
-    const result = runTsx(["--branch", "release/v1.0.0", "--changed-files", changed]);
-
-    expect(result.status).toBe(0);
-    expect(result.stdout).toBe("checkMigrationFiles: ok (2 changed files)\n");
+    expect(status, output).toBe(1);
+    expect(output).not.toContain("ERR_PNPM");
   });
 
-  it("TP-0.20x: no arguments exits 64 with the usage line", () => {
-    const result = runTsx([]);
+  it("TP-0.24 (c): a release branch exits 0", async () => {
+    const { status, output } = runTsx([
+      "--branch",
+      "release/v1.0.0",
+      "--changed-files",
+      await changedFile(),
+    ]);
 
-    expect(result.status).toBe(64);
-    expect(result.stderr).toBe(
-      `checkMigrationFiles: Missing required argument: --branch\n${USAGE}\n`,
-    );
+    expect(status, output).toBe(0);
+    expect(output).not.toContain("ERR_PNPM");
   });
 });

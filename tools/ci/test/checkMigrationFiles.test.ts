@@ -5,6 +5,8 @@ import { describe, expect, it } from "vitest";
 import { checkMigrationFiles } from "../checkMigrationFiles.js";
 
 const MIGRATION = "apps/server/drizzle/0001.sql";
+const MESSAGE_SUFFIX =
+  ". Move these changes to a release/* or hotfix/* branch, or remove them from this pull request.";
 const MESSAGE_PREFIX =
   "Migration files may only change on release/* and hotfix/* branches (D-12): ";
 
@@ -17,7 +19,10 @@ describe("F-6 checkMigrationFiles", () => {
         isHotfixMergeBack: false,
       });
 
-      expect(result).toEqual({ ok: false, message: `${MESSAGE_PREFIX}${MIGRATION}` });
+      expect(result).toEqual({
+        ok: false,
+        message: `${MESSAGE_PREFIX}${MIGRATION}${MESSAGE_SUFFIX}`,
+      });
     });
 
     it("TP-0.5: the same change on release/v1.0.0 passes", () => {
@@ -83,7 +88,10 @@ describe("F-6 checkMigrationFiles", () => {
           isHotfixMergeBack: false,
         });
 
-        expect(result).toEqual({ ok: false, message: `${MESSAGE_PREFIX}${MIGRATION}` });
+        expect(result).toEqual({
+          ok: false,
+          message: `${MESSAGE_PREFIX}${MIGRATION}${MESSAGE_SUFFIX}`,
+        });
       },
     );
 
@@ -96,7 +104,10 @@ describe("F-6 checkMigrationFiles", () => {
         isHotfixMergeBack: false,
       });
 
-      expect(result).toEqual({ ok: false, message: `${MESSAGE_PREFIX}${journal}` });
+      expect(result).toEqual({
+        ok: false,
+        message: `${MESSAGE_PREFIX}${journal}${MESSAGE_SUFFIX}`,
+      });
     });
 
     it("TP-0.11x: files that only share the prefix (drizzle.config.ts) pass", () => {
@@ -118,7 +129,10 @@ describe("F-6 checkMigrationFiles", () => {
         isHotfixMergeBack: false,
       });
 
-      expect(result).toEqual({ ok: false, message: `${MESSAGE_PREFIX}${MIGRATION}, ${second}` });
+      expect(result).toEqual({
+        ok: false,
+        message: `${MESSAGE_PREFIX}${MIGRATION}, ${second}${MESSAGE_SUFFIX}`,
+      });
     });
 
     it("TP-0.11x: an empty change list passes", () => {

@@ -1,7 +1,7 @@
 // F-1 rule 1, layering (`no-restricted-imports`, A-11). TP-0.2, plus the extra cases TP-0.8x.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { describe, expect, it } from "vitest";
-import { errorRuleIds, lintFixture } from "./support/lintFixture.js";
+import { errorRuleIds, errorsIn, lintFixture, type LintMessages } from "./support/lintFixture.js";
 
 const REPO = 'export function findX(): string {\n  return "x";\n}\n';
 const DB_CLIENT = "export const client = 1;\n";
@@ -10,6 +10,23 @@ const DRIZZLE_IMPORT =
   'import { sql } from "drizzle-orm";\n\nexport const query = sql`select 1`;\n';
 const PG_IMPORT = 'import { Pool } from "pg";\n\nexport const P = Pool;\n';
 
+// F-1 rule 1's messages (A-27).
+const L1 =
+  "Layering: routers don't use the database. Call the module's service (*Service.ts) instead.";
+const L2 =
+  "Layering: routers don't import repositories. Call the module's service (*Service.ts) instead.";
+const L3 =
+  "Layering: services don't build queries. Call the module's repository (*Repo.ts) with the DbHandle you were given.";
+const L4 =
+  "Layering: services don't open database connections. Take a DbHandle from the caller (withTransaction, F-13) instead.";
+const L5 = "Layering: platform/http doesn't import repositories. Go through a service instead.";
+
+function restrictedImportMessages(messages: LintMessages, file: string): string[] {
+  return errorsIn(messages, file)
+    .filter((m) => m.ruleId === "no-restricted-imports")
+    .map((m) => m.message);
+}
+
 describe("F-1 layering (no-restricted-imports)", () => {
   describe("TP-0.2", () => {
     it.each([
@@ -17,27 +34,42 @@ describe("F-1 layering (no-restricted-imports)", () => {
         "(a) a router importing ./xRepo.js",
         "apps/server/src/x/xRouter.ts",
         'import { findX } from "./xRepo.js";\n\nexport const handler = findX;\n',
+        L2,
       ],
       [
         "(b) a module service importing drizzle-orm",
         "apps/server/src/x/xService.ts",
         DRIZZLE_IMPORT,
+        L3,
       ],
-      ["(c) a module service importing pg", "apps/server/src/x/xService.ts", PG_IMPORT],
+      ["(c) a module service importing pg", "apps/server/src/x/xService.ts", PG_IMPORT, L3],
       [
         "(d) a platform service importing ../db/client.js",
         "apps/server/src/platform/x/xService.ts",
         'import { client } from "../db/client.js";\n\nexport const c = client;\n',
+        L4,
       ],
-    ])("TP-0.2 %s is a no-restricted-imports error", async (_label, file, source) => {
-      const messages = await lintFixture({
-        "apps/server/src/x/xRepo.ts": REPO,
-        "apps/server/src/platform/db/client.ts": DB_CLIENT,
-        [file]: source,
-      });
+      ["(L-1) a router importing drizzle-orm", "apps/server/src/x/xRouter.ts", DRIZZLE_IMPORT, L1],
+      [
+        "(L-5) a file under platform/http importing ./xRepo.js",
+        "apps/server/src/platform/http/x.ts",
+        'import { findX } from "./xRepo.js";\n\nexport const check = findX;\n',
+        L5,
+      ],
+    ])(
+      "TP-0.2 %s is a no-restricted-imports error with F-1's message",
+      async (_label, file, source, text) => {
+        const messages = await lintFixture({
+          "apps/server/src/x/xRepo.ts": REPO,
+          "apps/server/src/platform/http/xRepo.ts": REPO,
+          "apps/server/src/platform/db/client.ts": DB_CLIENT,
+          [file]: source,
+        });
 
-      expect(errorRuleIds(messages, file)).toContain("no-restricted-imports");
-    });
+        expect(errorRuleIds(messages, file)).toContain("no-restricted-imports");
+        expect(restrictedImportMessages(messages, file).some((m) => m.includes(text))).toBe(true);
+      },
+    );
 
     it.each([
       ["(e) a repo importing drizzle-orm", "apps/server/src/x/xRepo.ts", DRIZZLE_IMPORT],

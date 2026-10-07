@@ -1,4 +1,4 @@
-// TP-0.19: `ci.yml`'s `migrations` job feeds F-6 (A-7, A-16).
+// TP-0.19: `ci.yml`'s `migrations` job feeds F-6 (A-7, A-16, A-28).
 import { spawnSync } from "node:child_process";
 import {
   chmodSync,
@@ -22,6 +22,7 @@ interface Step {
   with?: Record<string, unknown>;
   env?: Record<string, unknown>;
   run?: string;
+  "working-directory"?: string;
 }
 
 interface Job {
@@ -102,6 +103,14 @@ describe("TP-0.19: ci.yml migrations job wiring", () => {
     expect(run).toContain("--changed-files");
   });
 
+  it("TP-0.19: the F-6 step runs in tools/ci through ./node_modules/.bin/tsx, without pnpm (A-28)", () => {
+    const step = f6Step();
+
+    expect(step["working-directory"]).toBe("tools/ci");
+    expect(step.run).toContain("./node_modules/.bin/tsx checkMigrationFiles.ts");
+    expect(step.run).not.toContain("pnpm");
+  });
+
   it("TP-0.19: no run in the job interpolates the head ref or pull request fields", () => {
     const runs = steps().map((s) => (s.run ?? "").replace(/\{\{\s+/g, "{{"));
 
@@ -111,8 +120,9 @@ describe("TP-0.19: ci.yml migrations job wiring", () => {
     }
   });
 
-  // The F-6 step's script, run the way GitHub Actions runs `run:` (bash -eo pipefail), with a
-  // stub `pnpm` on PATH that records its arguments one per line.
+  // The F-6 step's script, run the way GitHub Actions runs `run:` (bash -eo pipefail) in the
+  // step's working directory, with a stub `./node_modules/.bin/tsx` there that records its
+  // arguments one per line.
   describe("TP-0.19: the F-6 step's script passes the values through", () => {
     let dir = "";
 
@@ -123,26 +133,22 @@ describe("TP-0.19: ci.yml migrations job wiring", () => {
 
     function runStep(env: { HEAD_REF: string; MERGE_BACK: string }): string[] {
       dir = mkdtempSync(path.join(tmpdir(), "budmon-ci-step-"));
-      const bin = path.join(dir, "bin");
-      const record = path.join(dir, "pnpm-args.txt");
+      const workingDirectory = path.join(dir, f6Step()["working-directory"] ?? ".");
+      const bin = path.join(workingDirectory, "node_modules", ".bin");
+      const record = path.join(dir, "tsx-args.txt");
       const script = path.join(dir, "step.sh");
-      mkdirSync(bin);
+      mkdirSync(bin, { recursive: true });
       writeFileSync(
-        path.join(bin, "pnpm"),
+        path.join(bin, "tsx"),
         `#!/usr/bin/env bash\nprintf '%s\\n' "$@" > ${JSON.stringify(record)}\n`,
       );
-      chmodSync(path.join(bin, "pnpm"), 0o755);
+      chmodSync(path.join(bin, "tsx"), 0o755);
       writeFileSync(script, f6Step().run ?? "");
 
       const result = spawnSync("bash", ["--noprofile", "--norc", "-eo", "pipefail", script], {
-        cwd: dir,
+        cwd: workingDirectory,
         encoding: "utf8",
-        env: {
-          ...process.env,
-          ...env,
-          PATH: `${bin}:${process.env["PATH"] ?? ""}`,
-          RUNNER_TEMP: dir,
-        },
+        env: { ...process.env, ...env, RUNNER_TEMP: dir },
       });
       expect(result.status, result.stderr).toBe(0);
       return readFileSync(record, "utf8").split("\n").slice(0, -1);
@@ -150,10 +156,6 @@ describe("TP-0.19: ci.yml migrations job wiring", () => {
 
     function expectedArgs(branch: string, hotfix: boolean): string[] {
       return [
-        "--filter",
-        "@budmon/tools-ci",
-        "exec",
-        "tsx",
         "checkMigrationFiles.ts",
         "--branch",
         branch,
