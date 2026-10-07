@@ -1,6 +1,7 @@
-// TP-1.10: the shared test vectors (F-313) hold at least the minimum set of cases.
+// TP-1.10: the shared test vectors (F-313) hold at least the minimum set of cases, and the format
+// vectors only CLDR-stable cases (A-37).
 import { describe, expect, it } from "vitest";
-import { loadVectors } from "./support/vectors.js";
+import { loadVectors, type FormatCase } from "./support/vectors.js";
 
 describe("TP-1.10: test vectors", () => {
   it("TP-1.10: rounding has at least 10 cases including ±1/2, ±3/2, ±5/2, 7/2, 1/3 and −1/3", () => {
@@ -62,5 +63,24 @@ describe("TP-1.10: test vectors", () => {
         expect(matching.some((c) => c.minor.startsWith("-"))).toBe(true);
       }
     }
+  });
+
+  it("TP-1.10: every format case is CLDR-stable: en-US or de-DE, currencyDisplay code (or absent), EGP/JPY/KWD, space-normalised (A-37)", () => {
+    const problems: string[] = [];
+    for (const c of loadVectors("format") as (FormatCase & {
+      currencyDisplay?: string;
+      signDisplay?: string;
+    })[]) {
+      const label = `${c.minor} ${c.currency} ${c.locale}`;
+      if (!["en-US", "de-DE"].includes(c.locale)) problems.push(`${label}: locale`);
+      if (c.currencyDisplay !== undefined && c.currencyDisplay !== "code")
+        problems.push(`${label}: currencyDisplay`);
+      if (c.signDisplay !== undefined && c.signDisplay !== "auto")
+        problems.push(`${label}: signDisplay`);
+      if (!["EGP", "JPY", "KWD"].includes(c.currency)) problems.push(`${label}: currency`);
+      if (/[\u00a0\u202f]/.test(c.expected)) problems.push(`${label}: unnormalised space`);
+    }
+
+    expect(problems).toEqual([]);
   });
 });

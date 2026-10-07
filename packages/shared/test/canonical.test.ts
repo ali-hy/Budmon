@@ -1,4 +1,4 @@
-// F-306 canonicalJson. TP-1.9, plus the extra cases TP-1.20x.
+// F-306 canonicalJson. TP-1.9, plus the extra cases TP-1.22x.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { describe, expect, it } from "vitest";
 import { canonicalJson } from "../src/json/canonical.js";
@@ -35,11 +35,11 @@ describe("F-306 canonicalJson", () => {
     ["a class instance", new Point(1, 2)],
     ["a bigint nested in an object", { a: { b: 1n } }],
     ["a Date nested in an array", [new Date(0)]],
-  ])("TP-1.20x: %s throws TypeError", (_label, value) => {
+  ])("TP-1.22x: %s throws TypeError", (_label, value) => {
     expect(() => canonicalJson(value)).toThrow(TypeError);
   });
 
-  it("TP-1.20x: keys are sorted by UTF-16 code unit, not by locale", () => {
+  it("TP-1.22x: keys are sorted by UTF-16 code unit, not by locale", () => {
     expect(canonicalJson({ b: 1, a: 2, B: 3, Z: 4, é: 5, "\u{1F600}": 6, Ａ: 7 })).toBe(
       '{"B":3,"Z":4,"a":2,"b":1,"é":5,"\u{1F600}":6,"Ａ":7}',
     );
@@ -53,7 +53,7 @@ describe("F-306 canonicalJson", () => {
     ["an empty array", [], "[]"],
     ["a nested empty structure", { a: [], b: {} }, '{"a":[],"b":{}}'],
     ["a negative decimal", -1.5, "-1.5"],
-  ])("TP-1.20x: %s serialises like JSON without whitespace", (_label, value, expected) => {
+  ])("TP-1.22x: %s serialises like JSON without whitespace", (_label, value, expected) => {
     expect(canonicalJson(value)).toBe(expected);
   });
 });

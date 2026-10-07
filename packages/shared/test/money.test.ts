@@ -1,4 +1,4 @@
-// F-301 Money and arithmetic. TP-1.3, TP-1.4, plus the extra cases TP-1.15x.
+// F-301 Money and arithmetic. TP-1.3, TP-1.4, plus the extra cases TP-1.17x.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { inspect } from "node:util";
 import { describe, expect, it } from "vitest";
@@ -45,7 +45,7 @@ describe("F-301 redaction", () => {
     expect(text).not.toContain("987654321");
   });
 
-  it("TP-1.15x: util.inspect of an object holding Money doesn't show the amount", () => {
+  it("TP-1.17x: util.inspect of an object holding Money doesn't show the amount", () => {
     const text = inspect({ nested: { m } }, { depth: 5 });
 
     expect(text).toContain("[redacted]");
@@ -82,7 +82,7 @@ describe("F-301 currency mismatches", () => {
     },
   );
 
-  it("TP-1.15x: sum with items in another currency than the requested one throws", () => {
+  it("TP-1.17x: sum with items in another currency than the requested one throws", () => {
     expect(() => sum([Money.of(1n, USD)], EGP)).toThrow(CurrencyMismatchError);
   });
 });
@@ -99,7 +99,7 @@ describe("F-301 sum and ratio", () => {
     expect(() => ratio(egp(5n), egp(0n))).toThrow(RangeError);
   });
 
-  it("TP-1.15x: sum adds every item exactly", () => {
+  it("TP-1.17x: sum adds every item exactly", () => {
     expect(sum([egp(9007199254740993n), egp(7n), egp(-1n)], EGP).minor).toBe(9007199254740999n);
   });
 
@@ -108,31 +108,31 @@ describe("F-301 sum and ratio", () => {
     [-30n, 90n, -1n, 3n],
     [7n, -2n, -7n, 2n],
     [0n, 3n, 0n, 1n],
-  ])("TP-1.15x: ratio(%i, %i) is exactly %i/%i", (part, whole, num, den) => {
+  ])("TP-1.17x: ratio(%i, %i) is exactly %i/%i", (part, whole, num, den) => {
     expectSameValue(ratio(egp(part), egp(whole)), num, den);
   });
 });
 
 describe("F-301 Money", () => {
-  it("TP-1.15x: Money.of keeps the minor amount and the currency", () => {
+  it("TP-1.17x: Money.of keeps the minor amount and the currency", () => {
     const m = Money.of(-12345n, EGP);
 
     expect(m.minor).toBe(-12345n);
     expect(m.currency).toBe("EGP");
   });
 
-  it("TP-1.15x: instances are frozen", () => {
+  it("TP-1.17x: instances are frozen", () => {
     expect(Object.isFrozen(egp(1n))).toBe(true);
   });
 
   it.each([[1], ["1"], [null], [undefined], [1.5]])(
-    "TP-1.15x: Money.of with a non-bigint minor (%j) throws TypeError",
+    "TP-1.17x: Money.of with a non-bigint minor (%j) throws TypeError",
     (minor) => {
       expect(() => Money.of(minor as unknown as bigint, EGP)).toThrow(TypeError);
     },
   );
 
-  it("TP-1.15x: toString and toJSON return [redacted]", () => {
+  it("TP-1.17x: toString and toJSON return [redacted]", () => {
     const m = egp(42n);
 
     expect(m.toString()).toBe("[redacted]");
@@ -141,7 +141,7 @@ describe("F-301 Money", () => {
 });
 
 describe("F-301 arithmetic", () => {
-  it("TP-1.15x: add, subtract and negate are exact and keep the currency", () => {
+  it("TP-1.17x: add, subtract and negate are exact and keep the currency", () => {
     const big = egp(9007199254740993n);
 
     expect(add(big, egp(2n)).minor).toBe(9007199254740995n);
@@ -154,11 +154,11 @@ describe("F-301 arithmetic", () => {
     [1n, 2n, -1],
     [2n, 2n, 0],
     [3n, -2n, 1],
-  ])("TP-1.15x: compare(%i, %i) is %i", (a, b, expected) => {
+  ])("TP-1.17x: compare(%i, %i) is %i", (a, b, expected) => {
     expect(compare(egp(a), egp(b))).toBe(expected);
   });
 
-  it("TP-1.15x: isZero", () => {
+  it("TP-1.17x: isZero", () => {
     expect(isZero(egp(0n))).toBe(true);
     expect(isZero(egp(1n))).toBe(false);
     expect(isZero(egp(-1n))).toBe(false);
@@ -172,7 +172,7 @@ describe("F-301 arithmetic", () => {
     [10n, 2n, 3n, 7n],
     [9007199254740993n, 1n, 1n, 9007199254740993n],
   ])(
-    "TP-1.15x: multiplyByRational(%i, %i/%i) rounds once, half-even, to %i",
+    "TP-1.17x: multiplyByRational(%i, %i/%i) rounds once, half-even, to %i",
     (minor, n, d, expected) => {
       const result = multiplyByRational(egp(minor), rational(n, d));
 
@@ -188,7 +188,7 @@ describe("F-301 arithmetic", () => {
     [-3n, 5000n, -2n],
     [12345n, 0n, 0n],
     [12345n, 10000n, 12345n],
-  ])("TP-1.15x: percentOf(%i, %i bp) is %i", (minor, basisPoints, expected) => {
+  ])("TP-1.17x: percentOf(%i, %i bp) is %i", (minor, basisPoints, expected) => {
     expect(percentOf(egp(minor), basisPoints).minor).toBe(expected);
   });
 });

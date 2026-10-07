@@ -6,14 +6,24 @@
 // Projects are added as their slices create them: `web-unit` (jsdom, @solidjs/testing-library,
 // MSW) in S-11a, and `server-int`'s `globalSetup` (Testcontainers Postgres) in S-2.
 //
-// Root scripts (§10.1): `pnpm test` = `vitest run --project=!server-int`;
-// `pnpm test:int` = `vitest run --project=server-int`.
+// Root scripts (§2.2.2): `pnpm test` = `vitest run --project=!server-int`;
+// `pnpm test:int` = `vitest run --project=server-int`;
+// `pnpm test:coverage` = `vitest run --project=shared --coverage` (A-35).
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   test: {
     // Several projects have no test files until their slice is built (S-1, S-2, S-4).
     passWithNoTests: true,
+    // A-35: `pnpm test:coverage` (vitest run --project=shared --coverage) requires 100 % of the
+    // branches in packages/shared/src/money/**. Nothing else is measured.
+    coverage: {
+      provider: "v8",
+      include: ["packages/shared/src/money/**"],
+      reporter: ["text-summary"],
+      reportsDirectory: "coverage",
+      thresholds: { "packages/shared/src/money/**": { branches: 100 } },
+    },
     projects: [
       {
         test: {

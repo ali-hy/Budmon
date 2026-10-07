@@ -1,4 +1,4 @@
-// F-300 currency codes and rationals. TP-1.1, TP-1.2, plus the extra cases TP-1.14x.
+// F-300 currency codes and rationals. TP-1.1, TP-1.2, plus the extra cases TP-1.16x.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { describe, expect, it } from "vitest";
 import { asCurrencyCode } from "../src/money/currency.js";
@@ -34,12 +34,12 @@ describe("F-300 parseDecimal", () => {
     ["1E+2", 100n, 1n],
     ["12.5e-1", 5n, 4n],
     ["1e999", 10n ** 999n, 1n],
-  ])("TP-1.14x: parseDecimal(%j) accepts the allowed forms", (text, num, den) => {
+  ])("TP-1.16x: parseDecimal(%j) accepts the allowed forms", (text, num, den) => {
     expect(parseDecimal(text)).toEqual({ num, den });
   });
 
   it.each([[".5"], ["1.2.3"], [" 1"], ["1 "], ["1e"], ["0x10"], ["1_000"], ["Infinity"], ["--1"]])(
-    "TP-1.14x: parseDecimal(%j) is outside the grammar and throws RangeError",
+    "TP-1.16x: parseDecimal(%j) is outside the grammar and throws RangeError",
     (text) => {
       expect(() => parseDecimal(text)).toThrow(new RangeError("Invalid decimal"));
     },
@@ -58,7 +58,7 @@ describe("F-300 roundHalfEven", () => {
     [5n, 2n, 2n],
     [7n, 2n, 4n],
     [-5n, 2n, -2n],
-  ])("TP-1.14x: F-300's examples: roundHalfEven(%i/%i) is %i", (num, den, expected) => {
+  ])("TP-1.16x: F-300's examples: roundHalfEven(%i/%i) is %i", (num, den, expected) => {
     expect(roundHalfEven(rational(num, den))).toBe(expected);
   });
 });
@@ -69,11 +69,11 @@ describe("F-300 rational", () => {
     [2n, -4n, -1n, 2n],
     [-3n, -9n, 1n, 3n],
     [0n, -5n, 0n, 1n],
-  ])("TP-1.14x: rational(%i, %i) normalises to %i/%i", (num, den, n, d) => {
+  ])("TP-1.16x: rational(%i, %i) normalises to %i/%i", (num, den, n, d) => {
     expect(rational(num, den)).toEqual({ num: n, den: d });
   });
 
-  it("TP-1.14x: rational with a zero denominator throws RangeError", () => {
+  it("TP-1.16x: rational with a zero denominator throws RangeError", () => {
     expect(() => rational(1n, 0n)).toThrow(RangeError);
   });
 });
@@ -90,12 +90,12 @@ describe("F-300 toFixedDecimalString", () => {
     [123n, 1n, 3, "123.000"],
     [1n, 10n ** 18n, 18, "0.000000000000000001"],
     [10n ** 30n, 1n, 0, "1000000000000000000000000000000"],
-  ])("TP-1.14x: toFixedDecimalString(%i/%i, %i) is %j", (num, den, scale, expected) => {
+  ])("TP-1.16x: toFixedDecimalString(%i/%i, %i) is %j", (num, den, scale, expected) => {
     expect(toFixedDecimalString(rational(num, den), scale)).toBe(expected);
   });
 
   it.each([[-1], [19], [1.5], [Number.NaN]])(
-    "TP-1.14x: a scale of %d throws RangeError",
+    "TP-1.16x: a scale of %d throws RangeError",
     (scale) => {
       expect(() => toFixedDecimalString(rational(1n, 2n), scale)).toThrow(RangeError);
     },
@@ -103,12 +103,12 @@ describe("F-300 toFixedDecimalString", () => {
 });
 
 describe("F-300 asCurrencyCode", () => {
-  it("TP-1.14x: a three-letter upper-case code is returned unchanged", () => {
+  it("TP-1.16x: a three-letter upper-case code is returned unchanged", () => {
     expect(asCurrencyCode("EGP")).toBe("EGP");
   });
 
   it.each([["egp"], ["EG"], ["EGPX"], [""], ["E1P"], [" EGP"]])(
-    'TP-1.14x: asCurrencyCode(%j) throws TypeError("Invalid currency code")',
+    'TP-1.16x: asCurrencyCode(%j) throws TypeError("Invalid currency code")',
     (code) => {
       expect(() => asCurrencyCode(code)).toThrow(new TypeError("Invalid currency code"));
     },

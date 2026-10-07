@@ -10,14 +10,17 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../.
 
 /** §2.2.2 rows owned by the slices built so far: script → root command. */
 const ROWS: Readonly<Record<string, string>> = {
-  // S-0
+  // S-0 (format to test:int)
   format: "prettier --write .",
   "format:check": "prettier --check .",
   lint: "eslint .",
   typecheck: "tsc -p tsconfig.json",
   test: "vitest run --project=!server-int",
   "test:int": "vitest run --project=server-int",
-  check: "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm test:int",
+  // S-1 (A-35): test:coverage added; check runs it after test.
+  "test:coverage": "vitest run --project=shared --coverage",
+  check:
+    "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm test:coverage && pnpm test:int",
 };
 
 function rootScripts(): Record<string, unknown> {
@@ -39,7 +42,7 @@ describe("TP-0.21: root scripts (§2.2.2)", () => {
   });
 
   it.each(Object.keys(ROWS).map((name) => [name]))(
-    "TP-0.21: the S-0 script %s is present",
+    "TP-0.21: the script %s of a built slice is present",
     (name) => {
       expect(Object.keys(rootScripts())).toContain(name);
     },

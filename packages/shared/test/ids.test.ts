@@ -1,4 +1,4 @@
-// F-311 IDs. TP-1.12, plus the extra cases TP-1.22x.
+// F-311 IDs. TP-1.12, plus the extra cases TP-1.24x.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { describe, expect, it } from "vitest";
 import { isUuid, uuidv7Generator } from "../src/ids/ids.js";
@@ -15,7 +15,7 @@ describe("F-311 uuidv7Generator", () => {
     }
   });
 
-  it("TP-1.22x: generated IDs pass isUuid", () => {
+  it("TP-1.24x: generated IDs pass isUuid", () => {
     expect(isUuid(uuidv7Generator.next())).toBe(true);
   });
 });
@@ -24,7 +24,7 @@ describe("F-311 isUuid", () => {
   it.each([
     ["a v4", "f47ac10b-58cc-4372-a567-0e02b2c3d479"],
     ["a v7", "01927f3a-6b1c-7d2e-8f00-123456789abc"],
-  ])("TP-1.22x: accepts %s in lower case", (_label, value) => {
+  ])("TP-1.24x: accepts %s in lower case", (_label, value) => {
     expect(isUuid(value)).toBe(true);
   });
 
@@ -35,7 +35,7 @@ describe("F-311 isUuid", () => {
     ["braces", "{f47ac10b-58cc-4372-a567-0e02b2c3d479}"],
     ["non-hex", "g47ac10b-58cc-4372-a567-0e02b2c3d479"],
     ["empty", ""],
-  ])("TP-1.22x: rejects %s", (_label, value) => {
+  ])("TP-1.24x: rejects %s", (_label, value) => {
     expect(isUuid(value)).toBe(false);
   });
 });

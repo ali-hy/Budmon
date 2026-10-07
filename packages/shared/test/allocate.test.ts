@@ -1,4 +1,4 @@
-// F-302 allocate. TP-1.5, plus the extra cases TP-1.16x.
+// F-302 allocate. TP-1.5, plus the extra cases TP-1.18x.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { describe, expect, it } from "vitest";
 import { allocate } from "../src/money/allocate.js";
@@ -33,11 +33,11 @@ describe("F-302 allocate", () => {
     expect(() => allocate(Money.of(100n, EGP), weights)).toThrow(RangeError);
   });
 
-  it("TP-1.16x: a negative weight next to positive ones throws RangeError", () => {
+  it("TP-1.18x: a negative weight next to positive ones throws RangeError", () => {
     expect(() => allocate(Money.of(100n, EGP), [2n, -1n])).toThrow(RangeError);
   });
 
-  it("TP-1.16x: parts always sum to the input over a range of amounts and weights", () => {
+  it("TP-1.18x: parts always sum to the input over a range of amounts and weights", () => {
     const weightSets = [[1n], [1n, 1n], [1n, 2n, 3n], [0n, 5n, 7n], [3n, 3n, 3n, 1n], [999n, 1n]];
     for (let minor = -50n; minor <= 50n; minor += 1n) {
       for (const weights of weightSets) {

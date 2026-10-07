@@ -1,4 +1,4 @@
-// F-304 wire conversion. TP-1.7, plus the extra cases TP-1.18x.
+// F-304 wire conversion (A-36). TP-1.7, plus the extra cases TP-1.20x.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { describe, expect, it } from "vitest";
 import { asCurrencyCode } from "../src/money/currency.js";
@@ -57,11 +57,36 @@ describe("F-304 wire conversion", () => {
     },
   );
 
-  it("TP-1.18x: MAX_WIRE_MINOR is 2^53 − 1", () => {
+  it.each([
+    ["2 ** 53", 2 ** 53, "9007199254740992"],
+    ["-(2 ** 53)", -(2 ** 53), "9007199254740992"],
+    ["1.5", 1.5, "1.5"],
+    ["NaN", Number.NaN, "NaN"],
+    ["Infinity", Number.POSITIVE_INFINITY, "Infinity"],
+    ['"5" (cast)', "5" as unknown as number, "5"],
+  ])(
+    "TP-1.7: fromWireMoney with amount %s throws MoneyRangeError without the amount in its message",
+    (_label, amount, digits) => {
+      const error = caught(() => fromWireMoney({ amount, currency: "EGP" }));
+
+      expect(error).toBeInstanceOf(MoneyRangeError);
+      expect((error as Error).message).not.toContain(digits);
+    },
+  );
+
+  it("TP-1.7: fromWireMoney checks the amount before the currency code", () => {
+    expect(() => fromWireMoney({ amount: 1.5, currency: "bad" })).toThrow(MoneyRangeError);
+  });
+
+  it("TP-1.7: fromWireMoney with a valid amount and an invalid code throws TypeError", () => {
+    expect(() => fromWireMoney({ amount: 5, currency: "bad" })).toThrow(TypeError);
+  });
+
+  it("TP-1.20x: MAX_WIRE_MINOR is 2^53 − 1", () => {
     expect(MAX_WIRE_MINOR).toBe(9007199254740991);
   });
 
-  it("TP-1.18x: MoneyRangeError's message holds no amount", () => {
+  it("TP-1.20x: MoneyRangeError's message holds no amount", () => {
     const error = caught(() => toWire(Money.of(98765432109876543n, EGP)));
 
     expect(error).toBeInstanceOf(MoneyRangeError);
@@ -69,7 +94,7 @@ describe("F-304 wire conversion", () => {
     expect((error as Error).message).not.toContain("98765432109876543");
   });
 
-  it("TP-1.18x: fromWireMoney is the inverse of toWireMoney", () => {
+  it("TP-1.20x: fromWireMoney is the inverse of toWireMoney", () => {
     const m = fromWireMoney({ amount: -9007199254740991, currency: "KWD" });
 
     expect(m.minor).toBe(-9007199254740991n);
@@ -78,7 +103,7 @@ describe("F-304 wire conversion", () => {
   });
 
   it.each([["egp"], ["EG"], [""]])(
-    "TP-1.18x: fromWireMoney with the invalid code %j throws TypeError",
+    "TP-1.20x: fromWireMoney with the invalid code %j throws TypeError",
     (currency) => {
       expect(() => fromWireMoney({ amount: 1, currency })).toThrow(TypeError);
     },

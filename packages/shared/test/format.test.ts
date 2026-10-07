@@ -1,4 +1,4 @@
-// F-305 formatMoney. TP-1.8, plus the extra cases TP-1.19x.
+// F-305 formatMoney. TP-1.8, plus the extra cases TP-1.21x.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { describe, expect, it } from "vitest";
 import { asCurrencyCode } from "../src/money/currency.js";
@@ -28,13 +28,13 @@ describe("F-305 formatMoney", () => {
     );
   });
 
-  it("TP-1.19x: minorUnits 4 is allowed", () => {
+  it("TP-1.21x: minorUnits 4 is allowed", () => {
     expect(
       normaliseSpaces(formatMoney(Money.of(12345n, EGP), { locale: "en-US", minorUnits: 4 })),
     ).toBe("EGP 1.2345");
   });
 
-  it("TP-1.19x: amounts beyond 2^53 are formatted exactly", () => {
+  it("TP-1.21x: amounts beyond 2^53 are formatted exactly", () => {
     const text = formatMoney(Money.of(123456789012345678901n, EGP), {
       locale: "en-US",
       minorUnits: 2,
@@ -43,7 +43,7 @@ describe("F-305 formatMoney", () => {
     expect(normaliseSpaces(text)).toBe("EGP 1,234,567,890,123,456,789.01");
   });
 
-  it("TP-1.19x: currencyDisplay and signDisplay are passed to Intl", () => {
+  it("TP-1.21x: currencyDisplay and signDisplay are passed to Intl", () => {
     expect(
       normaliseSpaces(
         formatMoney(Money.of(123450n, USD), {
@@ -56,7 +56,7 @@ describe("F-305 formatMoney", () => {
     ).toBe("+$1,234.50");
   });
 
-  it("TP-1.19x: the default numbering system follows the locale (ar-EG uses Arabic-Indic digits)", () => {
+  it("TP-1.21x: the default numbering system follows the locale (ar-EG uses Arabic-Indic digits)", () => {
     const text = formatMoney(Money.of(123450n, EGP), { locale: "ar-EG", minorUnits: 2 });
 
     expect(text).toMatch(/[٠-٩]/);

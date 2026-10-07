@@ -1,4 +1,4 @@
-// F-303 convertWithRates. TP-1.6, plus the extra cases TP-1.17x.
+// F-303 convertWithRates. TP-1.6, plus the extra cases TP-1.19x.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { describe, expect, it } from "vitest";
 import { convertWithRates } from "../src/money/convert.js";
@@ -55,7 +55,7 @@ describe("F-303 convertWithRates", () => {
     ["source 0", rational(0n, 1n), rational(1n, 1n)],
     ["source negative", rational(-1n, 2n), rational(1n, 1n)],
     ["target negative", rational(97n, 2n), rational(-1n, 1n)],
-  ])("TP-1.17x: a non-positive unitsPerUsd (%s) throws RangeError", (_label, from, to) => {
+  ])("TP-1.19x: a non-positive unitsPerUsd (%s) throws RangeError", (_label, from, to) => {
     expect(() =>
       convertWithRates(
         Money.of(100n, EGP),

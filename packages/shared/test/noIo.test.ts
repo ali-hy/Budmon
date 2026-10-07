@@ -1,4 +1,4 @@
-// TP-1.24x (test-architect addition, not an LLD ID): S-1's acceptance criterion "the library has
+// TP-1.26x (test-architect addition, not an LLD ID): S-1's acceptance criterion "the library has
 // no I/O". No source file under packages/shared/src imports a Node built-in or uses a global I/O
 // API.
 import { readdirSync, readFileSync } from "node:fs";
@@ -33,12 +33,12 @@ const NODE_BUILTINS = new Set([
   "process",
 ]);
 
-describe("TP-1.24x: @budmon/shared has no I/O", () => {
-  it("TP-1.24x: packages/shared/src has source files", () => {
+describe("TP-1.26x: @budmon/shared has no I/O", () => {
+  it("TP-1.26x: packages/shared/src has source files", () => {
     expect(sourceFiles(SRC).length).toBeGreaterThan(0);
   });
 
-  it("TP-1.24x: no source file imports a Node built-in or calls fetch, process or XMLHttpRequest", () => {
+  it("TP-1.26x: no source file imports a Node built-in or calls fetch, process or XMLHttpRequest", () => {
     const problems: string[] = [];
     for (const file of sourceFiles(SRC)) {
       const text = readFileSync(file, "utf8");

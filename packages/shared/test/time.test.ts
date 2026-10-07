@@ -1,4 +1,4 @@
-// F-310 time. TP-1.11, plus the extra cases TP-1.21x.
+// F-310 time. TP-1.11, plus the extra cases TP-1.23x.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { describe, expect, it } from "vitest";
 import { fixedClock, isValidTimeZone, systemClock, todayIn, utcDateOf } from "../src/time/clock.js";
@@ -31,13 +31,13 @@ describe("F-310 todayIn and utcDateOf", () => {
     expect(utcDateOf(clock.now()).toString()).toBe("2026-10-06");
   });
 
-  it('TP-1.21x: todayIn with "Etc/Unknown" throws RangeError("Invalid time zone")', () => {
+  it('TP-1.23x: todayIn with "Etc/Unknown" throws RangeError("Invalid time zone")', () => {
     expect(() => todayIn(fixedClock("2026-10-05T22:30:00Z"), "Etc/Unknown")).toThrow(
       new RangeError("Invalid time zone"),
     );
   });
 
-  it("TP-1.21x: todayIn west of UTC is the previous date", () => {
+  it("TP-1.23x: todayIn west of UTC is the previous date", () => {
     expect(todayIn(fixedClock("2026-10-06T02:00:00Z"), "America/New_York").toString()).toBe(
       "2026-10-05",
     );
@@ -45,14 +45,14 @@ describe("F-310 todayIn and utcDateOf", () => {
 });
 
 describe("F-310 clocks", () => {
-  it("TP-1.21x: a fixed clock returns the same instant until it's moved", () => {
+  it("TP-1.23x: a fixed clock returns the same instant until it's moved", () => {
     const clock = fixedClock("2026-10-05T22:30:00Z");
 
     expect(clock.now().toString()).toBe("2026-10-05T22:30:00Z");
     expect(clock.now().toString()).toBe("2026-10-05T22:30:00Z");
   });
 
-  it("TP-1.21x: set moves a fixed clock to a string or an Instant", () => {
+  it("TP-1.23x: set moves a fixed clock to a string or an Instant", () => {
     const clock = fixedClock(Temporal.Instant.from("2026-01-01T00:00:00Z"));
 
     clock.set("2026-03-01T12:00:00Z");
@@ -62,7 +62,7 @@ describe("F-310 clocks", () => {
     expect(clock.now().toString()).toBe("2027-01-01T00:00:00Z");
   });
 
-  it("TP-1.21x: advance accepts a duration with several units", () => {
+  it("TP-1.23x: advance accepts a duration with several units", () => {
     const clock = fixedClock("2026-10-05T22:30:00Z");
 
     clock.advance({ minutes: 45, seconds: 30 });
@@ -71,13 +71,13 @@ describe("F-310 clocks", () => {
   });
 
   it.each([["not a date"], [""], ["2026-13-01T00:00:00Z"]])(
-    "TP-1.21x: fixedClock(%j) throws RangeError",
+    "TP-1.23x: fixedClock(%j) throws RangeError",
     (at) => {
       expect(() => fixedClock(at)).toThrow(RangeError);
     },
   );
 
-  it("TP-1.21x: systemClock reads the current time", () => {
+  it("TP-1.23x: systemClock reads the current time", () => {
     const before = Date.now();
     const now = systemClock.now().epochMilliseconds;
     const after = Date.now();
@@ -89,14 +89,14 @@ describe("F-310 clocks", () => {
 
 describe("F-310 isValidTimeZone", () => {
   it.each([["Africa/Cairo"], ["UTC"], ["America/New_York"], ["Asia/Kuwait"]])(
-    "TP-1.21x: %s is valid",
+    "TP-1.23x: %s is valid",
     (zone) => {
       expect(isValidTimeZone(zone)).toBe(true);
     },
   );
 
   it.each([["Mars/Base"], ["Etc/Unknown"], [""], ["Not A Zone"]])(
-    "TP-1.21x: %j is not valid",
+    "TP-1.23x: %j is not valid",
     (zone) => {
       expect(isValidTimeZone(zone)).toBe(false);
     },
