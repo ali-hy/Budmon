@@ -1,8 +1,18 @@
 // TP-0.19: `ci.yml`'s `migrations` job feeds F-6 (A-7).
-import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { parse } from "yaml";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -97,5 +107,79 @@ describe("TP-0.19: ci.yml migrations job wiring", () => {
       expect(run).not.toContain("${{github.head_ref");
       expect(run).not.toContain("${{github.event.pull_request");
     }
+  });
+
+  // The F-6 step's script, run the way GitHub Actions runs `run:` (bash -eo pipefail), with a
+  // stub `pnpm` on PATH that records its arguments one per line.
+  describe("TP-0.19: the F-6 step's script passes the values through", () => {
+    let dir = "";
+
+    afterEach(() => {
+      if (dir !== "") rmSync(dir, { recursive: true, force: true });
+      dir = "";
+    });
+
+    function runStep(env: { HEAD_REF: string; MERGE_BACK: string }): string[] {
+      dir = mkdtempSync(path.join(tmpdir(), "budmon-ci-step-"));
+      const bin = path.join(dir, "bin");
+      const record = path.join(dir, "pnpm-args.txt");
+      const script = path.join(dir, "step.sh");
+      mkdirSync(bin);
+      writeFileSync(
+        path.join(bin, "pnpm"),
+        `#!/usr/bin/env bash\nprintf '%s\\n' "$@" > ${JSON.stringify(record)}\n`,
+      );
+      chmodSync(path.join(bin, "pnpm"), 0o755);
+      writeFileSync(script, f6Step().run ?? "");
+
+      const result = spawnSync("bash", ["--noprofile", "--norc", "-eo", "pipefail", script], {
+        cwd: dir,
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          ...env,
+          PATH: `${bin}:${process.env["PATH"] ?? ""}`,
+          RUNNER_TEMP: dir,
+        },
+      });
+      expect(result.status, result.stderr).toBe(0);
+      return readFileSync(record, "utf8").split("\n").slice(0, -1);
+    }
+
+    function expectedArgs(branch: string, hotfix: boolean): string[] {
+      return [
+        "--filter",
+        "@budmon/tools-ci",
+        "exec",
+        "tsx",
+        "checkMigrationFiles.ts",
+        "--branch",
+        branch,
+        "--changed-files",
+        path.join(dir, "changed-files.txt"),
+        ...(hotfix ? ["--hotfix-merge-back"] : []),
+      ];
+    }
+
+    it("TP-0.19: MERGE_BACK=true adds --hotfix-merge-back", () => {
+      const args = runStep({ HEAD_REF: "hotfix/v1.0.1", MERGE_BACK: "true" });
+
+      expect(args).toEqual(expectedArgs("hotfix/v1.0.1", true));
+    });
+
+    it("TP-0.19: MERGE_BACK=false passes no --hotfix-merge-back", () => {
+      const args = runStep({ HEAD_REF: "feat/x", MERGE_BACK: "false" });
+
+      expect(args).toEqual(expectedArgs("feat/x", false));
+    });
+
+    it("TP-0.19: a branch name with shell syntax reaches --branch as one literal argument", () => {
+      const branch = 'feat/$(touch pwned)";x y';
+
+      const args = runStep({ HEAD_REF: branch, MERGE_BACK: "false" });
+
+      expect(args).toEqual(expectedArgs(branch, false));
+      expect(existsSync(path.join(dir, "pwned"))).toBe(false);
+    });
   });
 });
