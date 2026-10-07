@@ -37,4 +37,4 @@ Templates (including `lld-brief.md`) are in [`_templates/`](./_templates) and [`
 
 | Module | HLD | LLD |
 | ------ | --- | --- |
-| `platform` | [hld.md](./platform/hld.md) (approved, v1.0) | [lld.md](./platform/lld.md) (in-review, v0.5); [brief](./platform/lld-brief.md) |
+| `platform` | [hld.md](./platform/hld.md) (draft, v1.1) | [lld.md](./platform/lld.md) (in-review, v0.5); [brief](./platform/lld-brief.md) |
