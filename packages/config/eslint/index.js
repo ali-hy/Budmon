@@ -64,7 +64,7 @@ export function createBudmonEslintConfig({ tsconfigRootDir }) {
     // 1. Layering, and 2. logging (pino only under observability). `no-restricted-imports` is one
     // rule per file, so every block lists the pino restriction too.
     {
-      files: [`${SERVER_SRC}/**/*.ts`],
+      files: ["**/*.{ts,tsx,mts,cts}"],
       ignores: [`${SERVER_SRC}/platform/observability/**`],
       rules: { "no-restricted-imports": restricted({}) },
     },

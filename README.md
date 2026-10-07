@@ -22,6 +22,7 @@ A personal budgeting and money-monitoring application. What it does and for whom
 
 - Node 24 (see `.nvmrc`) and pnpm 10 (`corepack enable` picks up the pinned version).
 - Docker with Compose v2, for the database used by integration tests (from slice S-2).
+- JDK and Android Studio, for the Android app (from S-13).
 
 ## Commands
 
@@ -38,6 +39,6 @@ A personal budgeting and money-monitoring application. What it does and for whom
 ## Environments
 
 Stage 0 runs the whole stack on the owner's laptop; stage 1 and 2 move it to hosted
-infrastructure without code changes. The stage model, and the environments for development, CI,
-staging and production, are described in the
+infrastructure without code changes. The stage model, and the environments for development and CI
+are described in the
 [platform HLD](docs/design/platform/hld.md). Only development and CI exist so far.
