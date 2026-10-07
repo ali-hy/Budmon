@@ -2,7 +2,7 @@
 module: platform
 doc: lld
 status: approved # draft | in-review | approved
-version: 0.12
+version: 0.13
 hld_version: 1.3
 author: planner
 approved_by: the user (project owner), delegated auto-approval
@@ -78,6 +78,7 @@ Nothing in that list changes application code (D-29 rule 2).
 | 0.9     | 2026-10-07 | **Approved.** Approved on the owner's behalf by the main conversation, under the owner's direct instruction on 2026-10-07: "auto approve the hlds as well just keep going man. I want you to skip the human in the loop (me) and just keep going" (and earlier: "auto approve the lld and start building right away"). Plan review passed. No content change. |
 | 0.11    | 2026-10-07 | Implementation-time amendments A-7 to A-9, raised by the test-architect while writing the S-0 tests. **A-7:** F-6's CLI runs `tools/ci/checkMigrationFiles.ts` (the `@budmon/tools-ci` sources sit at the package root, no `src/`; F-185's CLI line corrected the same way); the CLI takes `--branch`, `--changed-files` and `--hotfix-merge-back`, parsed by new exported functions; `ci.yml`'s `migrations` job (from S-0) supplies them from `github.head_ref`, a `git diff --no-renames --name-only origin/<base_ref>...HEAD` file and the PR labels, through `env`; TP-0.17 and TP-0.19 added. **A-8:** §10.1 uses a root `vitest.config.ts` with `test.projects` and `passWithNoTests` instead of `vitest.workspace.ts` (removed in Vitest 4); pins unchanged (Vitest 5.0.3, TypeScript 5.9.3). **A-9:** `.gitattributes` moves from S-15 to S-0 with its exact content in §2.2; TP-0.18 added. Approval stands. |
 | 0.12    | 2026-10-07 | Implementation-time amendments A-10 to A-21, raised by the software-engineer, the code-reviewer and the test-architect after S-0. **A-10:** F-3 checks only non-relative (package) specifiers, by package name matching `/icon/i`, in imports, re-exports and literal dynamic imports; relative imports are never reported except `.svg` files outside `ui/icons/`; TP-11.19 rewritten. **A-11:** the service layering rule's `files` are `apps/server/src/*/*Service.ts` and `apps/server/src/platform/*/*Service.ts`; TP-0.2 rewritten with full paths. **A-12:** `formatjs/enforce-id` is removed (the catalog uses explicit dotted IDs, which the hash pattern rejects, and the rule's hash path calls `context.getFilename()`, which ESLint 10 removed); new rule F-3b `budmon/message-id` requires a literal ID matching the ID grammar; F-1 sets `settings.formatjs.additionalFunctionNames: ["t"]` and F-9 extracts with `--additional-function-names t`; TP-11.30 added. **A-13:** ESLint 10.12.0 stays; `eslint-plugin-formatjs` pinned to 8.1.1 (peer `9 || 10`; code review G-1: 5.4.2 crashes under ESLint 10); `eslint-plugin-jsx-a11y` 6.10.2 pinned exactly, its ESLint 9 peer widened to 10 by a single `pnpm-workspace.yaml` `peerDependencyRules.allowedVersions` entry; TP-0.20 and TP-0.22 (web-rule smoke lint) added, TP-11.21 and TP-11.22 also assert no rule throws. **A-14:** new §2.2.2 lists every root script with its command and owning slice (`dev`, `db:reset`, `db:seed`, `db:migrate` in S-2; `contract:openapi` in S-4; `stylelint.config.js`, F-4 and CSS linting in S-11a; `test:e2e` and `check:all` in S-11b, extended in S-13; `db:release-migration`, `db:pending-report`, `db:check-migrations`, `db:check-risky` in S-14; `test:bats` in S-15); `db:seed` defined (F-20 `seedDevelopmentDatabase`, F-94 `--seed-only`); TP-0.21 and TP-2.24 added. **A-15:** the money rule also bans `Number.parseFloat`, `globalThis.parseFloat`, `window.parseFloat` and unary `+`; TP-0.4 extended. **A-16:** the `migrations` job's diff uses `git -c core.quotePath=false`; TP-0.19 extended. **A-17:** the SHA pin for `uses:` (local `./` exempt) and the `env`-only rule for `run:` apply to every workflow; the existing workflow security test is TP-0.23. **A-18:** F-1 enables `formatjs/no-invalid-icu` (HLD D-37's "valid ICU syntax"); TP-0.22 and TP-11.21 extended. **A-19:** TP-0.20 (b) runs a resolving install (`pnpm install --fix-lockfile`) in a fresh clone, absorbing the test-architect's TP-0.20x; (c) keeps the frozen install. **A-20:** `jsx-a11y` setting `components: { Icon: "svg" }` and `control-has-associated-label` options `labelAttributes: ["label"]`, `ignoreElements: ["input", "select", "textarea"]`. **A-21:** `jsx-a11y` setting `attributes: { for: ["for"] }` for Solid's `for`. TP-11.22 rewritten. A-10, A-12 and A-13 also answer code review G-1 and G-2. Approval stands. |
+| 0.13    | 2026-10-07 | Implementation-time amendments A-22 to A-26 from the identity LLD v0.2 §1.1 (PA-7 to PA-11). **A-22:** `presignGet` takes `opts.downloadName` (S3 `ResponseContentDisposition`, fs token `n` and F-145's header, memory URL `n`). **A-23:** `OutboxDao.deleteAll()` and `countAll()`. **A-24:** the fake Google answers sign-in token requests (by `client_id`) with an RS256 `id_token` and serves the JWKS on `www.googleapis.com`; `api` resolves Google to the fake; rehearsal sub-step 7c `google-sign-in`; new F-193 `scanForNeedles` makes step 8's needles concrete. **A-25:** rehearsal sub-step 7b `email-canary` in the harness; the bootstrap owner is `rehearsal-owner.7f3a@example.invalid`, not the canary address. **A-26:** wiring points: F-59 `appRouter` and F-55's defaults, `ApiContainer.moduleRoutes` (F-55 step 4b), `WorkerContainer.onGeneralStarted` with F-78b `runGeneralStartHooks`, `WorkerContainer.erasureHandler` declared, `BaseContainer.sealedColumns` with `rewrapApiSecretsCommand`; the `identity` slot is declared by identity's S-0. Slices S-4, S-6, S-8, S-10, S-13, S-16 extended. Tests: TP-10.1 to TP-10.4, TP-13.4, TP-16.2, TP-16.13 rewritten; TP-4.22, TP-6.14, TP-8.16, TP-16.14, TP-16.15 added. Also A-27 to A-32 from S-0 QA (relayed by the coordinator): **A-27** messages for every layering restriction and for plain `parseFloat`; **A-28** `ci.yml` runs F-6 with `tools/ci`'s own `tsx` (`working-directory: tools/ci`), so exit codes 0/1/64 reach CI; **A-29** F-6's singular `1 changed file` and an actionable failure message; **A-30** `apps/server/tsconfig.json` (S-2) and `apps/web/tsconfig.json` (S-11a), each added to root `typecheck`; **A-31** `test:int` joins the `check` job in S-2; **A-32** `ignoredBuiltDependencies: [esbuild]`. Tests: TP-0.2, TP-0.4, TP-0.17, TP-0.19, TP-0.20 rewritten; TP-0.24, TP-2.25, TP-2.26 added. Approval stands. |
 
 ## Amendments
 
@@ -104,6 +105,17 @@ Nothing in that list changes application code (D-29 rule 2).
 | A-19 | TP-0.20 (b) can't detect a peer problem: `pnpm install --frozen-lockfile` skips resolution, so pnpm never prints its peer report, and it passes even with formatjs 5.4.2. `pnpm install --fix-lockfile` does print it; the test-architect added "TP-0.20x" with a resolving install in a clean clone (test-architect, S-0). | **(b) becomes the resolving install**, and TP-0.20x is folded into it (renamed TP-0.20): in a fresh clone of `HEAD`, `pnpm install --fix-lockfile` must exit 0 with no `Issues with peer dependencies found` and no `unmet peer` in its output. A new (c) keeps the frozen install (`--frozen-lockfile` exits 0 in a fresh clone), which is what CI runs. | TP-0.20 | none | planner decision |
 | A-20 | TP-11.22: `<button><Icon name="x"/></button>` triggers no rule, because jsx-a11y 6.10.2 treats a childless capitalised component as possibly labelled (test-architect, S-11a; probed on ESLint 10.12.0). | F-1 sets `settings["jsx-a11y"].components = { Icon: "svg" }`, so the registry's `Icon` (F-215) is analysed as an `svg` element and no longer counts as a label, and `control-has-associated-label` gets `labelAttributes: ["label"]`, so `<Icon name="x" label="Close"/>` (F-215 renders that as `role="img"` with `aria-label`) does label a button. `ignoreElements: ["input", "select", "textarea"]` is added to the same rule, because with the default options it also reports every correctly labelled form field (`<label for="a">` with `<input id="a"/>`, and inputs nested in a `<label>`); field labels are `label-has-associated-control`'s job. I probed this on ESLint 10.12.0 and jsx-a11y 6.10.2: (3) in TP-11.22 reports, and (4), (5), (6), (10) and (11) don't. Other components stay "possibly labelled" (the plugin's default); Playwright's axe report (D-39) covers what static analysis can't see. Lands in **S-0** (F-1 config) and is tested in **S-11a**. | F-1 rule 4, TP-11.22, TP-0.22 | none | planner decision |
 | A-21 | jsx-a11y checks React attribute names: `label-has-associated-control` looks for `htmlFor`, not Solid's `for`; `tabindex`, `aria-*` and `role` already work (test-architect, S-11a). | **Plugin setting, no Budmon rule:** F-1 sets `settings["jsx-a11y"].attributes = { for: ["for"] }` (supported by 6.10.2's `label-has-associated-control`). So `<label for="a">` counts as associated and `htmlFor`, which Solid doesn't map to `for`, doesn't. No other blocking rule depends on a React-only name: `tabindex` and `aria-*`/`role` are matched case-insensitively, and none of the eight rules reads `className`. `eslint-plugin-solid` has no accessibility rules, so switching isn't an option. Known limit, unchanged by this: a `<label>` whose children include an expression (`{t(m)}`, which every real label has, because literal JSX strings are banned) is treated as possibly containing a control and passes without `for`; the axe report covers that case (D-39). Lands in **S-0** (F-1 config) and is tested in **S-11a**. | F-1 rule 4, TP-11.22 | none | planner decision |
+| A-22 | `ObjectStore.presignGet` can't name the downloaded file; identity's export download should arrive as `budmon-export-<YYYY-MM-DD>.zip` (identity LLD v0.2 §1.1 PA-7). | Signature `presignGet(bucket, key, ttlSeconds?, opts?: PresignGetOptions)` with `export interface PresignGetOptions { downloadName?: string }`. The name must match `^[A-Za-z0-9._-]{1,100}$`, else `RangeError`; it's validated with the key and TTL, before any I/O. **S3:** `ResponseContentDisposition: 'attachment; filename="<name>"'` (`"attachment"` without a name). **fs:** the token payload becomes `{ b, k, exp, n }` (`n` omitted, not null, without a name); F-145 re-checks `n` against the pattern after the HMAC (else 404) and sends `Content-Disposition: attachment; filename="<n>"`. **memory:** the URL gains `&n=<name>`; nothing else is recorded (identity's "records the name" is met by the URL, which its TP-10.5 reads). Lands in **S-10**. | F-140, F-141, F-142, F-143, F-145, S-10, TP-10.1 to TP-10.4 | none | planner decision |
+| A-23 | Android sign-out and the outbox owner guard need to count and clear the whole outbox (identity PA-8). | `OutboxDao` gains `@Query("DELETE FROM outbox") suspend fun deleteAll(): Int` (rows deleted) and `@Query("SELECT COUNT(*) FROM outbox") suspend fun countAll(): Int`, both across every status. When they're called is identity's decision (its D-23 dialog). Lands in **S-13**. | F-254, S-13, TP-13.4 | none | planner decision |
+| A-24 | The rehearsal can't exercise Google sign-in: the fake Google issues no `id_token`, serves no JWKS, and `api` doesn't resolve Google's hosts to it (identity PA-9). | **F-196:** `startFakeGoogle` gains `signInClientId: string` and `signInKeyPair: { privateKey: KeyObject; publicKey: KeyObject }`; new exports `FAKE_SIGNIN_KID = "fake-signin-1"`, `generateSignInKeyPair()` (RSA-2048 from `node:crypto`, one per run; no new dependency) and `fakeSignInCode(nonce)` (`"signin." + base64url(nonce)`). `POST /token` branches on the form's `client_id`: equal to `signInClientId` → the code must be `signin.<base64url(nonce)>`, answer `200` with an RS256 `id_token` with exactly identity's claims; malformed → `400 {"error":"invalid_grant"}`; control modes apply **only** to the Gmail branch, so sign-in stays deterministic. `www.googleapis.com GET /oauth2/v3/certs` serves the public JWKS; the fake's leaf certificate's SANs include `www.googleapis.com`. **Overlay:** `api` gets the same Google `extra_hosts` and `NODE_EXTRA_CA_CERTS` as the capture-path containers, reaching the fake over `egress` (A-3). **Rehearsal `site.env`:** `GOOGLE_SIGNIN_CLIENT_ID=rehearsal-signin.apps.googleusercontent.com` (`REHEARSAL_SIGNIN_CLIENT_ID`), `GOOGLE_SIGNIN_CALLBACK_ORIGIN` and `GOOGLE_SIGNIN_APP_ORIGINS` = `http://localhost:8080` (A-3's rule allows `http://localhost:<port>`, not `127.0.0.1`), `GOOGLE_SIGNIN_ANDROID_CLIENT_IDS` empty; the client-secret placeholder gets a throwaway value like the others. **Sub-step 7c `google-sign-in`** after 7a and 7b: start → callback (no cookies) → complete (binding cookie); expects `404 GOOGLE_ACCOUNT_UNKNOWN` with `data.email = canaries.email`; `state`, nonce, code and hand-off token become needles; skipped when 7a was skipped or `start` answers `404 NOT_FOUND`. **New F-193 `scanForNeedles`** (`tools/rehearsal/src/needles.ts`) makes A-6's "needles" concrete; step 8 runs it beside F-198. Lands in **S-16**. | §2.2 (`tools/rehearsal/`), F-193 (new), F-195 steps 1, 4, 7, 8, F-196, §4.20, S-16, TP-16.2, TP-16.13, TP-16.14 (new), TP-16.15 (new) | none | planner decision |
+| A-25 | A-2 left the email canary path to identity's additions to `canaryFlows.test.ts`; identity asks for a defined rehearsal sub-step (identity PA-10). | **Sub-step 7b `email-canary`** in F-195 (harness code, so it ships with S-16; this replaces A-2's "added to `canaryFlows.test.ts` by identity's build"): accept the bootstrap invitation with a password and `tokenDelivery "body"`; invite `canaries.email` as the owner (bearer, `Idempotency-Key`); request a password reset for the owner; poll Mailpit's API for up to 60 s at its **published** `http://127.0.0.1:8025/api/v1/` (the harness runs on the runner host, outside `mail-ui`); extract every `#t=` token. The owner's password, the session tokens and the mail tokens become needles; `canaries.email` is already a CANARIES member. **Conflict resolved:** sub-step 7a bootstraps the owner as `REHEARSAL_OWNER_EMAIL = "rehearsal-owner.7f3a@example.invalid"` (a needle), not `canaries.email` as A-6 had it, because 7b invites the canary address (`ALREADY_A_USER` otherwise) and 7c needs that address to have no user. Upgrade fixtures (`apps/server/test/upgrade/<version>/fixtures.sql`) contain no owner, so 7a can run on upgraded databases. Skipped when 7a was skipped or accept answers `404 NOT_FOUND`. Lands in **S-16**. | F-195 steps 4 and 7, S-16, TP-16.13 | none | planner decision |
+| A-26 | Modules have no named places to plug into the API server, the containers, the worker start-up and the re-wrap command (identity PA-11). | (a) **F-59 `appRouter`** (`platform/http/appRouter.ts`): `base.router({ meta: metaRouter })`; modules add their keys; F-55 defaults `opts.contract` to F-346's `contract` and `opts.router` to `appRouter`. (b) **`ApiContainer.moduleRoutes: ((app: FastifyInstance) => void)[]`** (default `[]`), registered by F-55's new step 4b, after the health routes and before the `/api/v1/*` catch-all. (c) The **`identity` member isn't declared by the platform** (its type is identity's): identity's S-0 adds `identity: IdentityModule` to `ApiContainer` and `WorkerContainer`, builds it after `sealedColumns`, and sets `authHook` and `erasureHandler` from it. The platform declares `WorkerContainer.erasureHandler: ErasureHandler \| null` (default `null`; F-146 and F-151 already used it) and keeps `authHook = noAuthHook` by default; `overrides` of either win over a module's value. (d) **`WorkerContainer.onGeneralStarted: (() => Promise<void>)[]`** (default `[]`), run by new **F-78b `runGeneralStartHooks`**, which F-91 calls after `startWorkers`: general role only, in array order, each once; a rejecting hook is reported and logged (`worker_start_hook_failed`, `step "onGeneralStarted:<index>"`) and the remaining hooks still run. (e) **`BaseContainer.sealedColumns: SealedColumnRegistry`** (F-115; the type gets this name), created before any module in both containers; `secrets:rewrap-api` calls new `rewrapApiSecretsCommand(c)` (F-117's file), which passes `c.sealedColumns.all()`; F-118 reads the worker container's registry. (f) Names only, no behaviour change: `platform/db/grants.ts` merges `<module>Grants`; `platform/db/seed.ts` appends to `seeders`; `platform/queue/handlers.ts` `buildHandlerMap(c)` merges each module's handler map (the factory's argument is the module's choice); web routes go into `apps/web/src/router.tsx` (F-216, unchanged). Lands in **S-4** (a, b), **S-6** (d), **S-8** (e) and **S-10** (`erasureHandler`). | §2.3, F-55, F-59 (new), F-78b (new), F-91, F-93, F-96, F-115, F-117, F-118, F-146, §4.20, §5.3, S-4, S-6, S-8, S-10, TP-4.22 (new), TP-6.14 (new), TP-8.16 (new) | none | planner decision |
+| A-27 | F-1 gives no message for the layering restrictions, so a router importing `drizzle-orm` or a service importing `pg` reports only ESLint's bare "import is restricted" text; plain `parseFloat` shows ESLint's default wording (S-0 QA, via the coordinator). | Every `no-restricted-imports` entry of rule 1 carries a message naming the rule and the alternative (the five texts in F-1 rule 1, `paths` entries for exact names and `patterns` groups for globs, each with `message`); ESLint prints them after its own sentence. Rule 3's `no-restricted-globals` entry becomes `{ name: "parseFloat", message: "parseFloat is forbidden; use the money helpers" }`, the same text A-15 gave the property forms. Lands in **S-0**. | F-1 rules 1 and 3, TP-0.2, TP-0.4 | none | planner decision |
+| A-28 | F-6's 0/1/64 contract doesn't survive `pnpm --filter @budmon/tools-ci exec tsx …`: pnpm turns every non-zero exit into 1 and prints `ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL` (S-0 QA). | The F-6 step runs with `working-directory: tools/ci` and `run: … ./node_modules/.bin/tsx checkMigrationFiles.ts "${args[@]}"`: `tools/ci`'s own `tsx` (its dev dependency), no pnpm in between, so the script's exit code is the step's. The changed-files path stays absolute (`$RUNNER_TEMP`). Rule for every later CI step that relies on a `tools/ci` CLI's exit code (F-8, F-185 and S-14's steps): the same direct form. Lands in **S-0**. | F-6 (CLI invocation, `ci.yml` wiring), TP-0.19, TP-0.24 (new) | none | planner decision |
+| A-29 | F-6 prints `ok (1 changed files)`; the failure message doesn't say what to do (S-0 QA). | Success line: `checkMigrationFiles: ok (1 changed file)` when exactly one path was parsed, otherwise `checkMigrationFiles: ok (<n> changed files)` (including 0). Failure message: `Migration files may only change on release/* and hotfix/* branches (D-12): <files>. Move these changes to a release/* or hotfix/* branch, or remove them from this pull request.` Lands in **S-0**. | F-6, TP-0.5, TP-0.17 | none | planner decision |
+| A-30 | Nothing creates a tsconfig for `apps/**`, so the first app file would fail ESLint's project service ("was not found by the project service") (S-0 QA). | `apps/server/tsconfig.json` is created by **S-2** with the server's first file (extends `@budmon/config/tsconfig/node.json`, `noEmit: true`, `include: ["src/**/*.ts", "test/**/*.ts", "drizzle.config.ts"]`); `apps/web/tsconfig.json` by **S-11a** (extends `@budmon/config/tsconfig/web.json`, `noEmit: true`, `include: ["src/**/*.ts", "src/**/*.tsx", "test/**/*.ts", "test/**/*.tsx", "e2e/**/*.ts", "vite.config.ts"]`). Root `typecheck` grows with them: S-2 `tsc -p tsconfig.json && tsc -p apps/server/tsconfig.json`; S-11a appends `&& tsc -p apps/web/tsconfig.json`. The root `tsconfig.json` keeps excluding `apps/`. No TypeScript file is added under an app before its tsconfig, in the same commit at the latest. | §2.2.2 (`typecheck`), §2.3, S-2, S-11a, TP-0.21 (via §2.2.2), TP-2.25 (new) | none | planner decision |
+| A-31 | `ci.yml`'s `check` job runs `test` but not `test:int`, while local `pnpm check` runs both (S-0 QA). | **S-2** (which brings `server-int`'s `globalSetup` and the database) adds `pnpm test:int` to the `check` job's step, after `pnpm test`; GitHub's `ubuntu-latest` runner has Docker for Testcontainers. Until S-2 the project has no tests, so S-0's job is complete without it. This matches §10.1's CI table ("`check`: 1 to 4, including `server-int`"). | §10.1 CI jobs, S-2, TP-2.26 (new) | none | planner decision |
+| A-32 | pnpm prints "Ignored build scripts: esbuild" on install (S-0 QA). | `pnpm-workspace.yaml` gains `ignoredBuiltDependencies: ["esbuild"]` (S-0), which silences the notice without running the script. esbuild's postinstall only checks the platform binary that pnpm already installs from its `@esbuild/<platform>` optional dependency, and `tsx` and Vite run without it, so no install script runs (the supply-chain default stays). No `onlyBuiltDependencies`. A later dependency with a build script goes into one of the two lists by amendment. | §2.2 (`pnpm-workspace.yaml`), TP-0.20 | none | planner decision |
 
 ## 1. Deviations from the HLD, and decisions the HLD left open
 
@@ -144,7 +156,7 @@ Nothing in that list changes application code (D-29 rule 2).
 | File | Responsibility |
 | ---- | -------------- |
 | `package.json` | Private workspace root. Scripts: exactly those in §2.2.2, each added by its owning slice (A-14). `packageManager: pnpm@10.x` (pinned), `engines.node: ">=24 <25"`. |
-| `pnpm-workspace.yaml` | Workspaces: `apps/server`, `apps/web`, `packages/*`, `infra/budmonctl`, `tools/*`. `peerDependencyRules.allowedVersions` with exactly one entry, `eslint-plugin-jsx-a11y>eslint: "10"` (S-0, A-13); no other peer rules. |
+| `pnpm-workspace.yaml` | Workspaces: `apps/server`, `apps/web`, `packages/*`, `infra/budmonctl`, `tools/*`. `peerDependencyRules.allowedVersions` with exactly one entry, `eslint-plugin-jsx-a11y>eslint: "10"` (S-0, A-13); no other peer rules. `ignoredBuiltDependencies: ["esbuild"]` and no `onlyBuiltDependencies` (S-0, A-32). |
 | `.nvmrc` | `24`. |
 | `.gitattributes` | Line-ending rules for the owner's Windows laptop (HLD D-29) (S-0, A-9). Exact content below (§2.2.1). |
 | `.gitignore` | `node_modules/`, `dist/`, `build/`, `.data/`, `.env*` except `.env.example`, `coverage/`, `playwright-report/`, `test-results/`, Android `build/`, `.gradle/`, `local.properties`. |
@@ -162,7 +174,7 @@ Nothing in that list changes application code (D-29 rule 2).
 | `packages/contract/` (`@budmon/contract`) | `src/common/{money,dates,ids,cursor,errors,create,version}.ts`, `src/meta/metaContract.ts`, `src/index.ts`, `src/rules/contractRules.ts`, `scripts/emitOpenapi.ts`, `openapi.json` (S-4). |
 | `infra/budmonctl/` (`@budmon/budmonctl`) | The owner-side CLI in TypeScript: `src/cli.ts`, `src/scram.ts` (F-190), `src/localSecrets.ts` (F-191) (S-15). |
 | `tools/ci/` (`@budmon/tools-ci`) | Sources sit at the package root (`tools/ci/<name>.ts`; there is no `src/` directory, A-7); tests in `tools/ci/test/`. `package.json` has `tsx` (latest 4.x, pinned in the lockfile) as a dev dependency for the CLIs. `checkMigrationFiles.ts`, `checkMergeBack.ts`, `checkApiMinor.ts`, `checkCatalogs.ts`, `checkEnvExample.ts`, `buildNumber.ts`, `tagRelease.sh` (the stage-0 tagging step, §4.17 "Stage-0 tagging") (S-0, S-2, S-4, S-11a, S-14, S-15). |
-| `tools/rehearsal/` (`@budmon/tools-rehearsal`) | Rehearsal harness: `src/run.ts`, `src/fakeGoogle.ts`, `src/fakeFx.ts`, `src/sentryCapture.ts` (S-16). |
+| `tools/rehearsal/` (`@budmon/tools-rehearsal`) | Rehearsal harness: `src/run.ts`, `src/fakeGoogle.ts`, `src/fakeFx.ts`, `src/sentryCapture.ts`, `src/needles.ts` (F-193, A-24) (S-16). |
 
 #### 2.2.1 `.gitattributes` (S-0, A-9)
 
@@ -203,7 +215,7 @@ The root `package.json` `scripts` hold exactly these entries. Each slice adds it
 | `format` | `prettier --write .` | | F-5 | S-0 |
 | `format:check` | `prettier --check .` | | F-5 | S-0 |
 | `lint` | S-0: `eslint .`; from S-11a: `eslint . && pnpm lint:css` | | F-1, F-4 | S-0, changed in S-11a |
-| `typecheck` | `tsc -p tsconfig.json` | | F-5 | S-0 |
+| `typecheck` | S-0: `tsc -p tsconfig.json`; from S-2: `tsc -p tsconfig.json && tsc -p apps/server/tsconfig.json`; from S-11a: `tsc -p tsconfig.json && tsc -p apps/server/tsconfig.json && tsc -p apps/web/tsconfig.json` (A-30) | | F-5 | S-0, changed in S-2 and S-11a |
 | `test` | `vitest run --project=!server-int` | | §10.1 | S-0 |
 | `test:int` | `vitest run --project=server-int` | | §10.1 | S-0 |
 | `check` | `pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm test:int` | | §10.1, D-27 steps 1 to 4 | S-0 |
@@ -225,13 +237,13 @@ The root `package.json` `scripts` hold exactly these entries. Each slice adds it
 
 | Path | Responsibility |
 | ---- | -------------- |
-| `apps/server/package.json`, `tsconfig.json`, `drizzle.config.ts`, `drizzle/` (empty until the first release) | Server workspace. |
+| `apps/server/package.json`, `tsconfig.json`, `drizzle.config.ts`, `drizzle/` (empty until the first release) | Server workspace. `tsconfig.json` (S-2, A-30): extends `@budmon/config/tsconfig/node.json`, `noEmit: true`, `include: ["src/**/*.ts", "test/**/*.ts", "drizzle.config.ts"]`. |
 | `apps/server/src/main/{api,worker,migrate,cli,dbReset,dev}.ts` | Process entry points (F-90 to F-95). |
 | `apps/server/src/platform/config/{schema,loadConfig}.ts` | F-10, F-11. |
 | `apps/server/src/platform/db/{types,client,transaction,clusterBootstrap,roles,grants,schemaPush,migrations,schemaStep,referenceData,reset,seed}.ts`, `sql/cluster-bootstrap.sql` | F-12 to F-23. |
 | `apps/server/src/platform/observability/{safeFields,logger,redaction,sanitize,sentry,otel,metrics,requestLog,errorReporter}.ts` | F-30 to F-38, F-40 to F-42. |
 | `apps/server/src/platform/errors/{BudmonError,platformErrors,interceptor}.ts` | F-50 to F-52. |
-| `apps/server/src/platform/http/{context,procedures,server,clientVersion,health,meta,devObjects}.ts` | F-53 to F-58, F-145. |
+| `apps/server/src/platform/http/{context,procedures,server,clientVersion,health,meta,appRouter,devObjects}.ts` | F-53 to F-59, F-145 (`appRouter.ts`: F-59, A-26). |
 | `apps/server/src/platform/security/{headers,rateLimiter,rateLimitRepo,hashing}.ts` | F-61 to F-66. |
 | `apps/server/src/platform/queue/{jobs,registry,payloadSafety,jobQueue,queueSchema,queueSync,wrapper,workers,deadLetter,heartbeat}.ts` | F-70 to F-79. |
 | `apps/server/src/platform/maintenance/maintenanceJobs.ts` | F-80. |
@@ -245,7 +257,7 @@ The root `package.json` `scripts` hold exactly these entries. Each slice adds it
 | `apps/server/src/db/schema/{currencies,exchangeRates,idempotencyRecords,rateLimitCounters,index}.ts` | §3.1. |
 | `apps/server/src/i18n/{messages/en.json,render.ts}` | F-160 (server-side message rendering for emails and pushes; no messages until `identity`/`notifications`). |
 | `apps/server/test/**` | Test-architect's (§10.1). |
-| `apps/web/` | SolidJS SPA (§8.1, F-200 to F-221). |
+| `apps/web/` | SolidJS SPA (§8.1, F-200 to F-221). `tsconfig.json` (S-11a, A-30): extends `@budmon/config/tsconfig/web.json`, `noEmit: true`, `include: ["src/**/*.ts", "src/**/*.tsx", "test/**/*.ts", "test/**/*.tsx", "e2e/**/*.ts", "vite.config.ts"]`. |
 | `apps/android/` | Gradle project: `app/`, `lint-rules/`, `gradle/libs.versions.toml` (§8.2, F-250 to F-263). |
 | `images/server/Dockerfile` | Server image (api, worker, migrate, cli entry points). |
 | `images/web/Dockerfile` | Upstream `caddy` plus the built SPA. |
@@ -440,13 +452,15 @@ export interface RequestContext {
 - **File:** `packages/config/eslint/index.js` · **Layer:** config
 - **Signature:** `export function createBudmonEslintConfig(options: { tsconfigRootDir: string }): import("eslint").Linter.Config[]`
 - **Behaviour:** returns a flat config with typescript-eslint `strictTypeChecked`, Prettier compatibility, and these rules, all `error`:
-  1. **Layering** (`no-restricted-imports`):
-     - files `apps/server/src/*/*Router.ts` may not import `drizzle-orm*`, `pg`, `**/db/**` or `**/*Repo.js`;
-     - files `apps/server/src/*/*Service.ts` and `apps/server/src/platform/*/*Service.ts` (exactly these two globs, A-11) may not import `drizzle-orm*`, `pg` or `**/db/client.js`;
-     - files under `apps/server/src/platform/http/**` may not import `**/*Repo.js`.
+  1. **Layering** (`no-restricted-imports`; every entry has a `message`, A-27: exact names as `paths` entries, globs as `patterns` groups):
+     - files `apps/server/src/*/*Router.ts` may not import `drizzle-orm*`, `pg` or `**/db/**` (message **L-1** "Layering: routers don't use the database. Call the module's service (*Service.ts) instead.") or `**/*Repo.js` (**L-2** "Layering: routers don't import repositories. Call the module's service (*Service.ts) instead.");
+     - files `apps/server/src/*/*Service.ts` and `apps/server/src/platform/*/*Service.ts` (exactly these two globs, A-11) may not import `drizzle-orm*` or `pg` (**L-3** "Layering: services don't build queries. Call the module's repository (*Repo.ts) with the DbHandle you were given.") or `**/db/client.js` (**L-4** "Layering: services don't open database connections. Take a DbHandle from the caller (withTransaction, F-13) instead.");
+     - files under `apps/server/src/platform/http/**` may not import `**/*Repo.js` (**L-5** "Layering: platform/http doesn't import repositories. Go through a service instead.").
+
+     ESLint prints its own sentence ("'pg' import is restricted from being used.") followed by the message.
   2. **Logging:** `pino` may be imported only under `apps/server/src/platform/observability/**`. `no-console` everywhere except `apps/server/src/main/**` and `tools/**`.
   3. **Money**, in `apps/server/src`, `packages/shared/src` and `apps/web/src`:
-     - `no-restricted-globals: ["parseFloat"]`;
+     - `no-restricted-globals: [{ name: "parseFloat", message: "parseFloat is forbidden; use the money helpers" }]` (message: A-27);
      - `no-restricted-properties` for `Number.parseFloat`, `globalThis.parseFloat` and `window.parseFloat` ("parseFloat is forbidden; use the money helpers") (A-15);
      - `no-restricted-syntax` with `CallExpression[callee.name='Number']` ("Number() conversion is forbidden; use the money helpers or Number.parseInt with a reason"), `UnaryExpression[operator='+']` ("Unary + conversion is forbidden; use the money helpers or Number.parseInt with a reason") (A-15) and `CallExpression[callee.name='bigint'] ObjectExpression > Property[key.name='mode'][value.value='number']`.
 
@@ -517,7 +531,7 @@ export interface RequestContext {
   - `export function runCheckMigrationFilesCli(argv: readonly string[], deps: { readFile: (path: string) => string /* [inj] */; stdout: (line: string) => void /* [inj] */; stderr: (line: string) => void /* [inj] */ }): number` (A-7). Returns the exit code.
 - **Behaviour, `checkMigrationFiles`:**
   - If `branch` matches `^(release|hotfix|infra)/` or `isHotfixMergeBack` is true → `{ ok: true }`.
-  - Otherwise, any changed file whose path starts with `apps/server/drizzle/` → `{ ok: false, message: "Migration files may only change on release/* and hotfix/* branches (D-12): <files>" }`, where `<files>` is the matching paths in input order joined with `", "`.
+  - Otherwise, any changed file whose path starts with `apps/server/drizzle/` → `{ ok: false, message: "Migration files may only change on release/* and hotfix/* branches (D-12): <files>. Move these changes to a release/* or hotfix/* branch, or remove them from this pull request." }`, where `<files>` is the matching paths in input order joined with `", "` (A-29).
   - Otherwise → `{ ok: true }`.
 - **Behaviour, `parseCheckMigrationFilesArgs`** (pure; argv is `process.argv.slice(2)`): reads tokens left to right.
   - `--branch <value>` and `--changed-files <value>` take the next token as their value. If there is no next token, or it is the empty string, or it starts with `--` → `{ ok: false, message: "Missing value for <flag>" }`.
@@ -527,10 +541,10 @@ export interface RequestContext {
 - **Behaviour, `parseChangedFiles`:** splits on `/\r?\n/` and drops empty strings; no other trimming; order and duplicates are kept. `""` → `[]`.
 - **Behaviour, `runCheckMigrationFilesCli`:**
   1. Parse the arguments. On `ok: false`: `stderr("checkMigrationFiles: <message>")`, then `stderr("Usage: checkMigrationFiles.ts --branch <head ref> --changed-files <file> [--hotfix-merge-back]")`; return **64**.
-  2. `deps.readFile(changedFilesPath)` (a relative path resolves against the process's working directory, which under `pnpm --filter … exec` is `tools/ci/`; `ci.yml` passes an absolute path). If it throws: `stderr("checkMigrationFiles: cannot read <path>: <error message>")`; return **64**.
-  3. `checkMigrationFiles({ branch, changedFiles: parseChangedFiles(text), isHotfixMergeBack })`. Not ok → `stderr(message)`; return **1**. Ok → `stdout("checkMigrationFiles: ok (<n> changed files)")`, `n` the number of parsed paths; return **0**.
+  2. `deps.readFile(changedFilesPath)` (a relative path resolves against the process's working directory, which in `ci.yml` is `tools/ci/`; `ci.yml` passes an absolute path). If it throws: `stderr("checkMigrationFiles: cannot read <path>: <error message>")`; return **64**.
+  3. `checkMigrationFiles({ branch, changedFiles: parseChangedFiles(text), isHotfixMergeBack })`. Not ok → `stderr(message)`; return **1**. Ok → `stdout("checkMigrationFiles: ok (1 changed file)")` when exactly one path was parsed, else `stdout("checkMigrationFiles: ok (<n> changed files)")` (A-29), `n` the number of parsed paths; return **0**.
 - **Entry guard:** the module ends with `if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) process.exitCode = runCheckMigrationFilesCli(process.argv.slice(2), { readFile: (p) => readFileSync(p, "utf8"), stdout: (l) => process.stdout.write(`${l}\n`), stderr: (l) => process.stderr.write(`${l}\n`) })`. Importing the module (tests) runs nothing.
-- **CLI invocation:** `pnpm --filter @budmon/tools-ci exec tsx checkMigrationFiles.ts --branch <head ref> --changed-files <file> [--hotfix-merge-back]`.
+- **CLI invocation (A-28):** from `tools/ci/`, `./node_modules/.bin/tsx checkMigrationFiles.ts --branch <head ref> --changed-files <file> [--hotfix-merge-back]`. `tsx` passes the script's exit code through; `pnpm --filter … exec` isn't used, because pnpm maps every non-zero exit to 1 and adds its own error banner. Every CI step that relies on a `tools/ci` CLI's exit code uses this direct form.
 - **Wiring in `ci.yml`** (job `migrations`, created in S-0 and extended in S-14; A-7). The job has `if: github.event_name == 'pull_request'` and `permissions: contents: read`. Values reach the script only through `env`, never by `${{ }}` interpolation inside `run:` (a branch name is attacker-controlled text):
   ```yaml
   - uses: actions/checkout@<pinned SHA>
@@ -545,10 +559,11 @@ export interface RequestContext {
     env:
       HEAD_REF: ${{ github.head_ref }}
       MERGE_BACK: ${{ contains(github.event.pull_request.labels.*.name, 'hotfix-merge-back') || contains(github.event.pull_request.labels.*.name, 'infra-merge-back') }}
+    working-directory: tools/ci   # A-28
     run: |
       args=(--branch "$HEAD_REF" --changed-files "$RUNNER_TEMP/changed-files.txt")
       if [ "$MERGE_BACK" = "true" ]; then args+=(--hotfix-merge-back); fi
-      pnpm --filter @budmon/tools-ci exec tsx checkMigrationFiles.ts "${args[@]}"
+      ./node_modules/.bin/tsx checkMigrationFiles.ts "${args[@]}"
   ```
   - `branch` = `github.head_ref` (the pull request's source branch, e.g. `release/v1.2.0`).
   - `changedFiles` = the three-dot diff against the pull request's base (`github.base_ref`), so only the pull request's own changes count. `HEAD` is the pull request's merge ref checked out by `actions/checkout`. `--no-renames` lists both sides of a rename, so moving a file out of `apps/server/drizzle/` also counts. `-c core.quotePath=false` writes non-ASCII paths verbatim instead of quoted, so they can't slip past the prefix check (A-16).
@@ -1174,12 +1189,13 @@ Pure functions with no I/O. Imported by the server and the web app. Android mirr
 
 #### F-55: `createApiServer`
 - **File:** `platform/http/server.ts` · **Layer:** router (composition)
-- **Signature:** `export async function createApiServer(c: ApiContainer, opts?: { contract?: AnyContractRouter; router?: Router<any, RequestContext> }): Promise<import("fastify").FastifyInstance>`. `opts` defaults to the application's contract and router; tests pass test-only contracts and routers (S-4 AC 1).
+- **Signature:** `export async function createApiServer(c: ApiContainer, opts?: { contract?: AnyContractRouter; router?: Router<any, RequestContext> }): Promise<import("fastify").FastifyInstance>`. `opts.contract` defaults to F-346's `contract` and `opts.router` to F-59's `appRouter` (A-26); tests pass test-only contracts and routers (S-4 AC 1).
 - **Behaviour,** in registration order:
   1. `Fastify({ logger: false, disableRequestLogging: true, trustProxy: c.config.api.trustedProxy.length ? c.config.api.trustedProxy : false, bodyLimit: 102400, connectionTimeout: 30000, requestTimeout: 30000, return503OnClosing: true, genReqId: () => <request id per RequestContext> })`.
   2. F-61 (headers), F-62 (body handling), the coarse in-memory rate limit (F-65's global part), `@fastify/cookie`.
   3. The `onRequest` hook builds the request context: parses `X-Budmon-Client` (F-56), creates the commit tracker (F-13), calls `authHook.authenticate`, and binds a child logger with `requestId`.
   4. F-57 health routes (`GET /health/live`, `GET /health/ready`).
+  4b. **Module routes (A-26):** calls each `c.moduleRoutes[i](app)` in array order (identity registers `GET /api/v1/auth/google/callback` this way). They're plain Fastify routes on the same instance, so steps 2 and 3, F-38 and step 8 apply to them; they're outside oRPC, so F-52's interceptor and F-56's middleware don't, and each route answers its own errors. A static path wins over step 5's `/api/v1/*` wildcard in Fastify's router whatever the order; registering them first keeps the order explicit. A registration that throws (for example a duplicate route) rejects `createApiServer`.
   5. `OpenAPIHandler` from `@orpc/openapi/fastify` for the implemented router (`platform` plus modules' routers), with `prefix: "/api/v1"`, plugins `ResponseHeadersPlugin` and `RequestHeadersPlugin`, interceptors F-52, F-56's middleware, and the `X-Budmon-API-Version` setter. It's mounted with a Fastify catch-all `app.all("/api/v1/*", (request, reply) => handler.handle(request, reply, { prefix: "/api/v1", context }))`, using `@orpc/openapi/fastify`'s handler, which takes the **Fastify** request and reply (not `raw`). **Body handling:** Fastify parses the body first with F-62's JSON parser, body limit and errors, and the adapter reads the already-parsed `request.body`. oRPC never reads the raw stream, so malformed and oversized bodies are answered by F-62 before oRPC runs. TP-4.19 verifies this in S-4's spike. If the adapter turns out to read the raw stream instead, the fallback (an amendment) is `@orpc/openapi/node`'s handler with a pass-through content-type parser for `/api/v1/*` and F-62's checks moved into an oRPC interceptor.
   6. In development only, F-145's dev objects route.
   7. F-38 (request log).
@@ -1217,6 +1233,12 @@ Pure functions with no I/O. Imported by the server and the web app. Android mirr
 - **File:** `platform/http/meta.ts` · **Layer:** router
 - **Signature:** `export const metaRouter = { clientConfig: publicProcedure.meta.clientConfig.handler(({ context }) => …) }`
 - **Behaviour:** returns `{ apiVersion: "1.<API_MINOR>", android: { minimumVersionCode, latestVersionCode, downloadUrl: string | null }, web: { minimumBuild } }` from configuration. Never blocked by F-56.
+
+#### F-59: `appRouter` (A-26)
+- **File:** `platform/http/appRouter.ts` · **Layer:** router (composition)
+- **Signature:** `export const appRouter = base.router({ meta: metaRouter /* modules add their keys */ }); export type AppRouter = typeof appRouter;` (`base` from F-53, `metaRouter` from F-58).
+- **Behaviour:** the implemented router root, mirroring F-346's `contract` key for key. Modules add their routers' keys in their own slices (identity: `auth`, `me`, `invitations`, `users`, `exports`, `deletion`). Built through `base.router`, so a contract key without an implementation fails type-checking. Files under `platform/http/**` may import modules' `*Router.js` files; F-1 bans only repositories there.
+- **Errors:** none (pure).
 
 ### 4.6 Security baseline (S-5)
 
@@ -1381,6 +1403,16 @@ Pure functions with no I/O. Imported by the server and the web app. Android mirr
   - `stop()` calls `boss.stop({ graceful: true, timeout: 30000 })` for each instance.
 - **Errors:** a missing queue throws `MissingQueueError(name)` and the process exits 1 with `error("queue_missing", { queue })`. A missing handler throws `Error("no handler for <name>")`.
 
+#### F-78b: `runGeneralStartHooks` (A-26)
+- **File:** `platform/queue/workers.ts`
+- **Signature:** `export async function runGeneralStartHooks(c: Pick<WorkerContainer, "roles" | "onGeneralStarted" | "logger" | "reporter">): Promise<void>`
+- **Behaviour:**
+  1. `general` not in `c.roles` → returns without calling any hook.
+  2. Otherwise awaits each hook of `c.onGeneralStarted` in array order, each exactly once.
+  3. A hook that rejects: `c.reporter.report(err, { route: "worker:onGeneralStarted" })`, then `c.logger.error("worker_start_hook_failed", { step: "onGeneralStarted:<index>" })` with F-33's sanitised error, then the next hook runs. Hooks are catch-up work (identity's start-up erasure sweep) whose cron runs later anyway, so a failure doesn't stop the worker.
+- **Errors:** never rejects.
+- **Calls:** F-34 (`reporter`), F-31, F-33.
+
 #### F-79: `startHeartbeat`
 - **File:** `platform/queue/heartbeat.ts`
 - **Signature:** `export function startHeartbeat(deps: { metrics: Metrics; clock: Clock; service: string; intervalMs?: number; setInterval?: typeof setInterval /* [inj] */; writeFile?: (path: string, data: string) => void /* [inj], default fs.writeFileSync */; path?: string /* default "/tmp/heartbeat" */ }): { stop(): void; last(): number }`
@@ -1414,7 +1446,7 @@ Pure functions with no I/O. Imported by the server and the web app. Android mirr
 - **Errors:** `ConfigError` → exit 78 (F-11). Any start-up error → `error("startup_failed")` with F-33, then exit 1.
 
 #### F-91: `main/worker.ts`
-- **Behaviour:** like F-90 for kind `worker`: `createWorkerContainer`, then `startWorkers` with the handler map built from the platform's and every module's job handlers (`platform/queue/handlers.ts` exports `buildHandlerMap(c)`). Service name: `worker-capture`, `worker-general` or `worker` (several roles, development only). `SIGTERM` → `stop()`.
+- **Behaviour:** like F-90 for kind `worker`: `createWorkerContainer`, then `startWorkers` with the handler map built from the platform's and every module's job handlers (`platform/queue/handlers.ts` exports `buildHandlerMap(c)`, which merges each module's handler map, for example identity's `identityHandlers(…)`; the factory's argument is the module's choice), then F-78b `runGeneralStartHooks(c)` once `startWorkers` has resolved (A-26). Service name: `worker-capture`, `worker-general` or `worker` (several roles, development only). `SIGTERM` → `stop()`.
 
 #### F-92: `main/migrate.ts` (`pnpm db:migrate`, image entry `node dist/main/migrate.js`)
 - **Behaviour:**
@@ -1431,7 +1463,7 @@ Pure functions with no I/O. Imported by the server and the web app. Android mirr
   | ------- | ----- | ------ | ---- |
   | `jobs:dead list [--role capture\|general] [--limit n]` | F-81 | one JSON line per entry | 0 |
   | `jobs:dead redrive --role r --id <uuid>` | F-81 | `{"moved":n}` | 0 if moved = 1, else 2 |
-  | `secrets:rewrap-api` | F-117 | `{"rewrapped":n,"skipped":m}` | 0 |
+  | `secrets:rewrap-api` | F-117's `rewrapApiSecretsCommand(createApiContainer(config))`, then `close()` (A-26: the columns come from `container.sealedColumns.all()`) | `{"rewrapped":n,"skipped":m}` | 0 |
   | `restore:verify` | F-150 | report JSON | 0 if ok, else 6. Always run as the `migrate` service (role `budmon_migrator`, which holds `pg_read_all_data` and `EXECUTE` on `bt_index_check`) with that service's secrets; `budmon-local restore` adds `DB_NAME=budmon_restore` (F-178). |
   | `erasure:replay --since <RFC 3339>` | F-151 | `{"replayed":n}` | 0, 2 if no handler is registered and records exist |
   | `jobs:capture-rewrap` | enqueues `platform.capture-rewrap` (F-118) | `{"enqueued":true}` | 0 |
@@ -1451,15 +1483,21 @@ Pure functions with no I/O. Imported by the server and the web app. Android mirr
 - **Signatures:**
   ```ts
   export interface BaseContainer { config: Config; logger: Logger; clock: Clock; ids: IdGenerator; database: Database; metrics: PlatformMetrics;
-    reporter: ErrorReporter; registry: JobRegistry; queue: JobQueue; boss: PgBoss; close(): Promise<void> }
+    reporter: ErrorReporter; registry: JobRegistry; queue: JobQueue; boss: PgBoss;
+    sealedColumns: SealedColumnRegistry;                    // A-26 (F-115)
+    close(): Promise<void> }
   export interface ApiContainer extends BaseContainer { authHook: AuthHook; rateLimiter: RateLimiter; idempotency: Idempotency; cursors: CursorCodec;
-    captureSealer: CaptureSealer; apiSecrets: ApiSecretsCipher; objectStore: ObjectStore; fx: FxService }
+    captureSealer: CaptureSealer; apiSecrets: ApiSecretsCipher; objectStore: ObjectStore; fx: FxService;
+    moduleRoutes: ((app: import("fastify").FastifyInstance) => void)[] }   // A-26
   export interface WorkerContainer extends BaseContainer { roles: ReadonlySet<WorkerRole>; captureSealer: CaptureSealer | null; captureUnsealer: CaptureUnsealer | null;
-    fx: FxService; objectStore: ObjectStore | null; erasureLog: ErasureLog | null; fxProviders: FxProviders | null; queueBoss: PgBoss | null; captureBoss: PgBoss | null }
+    fx: FxService; objectStore: ObjectStore | null; erasureLog: ErasureLog | null; fxProviders: FxProviders | null; queueBoss: PgBoss | null; captureBoss: PgBoss | null;
+    erasureHandler: ErasureHandler | null;                  // A-26 (F-146)
+    onGeneralStarted: (() => Promise<void>)[] }             // A-26 (F-78b)
   export function createApiContainer(config: Config, overrides?: Partial<ApiContainer>): ApiContainer;
   export function createWorkerContainer(config: Config, overrides?: Partial<WorkerContainer>): WorkerContainer;
   ```
-- **Behaviour:** builds every dependency from config in dependency order, letting `overrides` replace any entry (tests). Capture-only members (`captureUnsealer`, `captureBoss`) are `null` unless the `capture` role is present. General-only members (`objectStore`, `erasureLog`, `fxProviders`, `queueBoss`) are `null` unless `general` is present. **`fx` (F-132) is built for every worker role** (and the API): worker-capture runs `transactions`' service when capturing, and budget progress needs conversion. It only reads `currencies`/`exchange_rates` (granted to both roles) and enqueues backfills, which `budmon_capture` may send. `close()` stops pg-boss instances and closes the database pool.
+- **Behaviour:** builds every dependency from config in dependency order, letting `overrides` replace any entry (tests).
+  - **Module wiring (A-26),** in this order: (1) the platform members; (2) `sealedColumns` (`overrides.sealedColumns` or `createSealedColumnRegistry()`), `moduleRoutes` and `onGeneralStarted` (the override's array or `[]`); (3) module members: identity's S-0 adds `identity: IdentityModule` to both interfaces (the platform doesn't declare it, because the type is identity's) and builds it here, so it registers into step 2's registry and appends to step 2's arrays; (4) `authHook` = `overrides.authHook`, else the module's (`identity.authHook`), else `noAuthHook` (F-54); `erasureHandler` = `overrides.erasureHandler`, else the module's, else `null`. Before any module exists, the defaults are `noAuthHook`, `null`, `[]` and an empty registry. Other modules register ports and subscriptions on `container.identity` here too, before the server or workers start. Capture-only members (`captureUnsealer`, `captureBoss`) are `null` unless the `capture` role is present. General-only members (`objectStore`, `erasureLog`, `fxProviders`, `queueBoss`) are `null` unless `general` is present. **`fx` (F-132) is built for every worker role** (and the API): worker-capture runs `transactions`' service when capturing, and budget progress needs conversion. It only reads `currencies`/`exchange_rates` (granted to both roles) and enqueues backfills, which `budmon_capture` may send. `close()` stops pg-boss instances and closes the database pool.
 
 ### 4.9 Idempotency and cursors (S-7)
 
@@ -1594,13 +1632,13 @@ Pure functions with no I/O. Imported by the server and the web app. Android mirr
 
 #### F-115: sealed-column registry
 - **File:** `platform/crypto/sealedColumns.ts`
-- **Signature:** `export interface SealedColumn { table: string; idColumn: string; column: string; purpose: string; provider: "capture" | "api" }; export function createSealedColumnRegistry(): { register(c: SealedColumn): void; all(): readonly SealedColumn[] }`
-- **Behaviour:** modules register their sealed columns at container build. The platform registers none.
+- **Signature:** `export interface SealedColumn { table: string; idColumn: string; column: string; purpose: string; provider: "capture" | "api" }; export interface SealedColumnRegistry { register(c: SealedColumn): void; all(): readonly SealedColumn[] }; export function createSealedColumnRegistry(): SealedColumnRegistry` (the interface name: A-26)
+- **Behaviour:** modules register their sealed columns at container build, into `container.sealedColumns` (F-96, A-26), which exists in the API and every worker container. The platform registers none. `all()` returns them in registration order.
 - **Errors:** identifiers not matching `^[a-z_][a-z0-9_]{0,62}$`, a purpose failing the `token` rule, or a duplicate `(table, column)` throw `TypeError`.
 
 #### F-117: `rewrapApiSecrets`
 - **File:** `platform/crypto/rewrap.ts`
-- **Signature:** `export async function rewrapApiSecrets(deps: { database: Database; cipher: ApiSecretsCipher; columns: readonly SealedColumn[]; batchSize?: number; logger: Logger }): Promise<{ rewrapped: number; skipped: number }>`
+- **Signatures:** `export async function rewrapApiSecrets(deps: { database: Database; cipher: ApiSecretsCipher; columns: readonly SealedColumn[]; batchSize?: number; logger: Logger }): Promise<{ rewrapped: number; skipped: number }>`; `export async function rewrapApiSecretsCommand(c: Pick<ApiContainer, "database" | "apiSecrets" | "sealedColumns" | "logger">): Promise<{ rewrapped: number; skipped: number }>` (A-26), which calls `rewrapApiSecrets({ database: c.database, cipher: c.apiSecrets, columns: c.sealedColumns.all(), logger: c.logger })`. F-93's `secrets:rewrap-api` calls the command form.
 - **Behaviour:** for each column with `provider: "api"`, repeatedly:
   1. Selects up to `batchSize` (default 500) rows: `SELECT <id>, <col> FROM <table> WHERE <col> IS NOT NULL AND substring(<col> from 4 for get_byte(<col>, 2)) <> convert_to($current, 'UTF8') LIMIT $n`.
   2. In one transaction per batch, for each row: `unseal` with `{ table, rowId: id, purpose }`, then `seal` with the current key, then `UPDATE … SET <col> = $new WHERE <id> = $id AND <col> = $old`.
@@ -1612,7 +1650,7 @@ Pure functions with no I/O. Imported by the server and the web app. Android mirr
 #### F-118: `platform.capture-rewrap` job
 - **File:** `platform/crypto/rewrap.ts`
 - **Definition:** `defineJob({ name: "platform.capture-rewrap", role: "capture", payload: z.object({}), retryLimit: 3, expireInSeconds: 3600, policy: "singleton" })`
-- **Behaviour:** like F-117 for columns with `provider: "capture"`. Rows qualify when their key version ≠ `config.capture.keyVersion`. Each row is unsealed through F-112/F-113 and sealed with F-111. Batches of 100. Logs `info("capture_rewrap", { count })`.
+- **Behaviour:** like F-117 for the worker container's `c.sealedColumns.all()` columns with `provider: "capture"` (A-26). Rows qualify when their key version ≠ `config.capture.keyVersion`. Each row is unsealed through F-112/F-113 and sealed with F-111. Batches of 100. Logs `info("capture_rewrap", { count })`.
 
 #### F-119: PKCE, state and the authorisation URL
 - **File:** `platform/crypto/oauth.ts`
@@ -1783,15 +1821,17 @@ Pure functions with no I/O. Imported by the server and the web app. Android mirr
     delete(bucket: BucketName, key: string): Promise<void>;          // missing key: no error
     deletePrefix(bucket: BucketName, prefix: string): Promise<number>;
     list(bucket: BucketName, prefix: string): AsyncIterable<{ key: string; lastModified: Temporal.Instant }>;
-    presignGet(bucket: BucketName, key: string, ttlSeconds?: number): Promise<URL>; // 60..900, default 900
+    presignGet(bucket: BucketName, key: string, ttlSeconds?: number, opts?: PresignGetOptions): Promise<URL>; // ttl 60..900, default 900; opts: A-22
   }
+  export interface PresignGetOptions { downloadName?: string }       // A-22: the file name the browser saves
   export function assertObjectKey(bucket: BucketName, key: string): void;
   ```
 - **Key rules:**
   - `exports`: `^users/[0-9a-f-]{36}/exports/[0-9a-f-]{36}\.(csv|json|zip)$`.
   - `erasure-log`: `^records/\d{8}T\d{6}Z_[0-9a-f-]{36}\.json$`.
   - Prefixes must match `^users/[0-9a-f-]{36}/$`, `^users/$` or `^records/$`.
-- **Errors:** an invalid key or prefix throws `RangeError`. A `ttlSeconds` outside 60..900 throws `RangeError`.
+- **`downloadName` (A-22):** must match `^[A-Za-z0-9._-]{1,100}$`. Each implementation puts it into the download's `Content-Disposition` as `attachment; filename="<downloadName>"`; without it the header is `attachment`.
+- **Errors:** an invalid key or prefix throws `RangeError`. A `ttlSeconds` outside 60..900 throws `RangeError`. A `downloadName` not matching its pattern throws `RangeError`. All three are checked before any I/O.
 
 #### F-141: `createS3ObjectStore`
 - **File:** `platform/storage/s3ObjectStore.ts` · **Layer:** integration
@@ -1799,7 +1839,7 @@ Pure functions with no I/O. Imported by the server and the web app. Android mirr
 - **Behaviour:**
   - AWS SDK v3 `S3Client({ endpoint, region, credentials, requestChecksumCalculation: "WHEN_REQUIRED" })`; the logical bucket is mapped to its configured name.
   - `deletePrefix` lists with `ListObjectsV2` (1000 per page) and deletes with `DeleteObjects`.
-  - `presignGet` uses `getSignedUrl(client, new GetObjectCommand({ Bucket, Key, ResponseContentDisposition: "attachment" }), { expiresIn })`.
+  - `presignGet` uses `getSignedUrl(client, new GetObjectCommand({ Bucket, Key, ResponseContentDisposition }), { expiresIn })`, with `ResponseContentDisposition` = `'attachment; filename="<downloadName>"'` when `opts.downloadName` is given, else `"attachment"` (A-22). The URL carries it as the signed `response-content-disposition` parameter.
 - **Errors:** SDK `NoSuchKey`/404 → `ObjectStoreError("not_found")`; 403 → `"denied"`; network or 5xx → `"unavailable"`.
 
 #### F-142: `createFsObjectStore`
@@ -1807,12 +1847,12 @@ Pure functions with no I/O. Imported by the server and the web app. Android mirr
 - **Signature:** `export function createFsObjectStore(cfg: { root: string; publicOrigin: URL; signingKey: Buffer; clock: Clock }): ObjectStore`
 - **Behaviour:**
   - Files live at `<root>/<bucket>/<key>`; `lastModified` is the file's mtime.
-  - `presignGet` returns `<publicOrigin>/dev/objects/<token>`, where `token = base64url(canonicalJson({ b, k, exp })) + "." + base64url(hmacSha256(signingKey, payloadPart))`.
+  - `presignGet` returns `<publicOrigin>/dev/objects/<token>`, where `token = base64url(canonicalJson({ b, k, exp, n })) + "." + base64url(hmacSha256(signingKey, payloadPart))`. `n` is `opts.downloadName`; the key is omitted (not `null`) when no name is given (A-22).
 
 #### F-143: `createMemoryObjectStore`
 - **File:** `platform/storage/memoryObjectStore.ts`
 - **Signature:** `export function createMemoryObjectStore(clock: Clock): ObjectStore & { snapshot(): ReadonlyMap<string, { body: Buffer; lastModified: Temporal.Instant }> }`
-- **Behaviour:** an in-memory fake with the same validation and error behaviour. `presignGet` returns `memory://<bucket>/<key>?exp=<epoch>`.
+- **Behaviour:** an in-memory fake with the same validation and error behaviour. `presignGet` returns `memory://<bucket>/<key>?exp=<epoch>`, plus `&n=<downloadName>` when `opts.downloadName` is given (A-22); tests read the name from the URL's `n` parameter. Nothing else records it.
 
 #### F-144: exports purge
 - **File:** `platform/storage/exportsPurge.ts`
@@ -1822,7 +1862,7 @@ Pure functions with no I/O. Imported by the server and the web app. Android mirr
 #### F-145: development objects route
 - **File:** `platform/http/devObjects.ts`
 - **Signature:** `export function registerDevObjectsRoute(app: FastifyInstance, deps: { root: string; signingKey: Buffer; clock: Clock }): void`
-- **Behaviour:** registered only when `APP_ENV=development`. `GET /dev/objects/:token` verifies the HMAC (constant time) and `exp ≥ now`, then streams the file with `Content-Disposition: attachment` and `Cache-Control: no-store`. Any failure → `404` with the platform `NOT_FOUND` envelope.
+- **Behaviour:** registered only when `APP_ENV=development`. `GET /dev/objects/:token` verifies the HMAC (constant time) and `exp ≥ now`, then streams the file with `Cache-Control: no-store` and `Content-Disposition: attachment; filename="<n>"` when the payload has `n`, else `Content-Disposition: attachment` (A-22). An `n` that doesn't match F-140's `downloadName` pattern is a failure (checked after the HMAC). Any failure → `404` with the platform `NOT_FOUND` envelope.
 
 #### F-146: `ErasureLog`
 - **File:** `platform/storage/erasureLog.ts`
@@ -1836,7 +1876,7 @@ Pure functions with no I/O. Imported by the server and the web app. Android mirr
 - **Behaviour:**
   - `append` writes `records/<erasedAt as YYYYMMDDTHHMMSSZ>_<userId>.json` with body `canonicalJson({ userId, erasedAt: erasedAt.toString() })`, `application/json`.
   - `listSince` lists `records/` and returns records with `erasedAt ≥ since`, read from the key name (parsed; the body isn't needed), sorted by `erasedAt` and then `userId`.
-  - `identity` provides the `ErasureHandler` through the container (`WorkerContainer.erasureHandler`, default `null`).
+  - `identity` provides the `ErasureHandler` through the container (`WorkerContainer.erasureHandler: ErasureHandler | null`, default `null`, declared in F-96 by A-26).
 - **Errors:** `put` failures propagate (`identity` stops the erasure before deleting anything, HLD D-30).
 
 ### 4.13 Operations commands (S-10)
@@ -2195,7 +2235,7 @@ Stage 0 runs on the owner's Windows laptop (HLD D-29 v1.1): Docker Desktop with 
 - **File:** `tools/rehearsal/src/run.ts`; CLI `pnpm --filter @budmon/tools-rehearsal rehearse --previous <tag|none>`
 - **Signature:** `export async function runRehearsal(opts: { previousTag: string | null; images: { server: string; web: string; postgres: string }; workDir: string }, deps: { exec: (cmd: string, args: string[], o?: object) => Promise<{ code: number; stdout: string }> /* [inj] */ }): Promise<{ ok: boolean; steps: { name: string; ok: boolean; detail: string }[] }>`
 - **Steps** (each recorded; the first failure stops the run, except that cleanup and artifact collection always run). The topology is the **laptop's** (`infra/local/compose.main.yaml` + `compose.capture.yaml`) with the overlay `infra/local/rehearsal/compose.rehearsal.yaml`.
-  1. `secrets`: F-191 into a temp `BUDMON_HOME`; placeholders filled with throwaway values through `budmon-local secret set`; the CA and TLS files as in F-178 `install` step 5; `apply_secret_ownership` (the runner has passwordless `sudo`), so the containers read their files under the same UIDs and modes as on the laptop; a `site.env` with throwaway values. The candidate's `infra/local/` is copied into `releases/<candidate>/` as F-178 does, and every Compose call uses that copy.
+  1. `secrets`: F-191 into a temp `BUDMON_HOME`; placeholders filled with throwaway values through `budmon-local secret set`; the CA and TLS files as in F-178 `install` step 5; `apply_secret_ownership` (the runner has passwordless `sudo`), so the containers read their files under the same UIDs and modes as on the laptop; a `site.env` with throwaway values, including Google sign-in (A-24): `GOOGLE_SIGNIN_CLIENT_ID=rehearsal-signin.apps.googleusercontent.com` (`REHEARSAL_SIGNIN_CLIENT_ID`, F-193's file), `GOOGLE_SIGNIN_CALLBACK_ORIGIN=http://localhost:8080`, `GOOGLE_SIGNIN_APP_ORIGINS=http://localhost:8080` (A-3's rule admits `http://localhost:<port>`, not `127.0.0.1`) and an empty `GOOGLE_SIGNIN_ANDROID_CLIENT_IDS`; the `GOOGLE_SIGNIN_CLIENT_SECRET` placeholder is filled like the others. The candidate's `infra/local/` is copied into `releases/<candidate>/` as F-178 does, and every Compose call uses that copy.
   2. `previous-db`:
      - `previousTag` not null: start Postgres from the **postgres image** with `BUDMON_FIRST_SETUP=1`, run the previous release's `migrate` image, then load `apps/server/test/upgrade/<version>/fixtures.sql`;
      - `previousTag = null`: first setup only.
@@ -2204,15 +2244,24 @@ Stage 0 runs on the owner's Windows laptop (HLD D-29 v1.1): Docker Desktop with 
      - `APP_ENV=rehearsal` with `KMS_PROVIDER=local`;
      - MinIO for B2;
      - F-197 behind `FX_PRIMARY_BASE_URL`/`FX_FALLBACK_BASE_URL`;
-     - the base stack's own Mailpit (A-2; the overlay adds nothing for email), whose API (`http://mailpit:8025/api/v1/`) the checks use;
-     - F-196 reachable as the Google hostnames through `extra_hosts`, with `NODE_EXTRA_CA_CERTS` set to its CA;
+     - the base stack's own Mailpit (A-2; the overlay adds nothing for email), whose API the harness reads at its published address `http://127.0.0.1:8025/api/v1/` (the harness runs on the runner host, outside `mail-ui`; A-25);
+     - F-196, started by the harness with `signInClientId = REHEARSAL_SIGNIN_CLIENT_ID` and a fresh `generateSignInKeyPair()` (A-24), reachable as the Google hostnames (`oauth2.googleapis.com`, `www.googleapis.com`, `gmail.googleapis.com`, `pubsub.googleapis.com`) through `extra_hosts`, with `NODE_EXTRA_CA_CERTS` set to its CA, on the capture-path containers and on **`api`** (A-24; `api` reaches it over `egress`, A-3). The harness's CA issues the fake's leaf certificate with exactly those four names as SANs;
      - `SENTRY_DSN` pointing at F-194.
   5. `ready`: `/health/ready` is 200 through Caddy on `127.0.0.1:8080`, and both workers are healthy within 120 s.
   6. `upgrade-assertions` (`previousTag` not null): runs `apps/server/test/upgrade/<version>/*.test.ts` against the migrated database.
-  7. `canary-flows`: runs `tools/rehearsal/checks/canaryFlows.test.ts` (test-architect) through Caddy. Then (A-2, A-6):
-     - **bootstrap-owner:** runs `budmon-local bootstrap-owner --email <canaries.email>` logic (`docker compose exec -T api node dist/main/cli.js identity:bootstrap-owner --email …`), captures the printed link and adds its token to step 8's needles. If the command prints `Unknown command:` (identity not built yet), the sub-step is recorded as `skipped: identity not built`.
-     - **email canary path** (added to `canaryFlows.test.ts` by `identity`'s build): a password reset and an invitation for the canary address are sent; Mailpit's API confirms both deliveries; their tokens are added to step 8's needles.
-  8. `scan`: F-198 over every container's `docker logs`, Caddy's access and error logs, the Postgres log, the captured Sentry events, and `SELECT output FROM pgboss.job`.
+  7. `canary-flows`: runs `tools/rehearsal/checks/canaryFlows.test.ts` (test-architect) through Caddy. Then three sub-steps, in this order, each recorded as `canary-flows/<name>` (A-2, A-6, A-24, A-25). The harness keeps a list `needles: Needle[]` (F-193) that step 8 scans for. **HTTP in the sub-steps:** `node:http` to `127.0.0.1:8080` with `Host: localhost:8080` (Caddy; the origin A-24 configures), `Origin: http://localhost:8080` on every `POST`, JSON bodies, and no `X-Budmon-Client` header (kind `other`, never blocked). Request and response shapes are identity's (identity LLD §5); an unexpected answer fails the sub-step with a detail naming the request, the status and the error key only. **Skipping:** a sub-step is recorded `skipped: identity not built` when the one before it was skipped, or when its first request answers `404` with envelope code `NOT_FOUND` (7a: when the CLI prints `Unknown command:`); a skipped sub-step doesn't fail the run.
+     - **7a `bootstrap-owner`** (A-6, A-25): `docker compose exec -T api node dist/main/cli.js identity:bootstrap-owner --email rehearsal-owner.7f3a@example.invalid` (`REHEARSAL_OWNER_EMAIL`, F-193's file; deliberately **not** `canaries.email`, which 7b invites and 7c expects to have no account). Takes the token from the printed link's `#t=` fragment. Needles: `bootstrap-token`, `owner-email`. Any other non-zero exit fails. Upgrade fixtures (`apps/server/test/upgrade/<version>/fixtures.sql`) never contain an owner user, so this runs on upgraded databases too.
+     - **7b `email-canary`** (A-25, identity PA-10):
+       1. `POST /api/v1/invitations/accept` with `{ token: <bootstrap token>, displayName: "Rehearsal Owner", locale: "en", timeZone: "UTC", baseCurrency: "USD", method: { kind: "password", password: <ownerPassword> }, tokenDelivery: "body" }` plus any device fields identity's contract requires. `ownerPassword` is base64url of 24 random bytes (needle `owner-password`). Expects 2xx. Every string value in the response JSON matching `^bm[a-z]_[A-Za-z0-9_-]{43}$` becomes a needle (`session-token-<i>`); the `bma_` one is the owner's access token.
+       2. `POST /api/v1/invitations` with `Authorization: Bearer <access token>`, `Idempotency-Key: <random UUID>` and `{ email: canaries.email }`. Expects 201.
+       3. `POST /api/v1/auth/password-reset/request` with `{ email: REHEARSAL_OWNER_EMAIL }`. Expects 2xx.
+       4. Polls `GET http://127.0.0.1:8025/api/v1/messages` every 2 s for up to 60 s, until there's a message whose `To` holds `canaries.email` and one whose `To` holds `REHEARSAL_OWNER_EMAIL`. For each, `GET http://127.0.0.1:8025/api/v1/message/<ID>` and extracts every match of `#t=(bm[a-z]_[A-Za-z0-9_-]{43})` from `Text` and `HTML`. Passes when the invitation message yields at least one `bmi_` token and the reset message at least one `bmp_` token; every extracted token becomes a needle (`mail-token-<i>`). Timeout → fails with detail `mail_not_delivered`. `canaries.email` needs no needle: it's a CANARIES member.
+     - **7c `google-sign-in`** (A-24, identity PA-9):
+       1. `POST /api/v1/auth/google/start` with `{ intent: "sign_in", returnTo: "/" }`. Expects 200 `{ authorizationUrl }`; keeps every `Set-Cookie` name and value as the cookie jar (the binding cookie).
+       2. Reads the `state` and `nonce` query parameters from `authorizationUrl` (both required). Needles: `google-state`, `google-nonce`.
+       3. `GET /api/v1/auth/google/callback?code=<fakeSignInCode(nonce)>&state=<state>` with **no cookies** (as a browser arriving from Google with `SameSite=Strict` cookies). Expects `303` with a `Location` ending in `#h=(bmh_[A-Za-z0-9_-]{43})`. Needles: `google-code`, `google-handoff`.
+       4. `POST /api/v1/auth/google/complete` with `{ handoff, tokenDelivery: "cookie" }` and the jar's cookies. Expects `404` with envelope code `GOOGLE_ACCOUNT_UNKNOWN` and `data.email` equal to `canaries.email` (the canary address has only a pending invitation, no user).
+  8. `scan`: F-198 `scanForCanaries(sources, CANARIES)` and F-193 `scanForNeedles(sources, needles)` (A-24) over every container's `docker logs`, Caddy's access and error logs, the Postgres log, the captured Sentry events, and `SELECT output FROM pgboss.job`. Any hit fails the step; the detail lists the source and the canary or needle **name**, never a value.
   8b. `mailpit-quiet` (A-2): `docker inspect` of `mailpit` shows `HostConfig.LogConfig.Type = none` and `--quiet` in its command, and its only published port is `127.0.0.1:8025`.
   9. `no-stage-setting`: `docker inspect` every application container. Fail if `Config.Env` or `Mounts` mention `HOST_ROLE`, `DEPLOYMENT`, `INFRA_STAGE` or `STAGE`.
   10. `cross-role-secrets`: no `budmon-main` container mounts anything under `secrets/capture`, and vice versa; worker-capture can't open a TCP connection to `PG_DATA_IP:5432` (it isn't on `data`).
@@ -2229,13 +2278,24 @@ Stage 0 runs on the owner's Windows laptop (HLD D-29 v1.1): Docker Desktop with 
 
 #### F-196: fake Google
 - **File:** `tools/rehearsal/src/fakeGoogle.ts`
-- **Signature:** `export function startFakeGoogle(opts: { tls: { key: Buffer; cert: Buffer }; port: number; controlPort: number; canaries: Canaries }): Promise<{ close(): Promise<void> }>`
+- **Signatures:**
+  ```ts
+  export const FAKE_SIGNIN_KID = "fake-signin-1";                                                    // A-24
+  export function generateSignInKeyPair(): { privateKey: KeyObject; publicKey: KeyObject };           // A-24: node:crypto RSA-2048, one per run
+  export function fakeSignInCode(nonce: string): string;                                              // A-24: "signin." + base64url(UTF-8 nonce)
+  export function startFakeGoogle(opts: { tls: { key: Buffer; cert: Buffer }; port: number; controlPort: number; canaries: Canaries;
+    signInClientId: string; signInKeyPair: { privateKey: KeyObject; publicKey: KeyObject } }): Promise<{ close(): Promise<void> }>;
+  ```
 - **Behaviour:** HTTPS server answering by the `Host` header:
-  - `oauth2.googleapis.com POST /token` → `{ access_token: canaries.token, refresh_token: canaries.token + "-r", expires_in: 3599, scope: "https://www.googleapis.com/auth/gmail.readonly", token_type: "Bearer" }`;
+  - `oauth2.googleapis.com POST /token` (form-encoded), by the form's `client_id` (A-24):
+    - **`client_id` equals `signInClientId` (sign-in):** the `code` must match `^signin\.([A-Za-z0-9_-]{1,512})$` and its group must decode (base64url, then UTF-8) to a non-empty string, the nonce. Otherwise `400 {"error":"invalid_grant"}`. On success, `200 { access_token: canaries.token, id_token: <JWT>, expires_in: 3599, token_type: "Bearer", scope: "openid email profile" }`. The JWT's header is `{ alg: "RS256", kid: FAKE_SIGNIN_KID, typ: "JWT" }`; it's signed with `crypto.sign("sha256", <header>.<payload>, privateKey)` (RSASSA-PKCS1-v1_5); its claims are exactly `iss "https://accounts.google.com"`, `aud` and `azp` = `signInClientId`, `sub "canary-sub-7f3a"`, `email` = `canaries.email`, `email_verified true`, `name "Canary User"`, `iat` = now (epoch seconds), `exp` = `iat + 3600`, `nonce` = the decoded nonce. The control mode doesn't apply to this branch.
+    - **Any other `client_id`, or none (Gmail):** `{ access_token: canaries.token, refresh_token: canaries.token + "-r", expires_in: 3599, scope: "https://www.googleapis.com/auth/gmail.readonly", token_type: "Bearer" }`, subject to the control mode.
+  - `www.googleapis.com GET /oauth2/v3/certs` (A-24) → `200`, `Content-Type: application/json`, `{ keys: [{ kty: "RSA", n, e, kid: FAKE_SIGNIN_KID, alg: "RS256", use: "sig" }] }` from `publicKey.export({ format: "jwk" })`: public members only.
   - `gmail.googleapis.com GET /gmail/v1/users/me/history` and `/messages/:id` → canary content (`snippet` and `payload.body.data` hold `canaries.message`; headers hold `canaries.payee`);
   - `pubsub.googleapis.com` → `503` (sources' tests use their own fakes).
+  - Any other host or path → `404`.
 
-  `POST /__control { mode: "ok" | "invalid_grant" | "server_error" | "gaxios_error" }` on `controlPort` switches the token endpoint: `400 {error:"invalid_grant", error_description: canaries.message}`, `500` with a body containing `canaries.token`, or a malformed body that triggers a client exception with config.
+  `POST /__control { mode: "ok" | "invalid_grant" | "server_error" | "gaxios_error" }` on `controlPort` switches the Gmail token branch: `400 {error:"invalid_grant", error_description: canaries.message}`, `500` with a body containing `canaries.token`, or a malformed body that triggers a client exception with config.
 
 #### F-197: fake FX
 - **File:** `tools/rehearsal/src/fakeFx.ts`
@@ -2246,6 +2306,18 @@ Stage 0 runs on the owner's Windows laptop (HLD D-29 v1.1): Docker Desktop with 
 - **Signatures:** `export interface Canaries { amountMinor: string; payee: string; email: string; token: string; message: string }; export const CANARIES: Canaries; export function scanForCanaries(sources: readonly { name: string; text: string }[], canaries: Canaries): { source: string; canary: keyof Canaries; offset: number }[]`
 - **Canaries:** `amountMinor: "987654321"`, `payee: "CANARYPAYEE7f3a"`, `email: "canary.7f3a@example.invalid"`, `token: "ya29.CANARYTOKEN7f3a"`, `message: "CANARYMESSAGE7f3a"`.
 - **Behaviour:** case-sensitive substring search. Also searches the base64 and URL-encoded forms of each canary.
+
+#### F-193: `scanForNeedles` and the rehearsal constants (A-24, A-25)
+- **File:** `tools/rehearsal/src/needles.ts` (platform code in the harness; F-198 stays the test-architect's)
+- **Signatures:**
+  ```ts
+  export const REHEARSAL_OWNER_EMAIL = "rehearsal-owner.7f3a@example.invalid";
+  export const REHEARSAL_SIGNIN_CLIENT_ID = "rehearsal-signin.apps.googleusercontent.com";
+  export interface Needle { name: string; value: string }
+  export function scanForNeedles(sources: readonly { name: string; text: string }[], needles: readonly Needle[]): { source: string; needle: string; offset: number }[];
+  ```
+- **Behaviour:** values the rehearsal learns at run time (tokens, the owner's address and password). For each needle, the same three forms F-198 searches: the raw value, its base64 form and its `encodeURIComponent` form, case-sensitive. Returns one hit per occurrence, ordered by source then offset. A hit carries the needle's **name**, never its value.
+- **Errors:** a needle whose `value` is shorter than 8 characters throws `TypeError` (naming the needle), so a short value can't match by accident.
 
 #### F-194: `startSentryCapture`
 - **File:** `tools/rehearsal/src/sentryCapture.ts` (S-16)
@@ -2423,7 +2495,7 @@ Package `com.budmon.app`, under `apps/android/app/src/main/java/com/budmon/app/`
 | F-251 | `ClientHeaderInterceptor(versionCode: Int)`, `TraceparentInterceptor(random)`, `IdempotencyKeyInterceptor` (`core/network/Interceptors.kt`) | Add `X-Budmon-Client: android/<versionCode>`, and `traceparent` with random ids. `IdempotencyKeyInterceptor` reads the request tag `IdempotencyKey(value: UUID)` and sets `Idempotency-Key` (lower-case); with no tag it adds nothing. |
 | F-252 | `ApiErrorParser.parse(code: Int, body: ByteArray?): ApiError` (`core/network/ApiError.kt`) | `sealed interface ApiError { data class Defined(val key: String, val status: Int, val data: JsonObject?); object Unavailable; object Network; object Timeout; object Unknown }`. A body matching the envelope (`defined: true`, string `code`) → `Defined`. Otherwise status 502, 503 or 504 → `Unavailable`; other statuses ≥ 500 → `Defined("INTERNAL", status, null)`; other statuses → `Unknown`. `IOException` → `Network`; `SocketTimeoutException` → `Timeout` (mapped by the caller). |
 | F-253 | `ErrorMessages.forError(error: ApiError, op: Operation): UiText` (`core/error/ErrorMessages.kt`) | Same mapping as F-203, to `R.string` resources with the same keys (dots → underscores). `UiText` holds a resource id and arguments. |
-| F-254 | `OutboxEntry` (`@Entity("outbox")`) and `OutboxDao` (`core/outbox/`) | Columns: `id: Long` (PK autogen), `idempotencyKey: String` (unique), `method: String`, `path: String`, `body: ByteArray`, `contentType: String`, `createdAtEpochMs: Long`, `status: String` (`PENDING`, `SENDING`, `FAILED`, `NEEDS_CONFIRMATION`, `PAUSED`), `lastErrorKey: String?`, `attempts: Int`. DAO: `insert`, `pendingOldestFirst(limit)`, `markStatus(id, status, errorKey)`, `delete(id)`, `observeCounts(): Flow<OutboxCounts>` (pending, failed, needsConfirmation). Room database `budmon.db`, version 1, schema exported to `app/schemas/`. |
+| F-254 | `OutboxEntry` (`@Entity("outbox")`) and `OutboxDao` (`core/outbox/`) | Columns: `id: Long` (PK autogen), `idempotencyKey: String` (unique), `method: String`, `path: String`, `body: ByteArray`, `contentType: String`, `createdAtEpochMs: Long`, `status: String` (`PENDING`, `SENDING`, `FAILED`, `NEEDS_CONFIRMATION`, `PAUSED`), `lastErrorKey: String?`, `attempts: Int`. DAO: `insert`, `pendingOldestFirst(limit)`, `markStatus(id, status, errorKey)`, `delete(id)`, `observeCounts(): Flow<OutboxCounts>` (pending, failed, needsConfirmation), and (A-23) `@Query("DELETE FROM outbox") suspend fun deleteAll(): Int` (returns the rows deleted) and `@Query("SELECT COUNT(*) FROM outbox") suspend fun countAll(): Int`, both across every status. Room database `budmon.db`, version 1, schema exported to `app/schemas/`. |
 | F-255 | `OutboxRepository.enqueue(method, path, body: ByteArray, contentType): Long`, `OutboxRepository.kick()` and `SyncWorker : CoroutineWorker` (`core/outbox/`) | `enqueue` stores **the exact bytes** with a new random UUID and `PENDING`, then calls `kick()`. `kick()` = `WorkManager.enqueueUniqueWork("outbox-sync-now", KEEP, oneTime with NetworkType.CONNECTED)`. Worker rules below the table. |
 | F-256 | `Money`, `Rational`, `roundHalfEven`, `allocate`, `convertWithRates`, `formatMoney` (`core/money/`) | Kotlin mirrors of F-300 to F-305: `BigInteger` minor units, `java.math` exact rationals, `android.icu.text.NumberFormat` with `setMinimumFractionDigits`/`setMaximumFractionDigits(minorUnits)` formatting a `BigDecimal`. `toString()` returns `"[redacted]"`. Passes the shared test vectors (TP-13.9). |
 | F-257 | `UpdateRepository` (`core/update/`) | `refresh()` calls `GET meta/client-config` (generated client), stores the result in DataStore, and computes `UpdateState`: `Required(min)` if `versionCode < minimumVersionCode`; `Available(latest)` if `< latestVersionCode` and not dismissed within 3 days; else `None`. `markRequired(min)` is called by the error path on `CLIENT_UPDATE_REQUIRED`. `dismissAvailable()` records the time. Exposes `state: StateFlow<UpdateState>`. |
@@ -2477,7 +2549,9 @@ flowchart TD
   F11 --> F32[F-32 Secret]
   F96[F-96 container] --> F11 & F12[F-12 createDatabase] & F31[F-31 logger] & F34[F-34 Sentry] & F36[F-36 telemetry] & F73[F-73 JobQueue] & F63[F-63 rateLimiter] & F100[F-100 idempotency] & F103[F-103 cursors] & F111[F-111 sealer] & F112[F-112/113 unsealer] & F114[F-114 apiSecrets] & F132[F-132 FxService] & F140[F-140 ObjectStore] & F146[F-146 ErasureLog]
   F90[F-90 api main] --> F122[F-122 proxy] & F96 & F55[F-55 api server]
-  F91[F-91 worker main] --> F122 & F96 & F78[F-78 startWorkers]
+  F91[F-91 worker main] --> F122 & F96 & F78[F-78 startWorkers] & F78b[F-78b start hooks]
+  F55 --> F59[F-59 appRouter]
+  F59 --> F58[F-58 meta router] & F53
   F92[F-92 migrate main] --> F19[F-19 schema step]
   F19 --> F15[F-15 roles] & F17[F-17 push] & F18[F-18 migrations] & F74[F-74 queue schema] & F16[F-16 grants] & F21[F-21 reference data] & F75[F-75 queue sync]
   F55 --> F61[F-61 headers] & F62[F-62 body] & F65[F-65 rate limits] & F56[F-56 client version] & F57[F-57 health] & F52[F-52 error interceptor] & F38[F-38 request log] & F53[F-53 procedures]
@@ -2495,6 +2569,7 @@ flowchart TD
   F112 --> F110
   F114 --> F110
   F117[F-117 rewrap api] --> F114 & F115[F-115 sealed columns]
+  F93[F-93 cli] --> F117
   F118[F-118 capture rewrap] --> F111 & F112 & F115
   F120[F-120 OAuth exchange] --> F121[F-121 guarded fetch]
   F132 --> F131[F-131 fxRepo] & F303[F-303 convertWithRates] & F73
@@ -2507,7 +2582,7 @@ flowchart TD
   F178[F-178 budmon-local] --> F191[F-191 initLocalSecrets] & F185[F-185 buildNumber] & F92 & F150
   F191 --> F190[F-190 scram]
   F179[F-179 gcp-bootstrap]
-  F195[F-195 rehearsal] --> F194[F-194 Sentry capture] & F196[F-196 fake Google] & F197[F-197 fake FX] & F198[F-198 canaries, test-support] & F191 & F178
+  F195[F-195 rehearsal] --> F194[F-194 Sentry capture] & F196[F-196 fake Google] & F197[F-197 fake FX] & F198[F-198 canaries, test-support] & F193[F-193 needles] & F191 & F178
   F200[F-200 web main] --> F201[F-201 api client] & F204[F-204 query client] & F206[F-206 i18n] & F217[F-217 web Sentry] & F216[F-216 router]
   F201 --> F346
   F203[F-203 messages] --> F202[F-202 toAppError]
@@ -2563,7 +2638,8 @@ flowchart TD
 | `GET /health/live` | F-57 | none | `200 {"status":"ok"}`. Reachable only inside the Docker network; Caddy doesn't proxy it. |
 | `GET /health/ready` | F-57 / Caddy | none | `200 {"status":"ready"}`; `503 {"status":"not_ready","reason":"database_unreachable"\|"schema_behind"\|"schema_ahead"}`; `503 {"status":"maintenance"}` from Caddy. |
 | `GET /version.json` | Caddy static file | none | `200 {"buildNumber":n}`, `Cache-Control: no-store`. |
-| `GET /dev/objects/:token` | F-145 | signed token | Development only. |
+| `GET /dev/objects/:token` | F-145 | signed token | Development only. `Content-Disposition: attachment`, with `filename="<n>"` when the token names the file (A-22). |
+| Module routes (A-26) | registered through `ApiContainer.moduleRoutes` (F-55 step 4b) | the module's | Each is specified in its module's LLD and listed here when it's an exception to a platform rule (as the Google callback below is). |
 | `OPTIONS /api/v1/*` | F-52 rule 4 | none | `404 NOT_FOUND` envelope (no CORS). |
 | `GET /api/v1/auth/google/callback?code&state` (A-4) | `identity` | none (single-use `state`) | Specified by `identity`. **The one stated exception to HLD D-24 rule 4:** Google's redirect necessarily puts `code` and `state` in the query string. Mitigations: the code is single-use, bound to the PKCE verifier and client secret and exchanged within seconds; `state` is single-use; F-37/F-38 and Caddy's log filter (F-175) drop query strings from request logs, spans and Sentry URLs; `Referrer-Policy: no-referrer`; a `303` away from the URL. The contract rule R4 (F-348) covers contract procedures only and is unaffected. |
 
@@ -2788,6 +2864,7 @@ The platform's slices are **capability slices** rather than one story each. Each
 | Web lint rules under ESLint 10 (A-12, A-13, A-18) | unhappy | A web fixture with one violation per configured rule (including malformed ICU): each rule reports, nothing crashes, `formatjs/enforce-id` isn't active. | TP-0.22 |
 | Float conversions bypassing the money rule (A-15) | unhappy | `Number.parseFloat`, `globalThis.parseFloat`, `window.parseFloat`, unary `+` fail lint. | TP-0.4 |
 | A workflow with a tag-pinned action or a `${{ }}` inside `run:` (A-17) | unhappy | TP-0.23 fails and names the file and job. | TP-0.23 |
+| TP-0.24 | S-0 | S | F-6 invocation (A-28) | `tools/ci` after install; a temp file `c.txt` with `apps/server/drizzle/0001.sql` | Spawn `./node_modules/.bin/tsx checkMigrationFiles.ts` with working directory `tools/ci`: (a) no arguments; (b) `--branch feat/x --changed-files <abs c.txt>`; (c) `--branch release/v1.0.0 --changed-files <abs c.txt>` | Exit codes (a) 64, (b) 1, (c) 0; neither stdout nor stderr contains `ERR_PNPM` |
 | Root scripts (A-14) | happy | Every root script is in §2.2.2 with its exact command; S-0's are all present. | TP-0.21 |
 | Strict TypeScript | unhappy | An unchecked index access fails type-check. | TP-0.7 |
 
@@ -2821,6 +2898,7 @@ The platform's slices are **capability slices** rather than one story each. Each
 - **Acceptance criteria:** the library has no I/O. 100% of the branches in `money/` are covered by TP-1.x.
 
 ### S-2: Configuration, database, schema step, local stack and test tooling (US-5, US-2, US-7 development)
+- **Also (A-30, A-31):** creates `apps/server/tsconfig.json` and extends root `typecheck`; adds `pnpm test:int` to `ci.yml`'s `check` job (TP-2.25, TP-2.26).
 - **Depends on:** S-1
 - **Functions:** F-7, F-10 to F-23 (including F-20 `seedDevelopmentDatabase`, A-14), F-90 to F-92 (start-up and config handling only), F-94, F-95, F-96 (base members), §3 tables, `infra/compose.yaml`, test tooling (§10.1); root scripts `dev`, `db:reset`, `db:seed`, `db:migrate` (§2.2.2, A-14).
 - **Scenarios:**
@@ -2845,6 +2923,8 @@ The platform's slices are **capability slices** rather than one story each. Each
 | Schema step end to end, twice | happy | The report; the second run is a no-op. | TP-2.15 |
 | `db:reset` against a non-local host or in production | unhappy | `ResetRefusedError`, exit 2. | TP-2.16 |
 | `db:seed` on the local database; against a non-local host or in production; combined with `--no-seed` (A-14) | happy and unhappy | Seeders run without dropping anything; `ResetRefusedError`, exit 2, seeders not run; exit 64. | TP-2.24 |
+| TP-2.25 | S-2 (extended in S-11a for `apps/web`) | S | app tsconfigs (A-30) | repository after install | (a) `eslint apps/server/src/main/api.ts apps/server/test/setup/globalSetup.ts`; (b) `pnpm typecheck` with a type error planted in a temp copy of `apps/server/src/main/api.ts`; (c) from S-11a, the same for `apps/web/src/main.tsx` | (a) no parsing error mentioning "project service"; (b) non-zero exit naming the planted file; (c) as (a) and (b) for the web file |
+| TP-2.26 | S-2 | S | `ci.yml` `check` job (A-31) | parse `.github/workflows/ci.yml` | Inspect the `check` job's steps | One `run` executes `pnpm test` and then `pnpm test:int` |
 | Test tooling | happy | Per-file database from the template; connects as `budmon_app`. | TP-2.17 |
 | Local stack | happy | `pnpm dev` serves `/health/ready` 200 within 90 s. | TP-2.18 |
 | Pool and TLS options | happy | As in F-12. | TP-2.19 |
@@ -2877,7 +2957,7 @@ The platform's slices are **capability slices** rather than one story each. Each
 
 ### S-4: Contract, OpenAPI, API server and error model (US-3, US-9)
 - **Depends on:** S-3
-- **Functions:** F-8, F-50 to F-58, F-90 (complete), F-96 (API members used so far), F-160, F-340 to F-349, root script `contract:openapi` (§2.2.2, A-14), CI step 2 (contract checks: drift, `oasdiff`, F-8, F-348).
+- **Functions:** F-8, F-50 to F-59 (F-59 `appRouter`, A-26), F-90 (complete), F-96 (API members used so far, plus `moduleRoutes`, A-26), F-160, F-340 to F-349, root script `contract:openapi` (§2.2.2, A-14), CI step 2 (contract checks: drift, `oasdiff`, F-8, F-348).
 - **Scenarios:**
 
 | Scenario | Happy / unhappy | Expected | Tests |
@@ -2897,6 +2977,7 @@ The platform's slices are **capability slices** rather than one story each. Each
 | Invalid `BudmonError` construction | unhappy | `TypeError`. | TP-4.18 |
 | Body handling order (Fastify parser before oRPC) | unhappy | As in F-55. | TP-4.19 |
 | Server message rendering | happy and unhappy | As in F-160. | TP-4.20 |
+| Default router `appRouter`; module routes before the catch-all; duplicate module route (A-26) | happy and unhappy | As in F-55 step 4b and F-59. | TP-4.22 |
 | No unexpected span-attribute drops through the real instrumented stack | happy | As in F-40. | TP-4.21 |
 
 - **Acceptance criteria:**
@@ -2921,7 +3002,7 @@ The platform's slices are **capability slices** rather than one story each. Each
 
 ### S-6: Jobs and workers (US-4)
 - **Depends on:** S-4
-- **Functions:** F-70 to F-81, F-91, F-93 (`jobs:dead` commands), F-19 steps 3 and 6 (extending S-2), the health-check entry (F-175 "Health checks").
+- **Functions:** F-70 to F-81, F-78b (A-26), F-91, F-96 (`onGeneralStarted`, A-26), F-93 (`jobs:dead` commands), F-19 steps 3 and 6 (extending S-2), the health-check entry (F-175 "Health checks").
 - **Scenarios:**
 
 | Scenario | Happy / unhappy | Expected | Tests |
@@ -2938,6 +3019,7 @@ The platform's slices are **capability slices** rather than one story each. Each
 | Dead-letter list and redrive | happy | As in F-81. | TP-6.11 |
 | Maintenance purges | happy | As in F-80. | TP-6.12 |
 | Graceful stop | happy | `SIGTERM` stops within 30 s. | TP-6.13 |
+| Start hooks: general only, in order, a failing hook doesn't stop the rest (A-26) | happy and unhappy | As in F-78b. | TP-6.14 |
 
 ### S-7: Idempotency and cursors (D-13, D-32)
 - **Depends on:** S-6
@@ -2960,7 +3042,7 @@ The platform's slices are **capability slices** rather than one story each. Each
 
 ### S-8: Credential encryption and capture plumbing (US-6, PLT-BR-2)
 - **Depends on:** S-6
-- **Functions:** F-110 to F-122, F-93 (`secrets:rewrap-api`, `jobs:capture-rewrap`).
+- **Functions:** F-110 to F-122 (with `rewrapApiSecretsCommand`, A-26), F-96 (`sealedColumns`, A-26), F-93 (`secrets:rewrap-api`, `jobs:capture-rewrap`).
 - **Scenarios:**
 
 | Scenario | Happy / unhappy | Expected | Tests |
@@ -2976,6 +3058,7 @@ The platform's slices are **capability slices** rather than one story each. Each
 | Egress guard | unhappy | `EgressDeniedError`. | TP-8.13 |
 | Proxy wiring with and without proxy variables | happy | Through the proxy; direct; `NO_PROXY` honoured. | TP-8.14 |
 | The API can't unseal capture secrets | unhappy | No unsealer and no credential in the API container or config. | TP-8.15 |
+| Container sealed-column registry feeds `secrets:rewrap-api` (A-26) | happy | As in F-96 and F-117. | TP-8.16 |
 
 ### S-9: FX rates and conversion (US-8)
 - **Depends on:** S-6
@@ -2999,7 +3082,7 @@ The platform's slices are **capability slices** rather than one story each. Each
 
 ### S-10: Object storage, erasure log and restore verification (US-15 part, D-35)
 - **Depends on:** S-6
-- **Functions:** F-140 to F-146, F-150, F-151, F-80 (exports purge), F-93 (`restore:verify`, `erasure:replay`).
+- **Functions:** F-140 to F-146 (with `downloadName`, A-22), F-96 (`erasureHandler`, A-26), F-150, F-151, F-80 (exports purge), F-93 (`restore:verify`, `erasure:replay`).
 - **Scenarios:**
 
 | Scenario | Happy / unhappy | Expected | Tests |
@@ -3008,12 +3091,14 @@ The platform's slices are **capability slices** rather than one story each. Each
 | Filesystem store and dev route; expired or tampered token | happy and unhappy | As in F-142/F-145. | TP-10.2 |
 | S3 store against MinIO; presigned URL expiry | happy and unhappy | As in F-141. | TP-10.3 |
 | Memory store parity | happy | As in F-143. | TP-10.4 |
+| Presigned download names (S3, fs, memory); invalid names (A-22) | happy and unhappy | As in F-140 to F-143, F-145. | TP-10.1 to TP-10.4 |
 | Exports older than 7 days purged | happy | As in F-144. | TP-10.5 |
 | Erasure log append and list | happy | As in F-146. | TP-10.6 |
 | Replay with and without a handler; handler failure | happy and unhappy | As in F-151. | TP-10.7, TP-10.8 |
 | Restore verification | happy and unhappy | As in F-150. | TP-10.9, TP-10.10 |
 
 ### S-11a: Web lint guards, i18n and pseudo-locales (D-37, D-38, D-39)
+- **Also (A-30):** creates `apps/web/tsconfig.json` and extends root `typecheck` (TP-2.25 (c)).
 - **Depends on:** S-4
 - **Functions:** F-2, F-3, F-3b (tests; the rule files exist from S-0), F-4 with the root `stylelint.config.js`, the `@budmon/config` `./stylelint` export and root scripts `lint:css` and `lint` (changed) (§2.2.2, A-14), F-9, F-206, F-207, F-215, F-221; the web workspace scaffold (Vite, Tailwind, the ESLint and stylelint wiring).
 - **Scenarios:**
@@ -3077,7 +3162,7 @@ The platform's slices are **capability slices** rather than one story each. Each
 | -------- | --------------- | -------- | ----- |
 | Headers and idempotency key | happy | As in F-251. | TP-13.1 |
 | Error parsing and messages | unhappy | As in F-252/F-253. | TP-13.2, TP-13.3 |
-| Outbox storage | happy | As in F-254. | TP-13.4 |
+| Outbox storage, including `countAll` and `deleteAll` (A-23) | happy | As in F-254. | TP-13.4 |
 | Sync outcomes: success, replay, 4xx, 5xx, offline, update required, entries older than 60 days | happy and unhappy | As in F-255. | TP-13.5 |
 | Update states | happy and unhappy | As in F-257. | TP-13.6 |
 | Platform UI states, including RTL and font scale | happy and unhappy | As in §8.2. | TP-13.7 |
@@ -3140,19 +3225,21 @@ The platform's slices are **capability slices** rather than one story each. Each
 
 ### S-16: Release rehearsal (stage-0 shape) (D-41)
 - **Depends on:** S-15, S-11b, S-13
-- **Functions:** F-194 to F-198 (F-198 already delivered in S-3), `.github/workflows/rehearsal.yml`.
+- **Functions:** F-193 (A-24), F-194 to F-198 (F-198 already delivered in S-3), `.github/workflows/rehearsal.yml`.
 - **Scenarios:**
 
 | Scenario | Happy / unhappy | Expected | Tests |
 | -------- | --------------- | -------- | ----- |
-| Fake Google modes | happy | As in F-196. | TP-16.2 |
+| Fake Google modes; sign-in token, `id_token` and JWKS (A-24) | happy and unhappy | As in F-196. | TP-16.2 |
 | Harness step order, stop on failure | happy and unhappy | As in F-195. | TP-16.3 |
 | Full rehearsal on a release candidate | happy | All steps green. | TP-16.4 |
 | Canary flows (platform) | unhappy | No canary anywhere. | TP-16.5 |
 | Stage setting or cross-role mount injected | unhappy | Steps 9 and 10 fail. | TP-16.6 |
 | worker-capture can't reach Postgres except through `capture-db` | unhappy | Step 10 passes only when the connection fails. | TP-16.7 |
 | Gate commands, including the migrator's previous-password fallback | happy | Step 11 green. | TP-16.12 |
-| Mailpit quiet; bootstrap-owner and email tokens absent from all logs (A-2, A-6) | unhappy | Steps 7, 8 and 8b green. | TP-16.13 |
+| Mailpit quiet; bootstrap-owner and email tokens absent from all logs (A-2, A-6, A-25) | unhappy | Steps 7a, 7b, 8 and 8b green; sub-steps skipped before identity. | TP-16.13 |
+| Google sign-in sub-step (A-24) | unhappy | Step 7c: `GOOGLE_ACCOUNT_UNKNOWN`; its values absent from all logs; skipped before identity. | TP-16.14 |
+| Needle scan (A-24) | unhappy | As in F-193. | TP-16.15 |
 
 - **Acceptance criteria:** the rehearsal passes for the first release candidate. `budmon-local upgrade` on the laptop builds the same tag the rehearsal ran, from the same inputs (Dockerfiles, pinned base digests, frozen lockfile); the images aren't necessarily byte-identical to CI's, which stage 1 removes by deploying the CI-built images.
 
@@ -3202,7 +3289,7 @@ The repository has no test tooling yet. The test-architect sets it up in S-0 to 
 
   | Job | Steps (D-27) | Runs |
   | --- | ------------ | ---- |
-  | `check` | 1 to 4, including `server-int` | Every PR |
+  | `check` | 1 to 4, including `server-int`: S-0's step runs `format:check`, `lint`, `typecheck` and `test`; **S-2 adds `pnpm test:int` after `pnpm test`** (A-31) | Every PR |
   | `contract` | Drift, `oasdiff` against main, F-8, F-348 | Every PR |
   | `e2e` | 5 | Every PR |
   | `android` | 6 | Path filter, release candidates |
@@ -3218,16 +3305,16 @@ Types: **U** unit, **I** integration (real Postgres and/or HTTP in-process), **E
 | ID | Slice | Type | Target | Setup | Input / action | Expected |
 | -- | ----- | ---- | ------ | ----- | -------------- | -------- |
 | TP-0.1 | S-0 | S | repo layout | checkout | Check the paths | `server/`, root `compose.yaml`, `code-bites.md` and `.prettierrc` don't exist; `git ls-files` has no `dist/` |
-| TP-0.2 | S-0 | U | F-1 layering (A-11) | ESLint API on fixture files at these repository paths | (a) `apps/server/src/x/xRouter.ts` imports `./xRepo.js`; (b) `apps/server/src/x/xService.ts` imports `drizzle-orm`; (c) `apps/server/src/x/xService.ts` imports `pg`; (d) `apps/server/src/platform/x/xService.ts` imports `../db/client.js`; (e) `apps/server/src/x/xRepo.ts` imports `drizzle-orm`; (f) `apps/server/src/x/xService.ts` imports `../platform/db/types.js`; (g) `apps/web/src/x/xService.ts` imports `drizzle-orm`; (h) `tools/ci/xService.ts` imports `pg` | (a) to (d): a `no-restricted-imports` error; (e) to (h): no `no-restricted-imports` error |
+| TP-0.2 | S-0 | U | F-1 layering (A-11) | ESLint API on fixture files at these repository paths | (a) `apps/server/src/x/xRouter.ts` imports `./xRepo.js`; (b) `apps/server/src/x/xService.ts` imports `drizzle-orm`; (c) `apps/server/src/x/xService.ts` imports `pg`; (d) `apps/server/src/platform/x/xService.ts` imports `../db/client.js`; (e) `apps/server/src/x/xRepo.ts` imports `drizzle-orm`; (f) `apps/server/src/x/xService.ts` imports `../platform/db/types.js`; (g) `apps/web/src/x/xService.ts` imports `drizzle-orm`; (h) `tools/ci/xService.ts` imports `pg` | (a) to (d): a `no-restricted-imports` error; (e) to (h): no `no-restricted-imports` error. Each error's message contains its F-1 text (A-27): (a) L-2; (b) and (c) L-3; (d) L-4; and a router importing `drizzle-orm` reports L-1, a file under `platform/http/` importing `./xRepo.js` reports L-5 |
 | TP-0.3 | S-0 | U | F-1 logging | same | `import pino from "pino"` in `platform/http/x.ts`; `console.log` in `platform/x.ts`; `console.log` in `main/x.ts` | Error, error, none |
-| TP-0.4 | S-0 | U | F-1 money (A-15) | same | `parseFloat(a)`; `Number(a)`; `bigint({ mode: "number" })`; `Number.parseFloat(a)`; `globalThis.parseFloat(a)`; `window.parseFloat(a)`; `+a`; `-a`; `Number.parseInt(a, 10)`; `// eslint-disable-next-line no-restricted-syntax -- reason` before `Number(a)`; the same without `-- reason` | Errors on the first seven; none on `-a` and `Number.parseInt`; none; error |
-| TP-0.5 | S-0 | U | F-6 | none | branch `feat/x` + `apps/server/drizzle/0001.sql`; `release/v1.0.0` + same; `feat/x` without; merge-back true; `infra/v1.0.0-infra.1` | `ok:false` with the file listed; ok; ok; ok; ok |
+| TP-0.4 | S-0 | U | F-1 money (A-15) | same | `parseFloat(a)`; `Number(a)`; `bigint({ mode: "number" })`; `Number.parseFloat(a)`; `globalThis.parseFloat(a)`; `window.parseFloat(a)`; `+a`; `-a`; `Number.parseInt(a, 10)`; `// eslint-disable-next-line no-restricted-syntax -- reason` before `Number(a)`; the same without `-- reason` | Errors on the first seven, `parseFloat(a)`'s message containing "parseFloat is forbidden; use the money helpers" (A-27); none on `-a` and `Number.parseInt`; none; error |
+| TP-0.5 | S-0 | U | F-6 | none | branch `feat/x` + `apps/server/drizzle/0001.sql`; `release/v1.0.0` + same; `feat/x` without; merge-back true; `infra/v1.0.0-infra.1` | `ok:false` with the file listed and the message ending "Move these changes to a release/* or hotfix/* branch, or remove them from this pull request." (A-29); ok; ok; ok; ok |
 | TP-0.6 | S-0 | S | `pnpm check` | clean clone | Run | Exit 0 |
 | TP-0.7 | S-0 | S | F-5 | fixture `const a: number[] = []; const b: number = a[0];` | `tsc -p` fixture | TS2322 error (`noUncheckedIndexedAccess`) |
-| TP-0.17 | S-0 | U | F-6 CLI (`parseCheckMigrationFilesArgs`, `parseChangedFiles`, `runCheckMigrationFilesCli`) | fake `readFile` (map of path → text, throws `Error("ENOENT")` for unknown paths), recording `stdout`/`stderr` | (a) `--branch feat/x --changed-files /c.txt` with `/c.txt` = `"apps/server/drizzle/0001.sql\nREADME.md\n"`; (b) same with `--hotfix-merge-back` (in any position); (c) `--branch release/v1.0.0 --changed-files /c.txt`; (d) `--branch feat/x --changed-files /empty.txt` (`""`); (e) `[]`; (f) `--changed-files /c.txt`; (g) `--branch` alone; (h) `--branch "" --changed-files /c.txt`; (i) `--branch --changed-files /c.txt`; (j) `--branch a --branch b --changed-files /c.txt`; (k) `--branch=feat/x --changed-files /c.txt`; (l) `--branch feat/x extra --changed-files /c.txt`; (m) `--branch feat/x --changed-files /missing.txt`; (n) `parseChangedFiles("a\r\nb\n\nc")` | (a) exit 1, stderr = F-6's message listing `apps/server/drizzle/0001.sql`, nothing on stdout; (b) exit 0, stdout `checkMigrationFiles: ok (2 changed files)`; (c) exit 0; (d) exit 0, `ok (0 changed files)`; (e) exit 64, stderr `checkMigrationFiles: Missing required argument: --branch` then the usage line; (f) the same as (e); (g) `Missing value for --branch`; (h) and (i) `Missing value for --branch`; (j) `Duplicate argument: --branch`; (k) `Unknown argument: --branch=feat/x`; (l) `Unknown argument: extra`; all (e) to (l) exit 64 with the usage line and `readFile` not called; (m) exit 64, stderr `checkMigrationFiles: cannot read /missing.txt: ENOENT`; (n) `["a", "b", "c"]`. Importing the module runs no CLI (no output, `process.exitCode` unchanged) |
+| TP-0.17 | S-0 | U | F-6 CLI (`parseCheckMigrationFilesArgs`, `parseChangedFiles`, `runCheckMigrationFilesCli`) | fake `readFile` (map of path → text, throws `Error("ENOENT")` for unknown paths), recording `stdout`/`stderr` | (a) `--branch feat/x --changed-files /c.txt` with `/c.txt` = `"apps/server/drizzle/0001.sql\nREADME.md\n"`; (b) same with `--hotfix-merge-back` (in any position); (c) `--branch release/v1.0.0 --changed-files /c.txt`; (d) `--branch feat/x --changed-files /empty.txt` (`""`); (e) `[]`; (f) `--changed-files /c.txt`; (g) `--branch` alone; (h) `--branch "" --changed-files /c.txt`; (i) `--branch --changed-files /c.txt`; (j) `--branch a --branch b --changed-files /c.txt`; (k) `--branch=feat/x --changed-files /c.txt`; (l) `--branch feat/x extra --changed-files /c.txt`; (m) `--branch feat/x --changed-files /missing.txt`; (n) `parseChangedFiles("a\r\nb\n\nc")`; (o) `--branch feat/x --changed-files /one.txt` (`"README.md\n"`) | (a) exit 1, stderr = F-6's message listing `apps/server/drizzle/0001.sql`, nothing on stdout; (b) exit 0, stdout `checkMigrationFiles: ok (2 changed files)`; (c) exit 0; (d) exit 0, `ok (0 changed files)`; (e) exit 64, stderr `checkMigrationFiles: Missing required argument: --branch` then the usage line; (f) the same as (e); (g) `Missing value for --branch`; (h) and (i) `Missing value for --branch`; (j) `Duplicate argument: --branch`; (k) `Unknown argument: --branch=feat/x`; (l) `Unknown argument: extra`; all (e) to (l) exit 64 with the usage line and `readFile` not called; (m) exit 64, stderr `checkMigrationFiles: cannot read /missing.txt: ENOENT`; (n) `["a", "b", "c"]`; (o) exit 0, stdout `checkMigrationFiles: ok (1 changed file)` (A-29). Importing the module runs no CLI (no output, `process.exitCode` unchanged) |
 | TP-0.18 | S-0 | S | `.gitattributes` (§2.2.1) | repository root; `git` | (a) read the file; (b) `git check-attr text eol diff -- a.ts x/y.sh x.bash t/x.bats apps/android/gradlew infra/local/budmon-local x.ps1 x.bat x.cmd i.png k.jar d.dump`; (c) `git ls-files --eol` | (a) its non-comment, non-blank lines equal §2.2.1's, in order; (b) `a.ts`: text `auto`, eol `lf`; every shell path: text `set`, eol `lf`; `.ps1`/`.bat`/`.cmd`: text `set`, eol `crlf`; `.png`/`.jar`/`.dump`: text `unset`, diff `unset`; (c) no entry has index status `i/crlf` or `i/mixed` |
-| TP-0.19 | S-0 | S | `ci.yml` F-6 wiring (A-7) | parse `.github/workflows/ci.yml` as YAML | Inspect `on` and the `migrations` job | `on.pull_request.types` includes `opened`, `synchronize`, `reopened`, `labeled`, `unlabeled`; the job's `if` restricts it to `pull_request`; checkout has `fetch-depth: 0`; a step's `run` contains `git -c core.quotePath=false diff --no-renames --name-only` (A-16) against `origin/${BASE_REF}...HEAD` with `env.BASE_REF` = `${{ github.base_ref }}`; the F-6 step's `env.HEAD_REF` = `${{ github.head_ref }}`, its `env.MERGE_BACK` tests both labels `hotfix-merge-back` and `infra-merge-back`, its `run` calls `checkMigrationFiles.ts` with `--branch "$HEAD_REF"` and `--changed-files`; no `run:` in the job contains `${{ github.head_ref }}` or `${{ github.event.pull_request` |
-| TP-0.20 | S-0 | S | ESLint 10 dependency pins (A-13, A-19) | read `pnpm-workspace.yaml` and `packages/config/package.json`; a fresh `git clone` of `HEAD` into a temporary directory (no `node_modules`) | (a) inspect the files; (b) in the clone, run `pnpm install --fix-lockfile` (forces resolution, so pnpm prints its peer report) and capture stdout and stderr; (c) in another fresh clone, run `pnpm install --frozen-lockfile` | (a) `peerDependencyRules.allowedVersions` has exactly one key, `eslint-plugin-jsx-a11y>eslint`, with value `"10"`, and `peerDependencyRules` has no other field; `eslint-plugin-formatjs` is `8.1.1` and `eslint-plugin-jsx-a11y` is `6.10.2` (exact, no range); `eslint` is `10.12.0`; (b) exit 0, and the output contains neither `Issues with peer dependencies found` nor `unmet peer` (with formatjs 5.4.2 or without the jsx-a11y rule, this fails); (c) exit 0 (the committed lockfile is consistent). The test-architect's extra case "TP-0.20x" is this case's (b) and is renamed TP-0.20 |
+| TP-0.19 | S-0 | S | `ci.yml` F-6 wiring (A-7) | parse `.github/workflows/ci.yml` as YAML | Inspect `on` and the `migrations` job | `on.pull_request.types` includes `opened`, `synchronize`, `reopened`, `labeled`, `unlabeled`; the job's `if` restricts it to `pull_request`; checkout has `fetch-depth: 0`; a step's `run` contains `git -c core.quotePath=false diff --no-renames --name-only` (A-16) against `origin/${BASE_REF}...HEAD` with `env.BASE_REF` = `${{ github.base_ref }}`; the F-6 step's `env.HEAD_REF` = `${{ github.head_ref }}`, its `env.MERGE_BACK` tests both labels `hotfix-merge-back` and `infra-merge-back`, its `working-directory` is `tools/ci` and its `run` calls `./node_modules/.bin/tsx checkMigrationFiles.ts` with `--branch "$HEAD_REF"` and `--changed-files` and contains no `pnpm` (A-28); no `run:` in the job contains `${{ github.head_ref }}` or `${{ github.event.pull_request` |
+| TP-0.20 | S-0 | S | ESLint 10 dependency pins (A-13, A-19) | read `pnpm-workspace.yaml` and `packages/config/package.json`; a fresh `git clone` of `HEAD` into a temporary directory (no `node_modules`) | (a) inspect the files; (b) in the clone, run `pnpm install --fix-lockfile` (forces resolution, so pnpm prints its peer report) and capture stdout and stderr; (c) in another fresh clone, run `pnpm install --frozen-lockfile` | (a) `peerDependencyRules.allowedVersions` has exactly one key, `eslint-plugin-jsx-a11y>eslint`, with value `"10"`, and `peerDependencyRules` has no other field; `eslint-plugin-formatjs` is `8.1.1` and `eslint-plugin-jsx-a11y` is `6.10.2` (exact, no range); `eslint` is `10.12.0`; (b) exit 0, and the output contains neither `Issues with peer dependencies found` nor `unmet peer` (with formatjs 5.4.2 or without the jsx-a11y rule, this fails); (c) exit 0 (the committed lockfile is consistent), and the output doesn't contain `Ignored build scripts` (A-32); in (a), `ignoredBuiltDependencies` is exactly `["esbuild"]` and there's no `onlyBuiltDependencies`. The test-architect's extra case "TP-0.20x" is this case's (b) and is renamed TP-0.20 |
 | TP-0.21 | S-0 (extended by each slice that adds a root script) | S | §2.2.2 root scripts (A-14) | read the root `package.json` | Compare `scripts` with §2.2.2 | Every key in `scripts` is a §2.2.2 row and its value equals that row's root command for the current slice; every row owned by S-0 (`format`, `format:check`, `lint`, `typecheck`, `test`, `test:int`, `check`) is present. Later slices add their rows to the expected set |
 | TP-0.22 | S-0 | U | F-1 rule 4 web rules smoke (A-12, A-13) | `lintFixture` (§10.1 helper) with one fixture `apps/web/src/smoke.tsx` (the fixture tsconfig includes `*.tsx`; stubs for `lucide-solid`) | The fixture holds one violation for each configured web rule: `formatjs/enforce-default-message` (`t({ id: "a.b" })`), `formatjs/no-literal-string-in-jsx` (`<p>Hello</p>`), `budmon/message-id` (`t({ defaultMessage: "x" })`), `budmon/no-physical-tailwind` (`class="ml-2"`), `budmon/icon-from-registry` (`import { Home } from "lucide-solid"`), `formatjs/no-invalid-icu` (`defineMessage({ id: "a.c", defaultMessage: "{count, plural, one {x}" })`, malformed ICU, A-18), and the eight blocking `jsx-a11y` rules as in TP-11.22 | The run resolves (no thrown error, no message with `fatal: true`); the set of reported `ruleId`s contains all fourteen configured web rules, and `formatjs/no-invalid-icu` reports on the malformed message's `defaultMessage`; no message has `ruleId` `formatjs/enforce-id` |
 | TP-0.23 | S-0 (applies to every later workflow) | S | workflow rules (A-17), `tools/ci/test/workflowSecurity.test.ts` | parse every `*.yml`/`*.yaml` under `.github/workflows/` as YAML | (a) list the directory; (b) collect every job-level and step-level `uses:`; (c) collect every step `run:` | (a) at least one workflow file; (b) each value is a string that starts with `./` or matches `^[^@\s]+@[0-9a-f]{40}$`; (c) no `run:` contains `${{` |
@@ -3300,6 +3387,7 @@ Types: **U** unit, **I** integration (real Postgres and/or HTTP in-process), **E
 | TP-4.19 | S-4 | I | F-55 body handling (spike) | API with a test create procedure | Valid JSON; malformed JSON; 100 KiB + 1 body; valid JSON with an extra unknown field | 201; F-62's 400 `invalid_json` (oRPC handler never invoked: interceptor spy not called); 413; 400 `VALIDATION_FAILED` from oRPC with code `unrecognized_keys` |
 | TP-4.20 | S-4 | U | F-160 | catalogs `en.json` with `test.hello` = `Hello {name}`; `ar` missing | `renderMessage("en","test.hello",{name:"Ali"})`; `("ar-EG", …)`; unknown id | `Hello \u2068Ali\u2069`; falls back to `en`; throws |
 | TP-4.21 | S-4 | I | F-40 with real instrumentation | full API with `startTelemetry` and an in-memory trace exporter; `onDrop` spy | `GET /api/v1/meta/client-config?x=1` with a `User-Agent`; a request that runs a query | `onDrop("unexpected", n)` never called with n > 0; exported spans contain no `url.full`, `user_agent.original` or `x=1` |
+| TP-4.22 | S-4 | I | F-55, F-59, F-96 (A-26) | (a) `buildApiContainer()`; (b) the same with `moduleRoutes: [app => app.get("/api/v1/test/module-route", async () => ({ ok: true }))]`; (c) one whose module route registers `GET /health/live` again | (a) `createApiServer(c)` without `opts`, then `GET /api/v1/meta/client-config`; read `c.moduleRoutes` and `c.authHook`; `Object.keys(appRouter)`; (b) `GET /api/v1/test/module-route`, `GET /api/v1/test/other`; (c) `createApiServer(c)` | (a) 200 with §5.2's body (served by `appRouter`); `[]` and `noAuthHook`; sorted keys equal `Object.keys(contract)` sorted; (b) 200 `{"ok":true}` with `X-Request-Id` and F-61's headers and one `http_request` log line with status 200; 404 `NOT_FOUND` envelope; (c) rejects |
 | TP-5.1 | S-5 | I | F-61 | API | `GET /api/v1/meta/client-config` | `content-security-policy` contains `default-src 'none'`; HSTS max-age 31536000; `referrer-policy: no-referrer`; `x-content-type-options: nosniff` |
 | TP-5.2 | S-5 | I | F-62 | API | `POST` to a test create with body `{"a":"CANARY` (invalid JSON) | 400 `VALIDATION_FAILED`, issues `[{path:[],code:"invalid_json",message:"Request body is not valid JSON."}]`; no canary in the response or logs |
 | TP-5.3 | S-5 | I | F-62 | API | 100 KiB + 1 body | 413 `PAYLOAD_TOO_LARGE` |
@@ -3323,6 +3411,7 @@ Types: **U** unit, **I** integration (real Postgres and/or HTTP in-process), **E
 | TP-6.11 | S-6 | I | F-81 | one dead-lettered job | list; redrive the id; redrive an unknown id | 1 entry with `failure:"Error"`; `moved` 1 and the job back in its source queue; 0 |
 | TP-6.12 | S-6 | I | F-80 | 6000 expired + 1 live idempotency records | Run the purge handler | 6000 deleted in 2 batches; live remains |
 | TP-6.13 | S-6 | I | F-91 | worker process with a long job (2 s) | `SIGTERM` during the job | The job completes; process exits 0 within 30 s |
+| TP-6.14 | S-6 | U+I | F-78b, F-96 (A-26) | `logCapture`, `createMemoryErrorReporter`, hook spies; worker config for `createWorkerContainer` | `runGeneralStartHooks` with roles `{general}` and hooks [h1, h2]; roles `{capture}` and [h1]; roles `{general}` and [h1 rejecting with `new Error(CANARIES.message)`, h2]; `createWorkerContainer(config)` with no overrides | h1 then h2, each once; none called; h2 still called, one report, one `worker_start_hook_failed` line with `step "onGeneralStarted:0"`, no canary in the log or report, resolves; `onGeneralStarted` is `[]`, `erasureHandler` is `null`, `sealedColumns.all()` is `[]` |
 | TP-7.1 | S-7 | I | F-100 | transaction; `work` spy returns `{id, createdAt}` | `run` | `replayed:false`, status 201; record has the result and `expires_at` = now + 90 d; `work` called once |
 | TP-7.2 | S-7 | I | F-100 | after TP-7.1 | Same key, same input | Stored result; `replayed:true`; `work` not called; `idempotent_replays_total` +1 |
 | TP-7.3 | S-7 | I | F-100 | after TP-7.1 | Same key with a different input; with a different procedure | `IdempotencyKeyReusedError` ×2 |
@@ -3352,6 +3441,7 @@ Types: **U** unit, **I** integration (real Postgres and/or HTTP in-process), **E
 | TP-8.12 | S-8 | U | F-120 | `fakeFetch` | 200 full; 200 without refresh; 400 invalid_grant (description = canary); 403; 503; 429; network error; timeout | Tokens (`Secret`s), `expiresAt` = now + `expires_in`; `no_refresh_token`; `invalid_grant`; `rejected`; `server`; `server`; `network`; `network`. The request body has `grant_type`, `code`, `code_verifier`, `client_id`, `client_secret`, `redirect_uri`. The canary never appears in the errors' properties or messages |
 | TP-8.13 | S-8 | U | F-121 | inner fetch spy | `https://gmail.googleapis.com/x`; `http://gmail.googleapis.com/`; `https://evil.example/`; `https://gmail.googleapis.com:8443/`; `https://u:p@gmail.googleapis.com/` | Called with `redirect:"manual"`; `EgressDeniedError` ×4; inner not called |
 | TP-8.14 | S-8 | I | F-122 | local HTTPS target and a CONNECT proxy recording hosts (test helper) | (a) `HTTPS_PROXY` set; (b) set with `NO_PROXY` including the target; (c) unset — each in a child process calling `installProxySupport` then `fetch` | (a) the proxy saw a CONNECT to the target; (b), (c) no CONNECT; requests succeed |
+| TP-8.16 | S-8 | I | F-96, F-117 `rewrapApiSecretsCommand`, F-93 (A-26) | `sealed_test` as in TP-8.7 with 2 rows sealed under k1; config current `k2`; an API container whose `sealedColumns` override has `sealed_test` registered (provider api) | `rewrapApiSecretsCommand(c)`; `createApiContainer(config).sealedColumns.all()`; CLI `secrets:rewrap-api` on that database (nothing registered) | `{rewrapped:2, skipped:0}` and both rows under `k2`; `[]`; stdout `{"rewrapped":0,"skipped":0}`, exit 0 |
 | TP-8.15 | S-8 | U | F-96, F-10 | API config | Build an `ApiContainer` | No `captureUnsealer` member; `configSchemaFor("api")` has no `KMS_PROVIDER`, `GCP_CREDENTIALS_FILE` or `CAPTURE_PRIVATE_KEY_FILE` keys |
 | TP-9.1 | S-9 | U | F-130 | none | `{"rates":{"EGP":48.123456789012345,"X":1e-3}}`; `normaliseRate("48.123456789012345")`, `("0")`, `("-1")`, `("1e12")`, `("abc")` | `"48.123456789012345"`, `"1e-3"` as strings; `"48.123456789012"`; null ×4 |
 | TP-9.2 | S-9 | I | F-132 | currencies loaded | `convert(EGP 100.00, EGP, d)` | Same money; provisional false; rateDate d |
@@ -3374,10 +3464,10 @@ Types: **U** unit, **I** integration (real Postgres and/or HTTP in-process), **E
 | TP-9.18 | S-9 | I | F-23 FX seeder | development database | Run `runSeeders` twice | 30 days × 7 currencies with provider `fixed` after the first run; the second run inserts nothing and doesn't fail |
 | TP-9.19 | S-9 | I | F-139 | clock 2026-10-07T10:00Z; (a) empty `exchange_rates`; (b) latest day 2026-10-03; (c) latest day 2026-10-06; (d) latest day 2026-08-01 | `fxGapCheck` | (a) `enqueued: []`; (b) `["2026-10-04","2026-10-05","2026-10-06"]`, three `platform.fx-backfill` jobs with those `singletonKey`s; (c) `[]`; (d) 31 dates, the earliest 2026-09-06, the latest 2026-10-06; running (b) twice leaves three jobs |
 | TP-9.20 | S-9 | I | F-78, F-139 startup | fresh queue; (a) one general-role worker; (b) two general-role workers started together before either job runs; (c) a capture-role worker | `startWorkers` | (a) one `platform.fx-gap-check` job with `singletonKey "startup"`, and the schedule `45 6 * * *` (tz UTC) registered; (b) still one queued job; (c) none |
-| TP-10.1 | S-10 | U | F-140 | none | Valid and invalid keys per bucket; prefix `users/`; ttl 30 and 901 | Pass/`RangeError` as per the rules |
-| TP-10.2 | S-10 | I | F-142, F-145 | temp directory, dev API | put/list/delete/deletePrefix; presign then GET; GET after expiry; tampered token | Behaviour per F-140; 200 with `attachment`; 404 envelope ×2 |
-| TP-10.3 | S-10 | I | F-141 | MinIO Testcontainer | Same operations; GET the presigned URL; after `ttlSeconds` | Works; 403 after expiry; `delete` of a missing key is fine; `put` to an unknown bucket → `ObjectStoreError` |
-| TP-10.4 | S-10 | U | F-143 | none | Same operations | Same results as TP-10.2's assertions |
+| TP-10.1 | S-10 | U | F-140 (A-22) | memory store | Valid and invalid keys per bucket; prefix `users/`; ttl 30 and 901; `presignGet` with `downloadName` `budmon-export-2026-10-07.zip`, a 100-character name, `""`, a 101-character name, `a b.zip`, `a"b.zip`, `x/y.zip`, `é.zip` | Pass/`RangeError` as per the rules; names: pass ×2, `RangeError` ×6 |
+| TP-10.2 | S-10 | I | F-142, F-145 (A-22) | temp directory, dev API | put/list/delete/deletePrefix; presign then GET; presign with `downloadName "budmon-export-2026-10-07.zip"` then GET; GET after expiry; tampered token; a token correctly signed (test signing key) whose `n` is `a"b` | Behaviour per F-140; 200 with exactly `Content-Disposition: attachment` and a token payload without `n`; 200 with `Content-Disposition: attachment; filename="budmon-export-2026-10-07.zip"`; 404 envelope ×3 |
+| TP-10.3 | S-10 | I | F-141 (A-22) | MinIO Testcontainer | Same operations; GET the presigned URL; after `ttlSeconds`; presign with and without `downloadName "budmon-export-2026-10-07.zip"` and GET each | Works; 403 after expiry; `delete` of a missing key is fine; `put` to an unknown bucket → `ObjectStoreError`; the URL's `response-content-disposition` is `attachment; filename="budmon-export-2026-10-07.zip"` and MinIO answers with that header; without a name, `attachment` |
+| TP-10.4 | S-10 | U | F-143 (A-22) | none | Same operations; presign with and without `downloadName "budmon-export-2026-10-07.zip"` | Same results as TP-10.2's assertions; `memory://exports/<key>?exp=<epoch>&n=budmon-export-2026-10-07.zip`; without a name, no `n` parameter |
 | TP-10.5 | S-10 | U | F-144 | memory store: objects at now − 8 d, now − 6 d | purge | Deletes 1 |
 | TP-10.6 | S-10 | U | F-146 | memory store | append 3 records out of order; `listSince(t2)` | Keys `records/20261005T120000Z_<uuid>.json`; records ≥ t2 sorted |
 | TP-10.7 | S-10 | U | F-151 | log with 2 records | handler spy; null handler; empty log + null handler; handler throwing on the second | Called in order, `{replayed:2}`; `NoErasureHandlerError`; `{replayed:0}`; rethrown after 1 |
@@ -3422,7 +3512,7 @@ Types: **U** unit, **I** integration (real Postgres and/or HTTP in-process), **E
 | TP-13.1 | S-13 | U | F-251 | MockWebServer | Request with tag `IdempotencyKey(uuid)`; without the tag | Headers `X-Budmon-Client: android/<code>`, `traceparent` format, `Idempotency-Key` lower-case; none |
 | TP-13.2 | S-13 | U | F-252 | none | envelope 404; 502 HTML; 504 empty; 500 non-JSON; 400 non-JSON | `Defined("NOT_FOUND",404)`; `Unavailable`; `Unavailable`; `Defined("INTERNAL",500)`; `Unknown` |
 | TP-13.3 | S-13 | U | F-253 | none | Same table as TP-11.3 | Matching string resources |
-| TP-13.4 | S-13 | U | F-254 | Room in-memory | Insert 3, query order, counts | Oldest first; counts correct; the unique key is enforced |
+| TP-13.4 | S-13 | U | F-254 (A-23) | Room in-memory | Insert 3, query order, counts; then with 3 entries in `PENDING`, `FAILED` and `NEEDS_CONFIRMATION`: `countAll()`, `deleteAll()`, `countAll()`, `deleteAll()` | Oldest first; counts correct; the unique key is enforced; 3, 3, 0, 0 |
 | TP-13.5 | S-13 | U | F-255 | MockWebServer, Room, fake clock | Entries: fresh; 61 days old; one left in `SENDING`; server responses in sequence 201, 201 + replayed, 400 `VALIDATION_FAILED`, 503, `CLIENT_UPDATE_REQUIRED`, 401 `UNAUTHENTICATED`, 502 HTML; network failure | `SENDING` reset to `PENDING` at start and sent; body bytes identical to stored; `Idempotency-Key` = stored; deleted; deleted; `FAILED` with the key; `Result.retry()`, entry kept; `UpdateState.Required` and the rest unsent; 401 → stop, entries stay `PENDING`, `Result.success()`; 502 → `Result.retry()`; old entry `NEEDS_CONFIRMATION`, never sent; retry |
 | TP-13.6 | S-13 | U | F-257 | fake API, DataStore | min 5 / latest 7 with version 4, 6, 7; dismiss, then 3 days later | Required; Available; None; hidden then Available again |
 | TP-13.7 | S-13 | U | F-258 | Compose tests (LTR and RTL; fontScale 2) | `UpdateRequiredScreen` with pending 0, 1, 1500 and a failing download; `SyncIndicator` counts 0, 3, 120, failed 1; `OfflineBanner` | Texts per §8.2 (note hidden at 0, "1,000+"-style at 1500, `update_download_failed` shown); "99+"; hidden at 0; nothing clipped at 200%; layout mirrored in RTL |
@@ -3465,14 +3555,16 @@ Types: **U** unit, **I** integration (real Postgres and/or HTTP in-process), **E
 | TP-15.17 | S-15 | E (manual) | stage-0 install and access (AC-15.1 to AC-15.3), and the development path | the owner's laptop, `infra/runbooks/stage0-laptop.md` | Follow the runbook from a fresh WSL2; open the Tailscale URL on the laptop and on the phone (Wi-Fi, then mobile data); with the laptop asleep, record an Android entry, then wake it; with `pnpm dev` running in WSL2, start a debug build on the emulator | Every runbook step succeeds as written; the app loads with a valid certificate both times; the entry syncs after wake; the emulator's debug build reaches the development API at `http://10.0.2.2:5173/` (its `client-config` call succeeds and its test entry appears in the development database, not production); the owner records the date and results in `docs/operations/stage0-install.md` |
 | TP-15.18 | S-15 | E (manual) | Sentry e-mail (AC-15.4) | the laptop stack | `budmon-local` project `budmon-main`: `docker compose run --rm worker-general node dist/main/cli.js diagnostics:sentry-test --yes` | An issue e-mail arrives; the event has no request body, query string or user fields |
 | TP-16.1 | S-3 | U | F-198 | none | Text containing a canary raw, base64-encoded and URL-encoded | 3 hits with the source and offset |
-| TP-16.2 | S-16 | I | F-196 | server started | Each control mode, then a token request | Bodies and status per F-196 |
+| TP-16.2 | S-16 | I | F-196 (A-24) | server started with `signInClientId = REHEARSAL_SIGNIN_CLIENT_ID` and `generateSignInKeyPair()` | Each control mode, then a Gmail token request; a sign-in token request with `fakeSignInCode("n-1")`; sign-in requests with codes `signin.`, `gmail-code`, `signin.***`; a sign-in request with mode `invalid_grant` set; `GET https://www.googleapis.com/oauth2/v3/certs` | Gmail bodies and statuses per F-196; 200 with the exact sign-in body, whose `id_token` verifies (RS256) against the served JWKS, has header `kid "fake-signin-1"`, and has exactly F-196's claims with `nonce "n-1"`, `aud` = `azp` = the client id and `exp − iat = 3600`; `400 {"error":"invalid_grant"}` ×3; 200 (control mode ignored); one key with `kid`, `alg "RS256"`, `use "sig"` and none of `d`, `p`, `q`, `dp`, `dq`, `qi` |
 | TP-16.3 | S-16 | U | F-195 | fake `exec` failing at step 5; then a fake where every step succeeds with `previousTag = null` | `runRehearsal` | Steps 1 to 5 recorded, 6+ not run, cleanup and artifact collection run, `ok:false`; with no previous tag, steps 6 and 13 are recorded as skipped and `ok:true` |
 | TP-16.4 | S-16 | E | rehearsal | first release PR | `rehearsal.yml` | All steps `ok` |
 | TP-16.5 | S-16 | E | canary flows | rehearsal stack | Flows: a request whose body fails validation with a canary in a field; malformed JSON containing a canary; an FX backfill failing because fake FX returns 500 with a canary body; a `GET` with a canary in the query string | Scan finds no canary in any source listed in F-195 step 8 (capture-path flows are added by `sources`) |
 | TP-16.6 | S-16 | E | steps 9, 10 | rehearsal with a doctored overlay adding `INFRA_STAGE=0` to `api`; another mounting capture secrets into `api` | Run | Step 9 fails; step 10 fails |
 | TP-16.7 | S-16 | E | F-195 step 10 | rehearsal stack | Run step 10; then a doctored overlay that attaches worker-capture to `data` | Ready; worker-capture's connection to `PG_DATA_IP:5432` fails and the step passes; with the doctored overlay the step fails |
 | TP-16.12 | S-16 | E | F-195 step 11 | rehearsal stack after step 10 | Run step 11 | `secrets:rewrap-api` exit 0; dump restored through `budmon-local restore` logic and `restore:verify` exit 0; `erasure:replay` exit 0; migrate with the rotated password succeeds through the fallback and a second run doesn't use it |
-| TP-16.13 | S-16 | E | F-195 steps 7 and 8b (A-2, A-6) | rehearsal stack | Run steps 7, 8 and 8b; then a doctored overlay that removes Mailpit's `logging: none`; then (before identity is built) the same run | `mailpit-quiet` passes; the bootstrap-owner sub-step's token (and, once identity exists, the email flows' tokens and the canary address) are absent from every scanned source; the doctored overlay fails 8b; before identity, the sub-step is recorded `skipped: identity not built` and the run stays `ok` |
+| TP-16.13 | S-16 | E | F-195 steps 7a, 7b and 8b (A-2, A-6, A-25) | rehearsal stack | Run steps 7, 8 and 8b; then a doctored overlay that removes Mailpit's `logging: none`; then (before identity is built) the same run | `mailpit-quiet` passes; once identity exists (run in identity's build, its TP-1.36): 7a and 7b pass, two messages are found in Mailpit, and the bootstrap token, `REHEARSAL_OWNER_EMAIL`, the owner's password, the session tokens, the `bmi_`/`bmp_` mail tokens and `canaries.email` are absent from every scanned source; the doctored overlay fails 8b; before identity, 7a, 7b and 7c are recorded `skipped: identity not built` and the run stays `ok` |
+| TP-16.14 | S-16 | E | F-195 step 7c, overlay's `api` Google mapping (A-24) | rehearsal stack; (a) before identity is built; (b) with identity built (run in identity's build, its TP-6.13) | Run step 7 and step 8 | (a) 7c `skipped: identity not built`, run `ok`; (b) start 200, callback 303 with `#h=bmh_…`, complete 404 `GOOGLE_ACCOUNT_UNKNOWN` with `data.email = canaries.email`; the state, nonce, code and hand-off token absent from every scanned source |
+| TP-16.15 | S-16 | U | F-193 (A-24) | none | Needle `{ name: "t", value: "bmi_" + 43 characters }` over sources holding it raw, base64-encoded, URL-encoded, and one without it; a needle with value `short` | 3 hits with source, `needle: "t"` and offset, none containing the value; `TypeError` |
 
 ## 11. Open questions
 
