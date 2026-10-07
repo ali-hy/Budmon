@@ -64,4 +64,19 @@ describe("F-303 convertWithRates", () => {
       ),
     ).toThrow(RangeError);
   });
+
+  // A hand-built rate with a zero or negative denominator is either rejected outright or
+  // normalised first; {1n, -1n} normalises to -1, which F-303 rejects as non-positive. So each
+  // call throws; the LLD doesn't name the error for an invalid Rational.
+  it.each([
+    ["source", { num: 1n, den: -1n }],
+    ["source", { num: 1n, den: 0n }],
+    ["target", { num: 1n, den: -1n }],
+    ["target", { num: 1n, den: 0n }],
+  ])("TP-1.19x: a hand-built %s rate %o throws", (side, rate) => {
+    const from = side === "source" ? { unitsPerUsd: rate, minorUnits: 2 } : EGP_RATE;
+    const to = side === "target" ? { ...USD_TARGET, unitsPerUsd: rate } : USD_TARGET;
+
+    expect(() => convertWithRates(Money.of(100n, EGP), from, to)).toThrow();
+  });
 });

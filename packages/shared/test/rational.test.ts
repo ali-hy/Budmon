@@ -63,6 +63,22 @@ describe("F-300 roundHalfEven", () => {
   });
 });
 
+describe("F-300 roundHalfEven with a hand-built Rational", () => {
+  // The LLD doesn't say whether a hand-built Rational with a negative denominator is rejected or
+  // normalised; either is accepted, but a result must be the normalised value's (-5/2 -> -2).
+  it("TP-1.16x: roundHalfEven({ num: 5n, den: -2n }) throws or returns -2n", () => {
+    let result: bigint | undefined;
+    let threw = false;
+    try {
+      result = roundHalfEven({ num: 5n, den: -2n });
+    } catch {
+      threw = true;
+    }
+
+    expect(threw || result === -2n).toBe(true);
+  });
+});
+
 describe("F-300 rational", () => {
   it.each([
     [2n, 4n, 1n, 2n],

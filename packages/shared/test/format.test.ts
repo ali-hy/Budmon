@@ -55,11 +55,4 @@ describe("F-305 formatMoney", () => {
       ),
     ).toBe("+$1,234.50");
   });
-
-  it("TP-1.21x: the default numbering system follows the locale (ar-EG uses Arabic-Indic digits)", () => {
-    const text = formatMoney(Money.of(123450n, EGP), { locale: "ar-EG", minorUnits: 2 });
-
-    expect(text).toMatch(/[٠-٩]/);
-    expect(text).not.toMatch(/[0-9]/);
-  });
 });

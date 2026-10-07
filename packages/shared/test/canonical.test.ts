@@ -33,6 +33,16 @@ describe("F-306 canonicalJson", () => {
     expect(() => canonicalJson(value)).toThrow(TypeError);
   });
 
+  it.each([
+    ["[1, , 3]", [1, , 3]],
+    ["{ a: [, 1] }", { a: [, 1] }],
+  ])(
+    "TP-1.22x: a sparse array (%s) throws TypeError, like an undefined element (A-38)",
+    (_label, value) => {
+      expect(() => canonicalJson(value)).toThrow(TypeError);
+    },
+  );
+
   it("TP-1.9 (A-38): a property set to undefined is dropped: { a: undefined } is {}", () => {
     expect(canonicalJson({ a: undefined })).toBe("{}");
   });
