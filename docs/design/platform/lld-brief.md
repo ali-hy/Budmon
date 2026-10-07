@@ -1,7 +1,7 @@
 ---
 module: platform
 doc: lld-brief
-summarises: lld.md v0.6
+summarises: lld.md v0.7
 ---
 
 # Platform: LLD brief
@@ -29,7 +29,7 @@ The platform is the foundation every other Budmon module stands on. Nothing a us
   - a database copy on the laptop before every upgrade (the last 5 kept), but **no off-site backups**, as you decided;
   - Sentry e-mails for errors; no other monitoring or alerts (the laptop sleeps, so uptime alerts would fire constantly);
   - the Android app built with the laptop's Tailscale address (a build setting, never committed).
-- **The rehearsal:** before every release, CI runs the release on a copy of the laptop setup (with fake Google and fake exchange-rate services). It upgrades a copy of the previous database, checks no private data leaks into any log, checks the capture worker is cut off from the main database network, and checks that rolling back works.
+- **The rehearsal:** before every release, CI runs the release on a copy of the laptop setup (with fake Google and fake exchange-rate services). It upgrades a copy of the previous database, checks no private data leaks into any log, checks the capture worker is cut off from the main database network, and checks that rolling back works. CI builds the images from the same inputs as your laptop does (same Dockerfiles, pinned base images, locked dependencies), though not byte-for-byte the same files; stage 1 removes that gap by deploying CI's own images.
 
 **Deliberately left out** (a later "stage-1" design, written before you invite anyone):
 - the servers and their provider, the domain, the tunnel to the capture server, disk encryption with manual unlock;
@@ -45,23 +45,26 @@ The code stage 1 needs is built now (the HLD's rule: moving off the laptop must 
 | - | ---- | -------------- | ------- |
 | 1 | **Q-1, decided: exchange rates before 2 March 2024 show "no rate".** The free backup rate source has no data before that date, so conversions dated earlier say "no rate" instead of guessing. This was the recommended default and went ahead with your go-ahead. | Matters only if you import old history. It can be extended later by an amendment, for example fetching older rates from Open Exchange Rates if its free plan includes them (not confirmed). | §11, F-132 |
 | 2 | **Q-2, deferred: an approval click on every release.** It belonged to the release-signing chain, which now starts at stage 1. In stage 0 nothing deploys from CI: a merged release PR only gets a tag, and you run `budmon-local upgrade` yourself, which is the approval. | Nothing to decide now; it comes back with the stage-1 design. | §11 Q-2 |
-| 3 | **One-time laptop setup by hand**, following `infra/runbooks/stage0-laptop.md`: WSL2 with Ubuntu, Docker Desktop (WSL2 backend, start at login), Tailscale on the laptop and phone (MagicDNS and HTTPS certificates switched on), the Google Cloud bootstrap script, two Backblaze B2 buckets for exports and the erasure log (free tier), filling in the few secret placeholders, then `budmon-local install` and `tailscale serve`. | No agent can or should do these. Budmon refuses to start while a placeholder is unfilled, so a missed step shows up at once. | §2.2 runbook, F-178, F-179, F-191 |
+| 3 | **One-time laptop setup by hand**, following `infra/runbooks/stage0-laptop.md`: WSL2 with Ubuntu (your user needs `sudo`), Docker Desktop (WSL2 backend, start at login), Tailscale on the laptop and phone (MagicDNS and HTTPS certificates switched on), two Backblaze B2 buckets for exports and the erasure log (free tier), a Sentry project and a Google OAuth client. Then `budmon-local install <tag>`: it creates the secret files, asks for a few settings (Tailscale name, bucket names, Sentry address, OAuth client id) and stops with a list of what's still missing. You run the Google Cloud script, paste each missing secret with `budmon-local secret set …`, and run `install` again; it finishes and prints the `tailscale serve` command. | No agent can or should do these. The install is resumable, and it refuses to start Budmon while anything is missing, so a skipped step shows up at once. `secret set` gives each file to the one container that reads it. | §2.2 runbook, F-175, F-178, F-179, F-191 |
 | 4 | **Your laptop's disk must be encrypted** (BitLocker or Windows device encryption). Budmon checks nothing here; the runbook asks you to confirm it. | Your real financial data and the Gmail credential file sit on that disk. This is the HLD's assumption A-14. | runbook, HLD A-14 |
 | 5 | **No off-site backups in stage 0** (your decision). Before every upgrade a copy of the database is saved on the laptop (last 5 kept). If the laptop's disk dies or the laptop is lost, the data is gone. | Recorded as accepted. Off-site backups start at stage 1. | F-178, HLD D-30 |
 | 6 | **No alerts in stage 0** except Sentry's "new error" e-mails. If Budmon stops while you're away, nothing tells you. | The laptop sleeping would make uptime alerts useless. Grafana and alerts start at stage 1. | §7.5 |
-| 7 | **Gmail is connected from the laptop's browser**, not the phone. Google's sign-in sends you back to `http://localhost:8080`, because there's no domain yet. A new setting (`GOOGLE_OAUTH_REDIRECT_ORIGIN`) makes this possible. | Once per Gmail connection; capture then runs on its own. | §4.2, HLD A-16 |
-| 8 | **Manual checks after the first install:** open Budmon on the laptop and on the phone (Wi-Fi and mobile data); record an entry on the phone while the laptop sleeps and see it sync after; trigger a test error and get the Sentry e-mail. | Proves the setup works end to end before you rely on it. | §9 S-15 AC-15.1 to AC-15.4 |
-| 9 | **DV-1:** "telemetry dropped" alerts (from stage 1, when Alloy and alerts arrive; the app-side counters exist now). The HLD said the log collector (Alloy) counts every field it strips. It can only count that for logs, so stripped trace and metric fields are counted in the app instead. The ones the monitoring libraries always add are labelled "expected" and don't alert. | Same protection, fewer false alarms. Needs your OK because it differs from the HLD wording. | §1 |
-| 10 | **DV-2:** a fourth environment name, `rehearsal`. It has production's rules, except that a local stand-in for Google's key service is allowed. | Lets the rehearsal be strict without real Google keys. | §1 |
-| 11 | **DV-3:** the UI component library is picked now (**Kobalte**). The HLD wanted a trial first; the trial is now a test in the web slice, and switching to Ark UI would be an amendment if it fails. | A design document can't leave a dependency open. | §1, S-11b |
-| 12 | **DV-4:** the "Gmail connections healthy" gauges are built by the `sources` module, not here. | The platform can't count connections before their tables exist. | §1 |
-| 13 | **DV-5:** the rate-limit counter table has no created/updated timestamps. | Short-lived counters; skipping them saves a write per login attempt. | §1 |
-| 14 | **Decision: the web app's build number is the number of commits in the release** (`git rev-list --count <tag>`). It only grows along `main`, and a hotfix gets a higher number than the release it fixes. | Lets the server tell old web versions to reload. Stage 1 may switch to a release-workflow counter. | F-185 |
-| 15 | **Decision: the server considers itself "ready" if the database is at most one migration ahead of the code.** | This is what makes one-step rollbacks possible. | F-57 |
-| 16 | **Decision: on the web, "Try again" after an uncertain save reuses the same idempotency key** while you haven't changed the form. | It can't create a duplicate even if the first attempt actually succeeded. | F-205 |
-| 17 | **Decision: database passwords are stored and set as hashes** (SCRAM "verifiers"), so the migration step never handles a plaintext password for another service. A one-time fallback to the previous password lets the migration account's own password be rotated. The rotation commands themselves come with stage 1. | Keeps the capture worker's password away from everything else. | F-15, F-92, F-190, F-191 |
-| 18 | **Decision: a daily "missing exchange rates" check**, also run whenever the worker starts. | The laptop is off at times, and the job scheduler doesn't catch up on missed runs; this fetches up to 31 missing days. | F-139 |
-| 19 | **Decision: TypeScript is pinned to 5.9.3,** not the new 7.x. | The linter doesn't support 7 yet. | §2.4 |
+| 7 | **Gmail is connected from the laptop's browser**, not the phone. Google's sign-in sends you back to `http://localhost:8080`, because there's no domain yet. A new setting (`GOOGLE_OAUTH_REDIRECT_ORIGIN`) makes this possible. | While Google's OAuth app is in testing mode, Google expires the sign-in after 7 days, so expect to **reconnect from the laptop about weekly** (Budmon shows "needs reconnect") until the Gmail trial (Q-11) settles the publishing status. | §4.2, HLD A-16, D-29 |
+| 8 | **If Gmail capture stops working, you get a Sentry e-mail.** With no alert rules in stage 0, the `sources` module reports a connection with no successful sync for 24 hours as a Sentry error, so the new-issue e-mail warns you. | Otherwise capture could fail silently for days. A requirement on the `sources` design, not built here. | §7.5, HLD D-25 |
+| 9 | **Android test builds can't reach your real data.** Debug builds on the emulator talk to the development stack (`pnpm dev`, port 5173); port 8080 on the laptop is your real Budmon and a debug build refuses it. Only the `stage0` release build, with your Tailscale address, reaches it. | Stops test entries landing in your real ledger. | F-22, F-264, HLD D-29 |
+| 10 | **Each release runs from its own copy of the setup files.** `budmon-local` copies a release's Compose and configuration files into `~/.budmon/releases/<tag>/` and always uses the running release's copy, never your working clone, so an unfinished branch can't change production. A restore brings back the release the copy was made with. | Rollback and restore always pair the right code with the right files and database. | F-178 |
+| 11 | **Manual checks after the first install:** open Budmon on the laptop and on the phone (Wi-Fi and mobile data); record an entry on the phone while the laptop sleeps and see it sync after; trigger a test error and get the Sentry e-mail. | Proves the setup works end to end before you rely on it. | §9 S-15 AC-15.1 to AC-15.4 |
+| 12 | **DV-1:** "telemetry dropped" alerts (from stage 1, when Alloy and alerts arrive; the app-side counters exist now). The HLD said the log collector (Alloy) counts every field it strips. It can only count that for logs, so stripped trace and metric fields are counted in the app instead. The ones the monitoring libraries always add are labelled "expected" and don't alert. | Same protection, fewer false alarms. Needs your OK because it differs from the HLD wording. | §1 |
+| 13 | **DV-2:** a fourth environment name, `rehearsal`. It has production's rules, except that a local stand-in for Google's key service is allowed. | Lets the rehearsal be strict without real Google keys. | §1 |
+| 14 | **DV-3:** the UI component library is picked now (**Kobalte**). The HLD wanted a trial first; the trial is now a test in the web slice, and switching to Ark UI would be an amendment if it fails. | A design document can't leave a dependency open. | §1, S-11b |
+| 15 | **DV-4:** the "Gmail connections healthy" gauges are built by the `sources` module, not here. | The platform can't count connections before their tables exist. | §1 |
+| 16 | **DV-5:** the rate-limit counter table has no created/updated timestamps. | Short-lived counters; skipping them saves a write per login attempt. | §1 |
+| 17 | **Decision: the web app's build number is the number of commits in the release** (`git rev-list --count <tag>`). It only grows along `main`, and a hotfix gets a higher number than the release it fixes. | Lets the server tell old web versions to reload. Stage 1 may switch to a release-workflow counter. | F-185 |
+| 18 | **Decision: the server considers itself "ready" if the database is at most one migration ahead of the code.** | This is what makes one-step rollbacks possible. | F-57 |
+| 19 | **Decision: on the web, "Try again" after an uncertain save reuses the same idempotency key** while you haven't changed the form. | It can't create a duplicate even if the first attempt actually succeeded. | F-205 |
+| 20 | **Decision: database passwords are stored and set as hashes** (SCRAM "verifiers"), so the migration step never handles a plaintext password for another service. A one-time fallback to the previous password lets the migration account's own password be rotated. The rotation commands themselves come with stage 1. | Keeps the capture worker's password away from everything else. | F-15, F-92, F-190, F-191 |
+| 21 | **Decision: a daily "missing exchange rates" check**, also run whenever the worker starts. | The laptop is off at times, and the job scheduler doesn't catch up on missed runs; this fetches up to 31 missing days. | F-139 |
+| 22 | **Decision: TypeScript is pinned to 5.9.3,** not the new 7.x. | The linter doesn't support 7 yet. | §2.4 |
 
 ## 3. Data
 
@@ -125,7 +128,7 @@ The LLD's catalog has about 179 functions. They're grouped by area here; the rig
 | Exchange rates | 7 (F-130 to F-139) | Daily rates and conversions. | F-132: rates are "provisional" until the day's rate arrives. F-137: switches to the backup provider after 6 hours. F-139: fills days missed while the laptop was off. |
 | Storage and erasure | 7 (F-140 to F-146) | Export files, the erasure log. | F-146: the erasure log that keeps deleted users deleted after a restore. |
 | Operations | 3 (F-150, F-151, F-160) | Restore check, erasure replay, server-side message text. | F-150: checks a restored database is complete and uncorrupted. |
-| Laptop stack | 4 (F-170, F-175, F-178, F-179) | Database image, the laptop's Compose files and Caddy, `budmon-local`, the Google Cloud setup script. | F-170: the database refuses to start empty by accident. F-175: the database port is never published, so the development tools can't reach real data. F-178: an upgrade saves a database copy first and rolls back by itself if the new release isn't healthy. |
+| Laptop stack | 4 (F-170, F-175, F-178, F-179) | Database image, the laptop's Compose files and Caddy, `budmon-local`, the Google Cloud setup script. | F-170: the database refuses to start empty by accident. F-175: the database port is never published, so the development tools can't reach real data. F-178: an upgrade saves a database copy first, runs from the release's own copy of the setup files, and rolls back by itself if the new release isn't healthy; `secret set` writes each secret for exactly one container. |
 | Owner commands | 2 (F-190, F-191) | `budmonctl` secrets tools on the laptop. | F-191: creates every secret file, keeping the capture worker's secrets in their own folder. |
 | Release tooling and rehearsal | 10 (F-180 to F-185, F-194 to F-198) | Generating migrations, release checks, the web build number, the rehearsal. | F-182: migrations must rebuild the exact schema. F-195: the rehearsal. |
 | Web | 21 (F-200 to F-221) | Skeleton, errors, updates, offline, i18n, virtual table. | F-205: create retries reuse the same key. F-219/F-220: the big-table component. |
@@ -161,7 +164,7 @@ About 240 test cases:
 
 | Type | Count | Notes |
 | ---- | ----- | ----- |
-| Unit | ~128 | Including 4 for the `budmon-local` and Google Cloud scripts. |
+| Unit | ~128 | Including 5 for the `budmon-local` and Google Cloud scripts. |
 | Integration | ~90 | Against a real Postgres database. |
 | End-to-end | 15 | Browser, Android emulator, and the rehearsal. |
 | Static checks | 11 | Configuration, workflow and Android build checks. |
@@ -174,19 +177,20 @@ About 240 test cases:
 - "every call needs login";
 - database rights per role;
 - right-to-left layout;
-- `budmon-local`'s upgrade, rollback and restore, with stand-ins for Docker and Git;
+- `budmon-local`'s install, upgrade, rollback, restore and `secret set`, with stand-ins for Docker and Git, plus a real install on the CI runner;
+- that the laptop's settings form a valid production configuration for every container, and that each missing setting is reported;
 - the tagging step and the rehearsal on every release.
 
 **Not covered here:**
 - **Accessibility checks report but never block**, as you asked. Only four simple lint rules block (images need alt text, buttons need names, valid ARIA, no positive tab order).
-- **Real Google, Backblaze and Sentry services, Windows, Docker Desktop and Tailscale** aren't in CI. The first real contact is the first install on your laptop (the manual checks above).
+- **What the build environment can't test** (LLD §10.1): anything on Windows (WSL2, Docker Desktop, Android Studio), the Android emulator outside the Android CI job, real Google, Backblaze, Tailscale and Sentry services, and GitHub-only behaviour such as tag pushes (checked by workflow linting, then seen on the first release). Firefox, WebKit and the slowed-down performance runs are indicative only there. The first real contact is the first install on your laptop (the manual checks above). What it does test for real: Postgres and storage integration, the laptop's container layout with its file ownership, the database safeguards, `budmon-local` and the full rehearsal.
 - **The capture worker's privacy paths with real Gmail data** are tested when the `sources` module is built.
 
 ## 8. Risks
 
 - **Your laptop holds everything in stage 0, with no off-site copy.** A dead disk, theft or a failed Windows reinstall loses all data since you started. You accepted this; stage 1 adds off-site backups. A pre-upgrade copy protects only against a bad upgrade.
 - **Budmon is only up while the laptop is on and awake.** The phone keeps entries offline and syncs later; Gmail capture and exchange rates catch up when it wakes (Gmail's push messages are kept 7 days).
-- **Windows-specific trouble** (WSL2 memory, line endings, Docker Desktop updates). The runbook pins the settings (`.wslconfig`, `.gitattributes`), and every script runs inside WSL2.
+- **Windows-specific trouble** (WSL2 memory and networking, line endings, Docker Desktop updates, file ownership in bind mounts). The runbook pins the settings (`.wslconfig` with WSL2's default networking; the "mirrored" mode is left off because Docker Desktop has had problems with it), every script runs inside WSL2, and `install` probes that each container can read its own secrets before starting anything.
 - **The agents' GitHub token can create release tags in stage 0** (`tag.yml` uses the built-in token). That only names a commit: nothing deploys until you run `budmon-local upgrade`, and it only accepts tags on `main` or a hotfix branch.
 - **Young libraries:** the API framework (oRPC), the UI library (Kobalte, pre-1.0) and the Android client generator. Early "spike" tests in S-4 and S-11b catch problems before modules depend on them.
 - **The backup rate provider** is a free community service with no guarantee. Every stored rate records its source, and no paid plan is used without asking you.
