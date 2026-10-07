@@ -83,3 +83,9 @@ Hetzner's cheap tier became unavailable (whole CX/CAX line marked unavailable si
 | Off-site backups in stage 0 | Declined: "except for the off-site backup, I don't care enough about it right now". |
 | Domain | Not needed until the first server (Google OAuth allows localhost redirects). |
 | HLD | "just go ahead and update the hld with the planner agent". |
+
+## Delegated approvals and build go-ahead (2026-10-07)
+
+- "once it's done... auto approve the lld and start building right away, I don't mind that" — the revised platform HLD (v1.1) and LLD are approved on the user's behalf once the plan-reviewer passes them; open questions take their recommended defaults (FX before 2024-03-02: "no rate", extendable by amendment; the extra release approval click: deferred with the stage-1 deploy chain).
+- "yeah work on feat/platform, that's good." — the platform build uses branch `feat/platform` with its own PR.
+- "once you're done with the platform keep going with the workflow till you're done with the platform module as well as the identity module." — after platform, design and build `identity` the same way (planner → plan-reviewer → approval on the user's behalf → build), on `feat/identity`.
