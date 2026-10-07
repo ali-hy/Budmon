@@ -24,7 +24,7 @@ Sources: [spec summary](../../product/spec-summary.md) v0.10 §4.1 (`IDN`), §3 
 | 0.4     | 2026-10-07 | Plan review round 3. **P-1:** the race tolerance for never-presented superseded tokens is now time-bound. Only the benign path creates such a token. Presented within 60 seconds of that supersession, it gets `REFRESH_INVALID` without revocation (the out-of-order-response race). Presented later, it revokes the session, records the security event and emails the user, as in v0.2. So a thief who redeems the predecessor is detected as soon as the legitimate device refreshes again. The Android app-killed case is unaffected: that device presents the predecessor and takes the benign path. D-3, F-2 and §9 updated; the LLD race test covers both sides of the window. **S-1:** the per-email sign-in limit as a way to block a user's password sign-in is noted, and the counting scheme is left to the LLD (D-18). **S-2:** J-16 tells the owner to use `--replace` if the link may have been seen elsewhere. |
 | 0.5     | 2026-10-07 | Final plan-review check. **P-1:** the no-revocation tolerance is keyed to the race's signature. It applies only when the benign path discarded the token within 60 s of its issue **and** the token is presented within 60 s of being discarded. Any other discarded token revokes the session, records the event and emails the user. So an active device whose access token dies when a thief redeems the predecessor is detected on its immediate refresh. D-3, F-2 and §9 updated; the LLD test adds "predecessor redeemed long after issue, device active". |
 | 0.5     | 2026-10-07 | **Approved** under the owner's standing auto-approval ("auto approve the hlds as well just keep going man", 2026-10-07) after plan review: rounds 1–3 plus a final focused check, whose last finding (refresh tolerance keyed on issue time) is applied exactly as the reviewer specified. The five recommended defaults remain flagged "needs user confirmation". No content change. |
-| 0.6     | 2026-10-07 | Amended during the LLD's design (identity LLD v0.5, DV-9; plan review round 2, Q-1 (a) under the owner's standing delegation): D-3's in-window discarded token now gets a new token while the current token is its unused sibling, instead of always `REFRESH_INVALID`, so concurrent refreshes never sign the user out. One-line change; detection of theft unchanged. Status stays `approved` (delegated amendment); **needs user confirmation**. |
+| 0.6     | 2026-10-07 | Amended during the LLD's design (identity LLD v0.5, DV-9; plan review round 2, Q-1 (a) under the owner's standing delegation): D-3's in-window discarded token now gets a new token while the current token is its unused sibling, instead of always `REFRESH_INVALID`, so concurrent refreshes never sign the user out. The decision line and the F-2 sequence diagram's matching branch are updated ("new tokens if the current token is its unused sibling, else 401 without revocation"); detection of theft unchanged. Status stays `approved` (delegated amendment); **needs user confirmation**. |
 
 ## 1. Context and requirements
 
@@ -795,7 +795,12 @@ sequenceDiagram
     API->>DB: mark the unused current token superseded; insert generation n+1 (child of the presented one); replace the access token hash
     API-->>C: 200 new tokens
   else a never-presented token discarded by the benign path within 60 s of its issue, and presented within 60 s of being discarded
-    API-->>C: 401 REFRESH_INVALID (no revocation: out-of-order race)
+    alt the current token is its unused sibling
+      API->>DB: discard the current token; issue a new one (child of the presented token); replace the access token hash
+      API-->>C: 200 new tokens (out-of-order race, session carries on)
+    else the branch has moved on
+      API-->>C: 401 REFRESH_INVALID (no revocation)
+    end
   else any other superseded token of the family (presented before, or discarded outside those windows)
     API->>DB: revoke session (reason reuse_detected), security event, enqueue email (one tx)
     API-->>C: 401 REFRESH_INVALID

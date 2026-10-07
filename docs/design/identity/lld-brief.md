@@ -1,7 +1,7 @@
 ---
 module: identity
 doc: lld-brief
-summarises: lld.md v0.5
+summarises: lld.md v0.6
 ---
 
 # Identity: LLD brief
@@ -40,7 +40,7 @@ Deliberately left out: changing your email address, passkeys, other sign-in prov
 | 5 | **Lifetimes are constants in code**, not settings (DV-1). | Changing "30 days" means a small code change, not an environment variable. | F-1 |
 | 6 | **A few extra error cases** beyond the HLD's list (DV-5): for example "your Budmon account is connected to a different Google account", "the owner can't delete their own account", and "your account is already being deleted" (cancelling is refused once the 7 days are up). | They make edge cases explicit; wording is in §8.1. | §6 |
 | 7 | **Built on the platform LLD v0.13.** Your earlier requests PA-1 to PA-6 are in it as amendments A-1 to A-6, and identity uses their exact names. The `budmon-local bootstrap-owner` command and Android's Google client-ID setting are the platform's, not identity's. | Nothing to align later. | §1 |
-| 8 | **Five platform requests (PA-7 to PA-11) have landed** in the platform LLD v0.13 as A-22 to A-26: a proper file name for export downloads; a "delete all" for Android's offline queue; Google sign-in and the email privacy check in the release rehearsal (with a separate rehearsal owner address); and named spots where modules plug in. Identity's own first slice still adds the `identity` slot to the platform's containers. **One new request, PA-12, is still open:** the rehearsal's Google sign-in step must identify itself as the web app (`X-Budmon-Client: web/<n>`). Otherwise identity's protection against cross-site sign-in requests refuses it, and the rehearsal's Google test (TP-6.13) can't pass until PA-12 lands. | The rehearsal sub-steps depend on it; nothing else does. | §1.1 |
+| 8 | **Six platform requests have landed** in the platform LLD v0.13. PA-7 to PA-11 are A-22 to A-26: a proper file name for export downloads; a "delete all" for Android's offline queue; Google sign-in and the email privacy check in the release rehearsal (with a separate rehearsal owner address); and named spots where modules plug in. **PA-12 is A-33:** the rehearsal's Google sign-in step identifies itself as the web app, using the build number it reads from the deployed `/version.json`, so identity's protection against cross-site sign-in requests lets it through. Identity's own first slice still adds the `identity` slot to the platform's containers. | Nothing left waiting on the platform. | §1.1 |
 | 9 | **Reset links open in the phone's browser for the MVP** (LD-9). Your delegated decision Q-1 (a); **needs user confirmation**. | The Android app doesn't open reset links itself. | §1 LD-9 |
 | 10 | **Two tabs refreshing at once never sign you out** (DV-9). The reviewer's option (a), taken under your delegation. The approved HLD's D-3 was amended to match, as HLD v0.6 (a one-line change). **Needs user confirmation**, like the other delegated items. Theft detection is unchanged. | It changes an approved document on your behalf. | §1 DV-9, F-25, HLD v0.6 |
 | 11 | **Google sign-in errors land on the sign-in page.** When Google returns to Budmon with an unknown or expired request, you land on `/sign-in` with "Google sign-in didn't complete. Try again." (as the HLD says). Errors on a known request return to the page that started it. | What you'll see when something goes wrong mid-way. | F-82 |
