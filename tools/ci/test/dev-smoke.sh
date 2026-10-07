@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# TP-2.18 (S-2, A-55): from a fresh clone, `pnpm dev` creates .data/dev-secrets/*, starts Postgres,
-# and creates and pushes database `budmon` (the four platform tables) within 90 s.
+# TP-2.18 (S-2, A-55, A-63): from a fresh clone (no .env), `pnpm dev` creates .env from
+# .env.example, creates .data/dev-secrets/*, starts Postgres, and creates and pushes database
+# `budmon` (the four platform tables) within 90 s.
 # From S-4, TP-4.23 adds `/health/ready` answering 200 within the same 90 s.
 #
 # Runs in CI's `dev-smoke` job (main only). It clones the committed state of this repository (HEAD,
@@ -41,6 +42,10 @@ echo "TP-2.18: cloning ${commit}"
 git clone --quiet --no-hardlinks "$repo_root" "$checkout"
 git -C "$checkout" checkout --quiet --detach "$commit"
 (cd "$checkout" && pnpm install --frozen-lockfile)
+if [[ -e "$checkout/.env" ]]; then
+  echo "TP-2.18: the fresh clone already has a .env" >&2
+  exit 1
+fi
 
 echo "TP-2.18: starting pnpm dev"
 setsid bash -c "cd '$checkout' && exec pnpm dev" >"$work_dir/dev.log" 2>&1 &
@@ -51,7 +56,11 @@ for ((elapsed = 0; elapsed < deadline_seconds; elapsed += 2)); do
   if [[ -d "$checkout/.data/dev-secrets" ]] && [[ -n "$(ls -A "$checkout/.data/dev-secrets" 2>/dev/null)" ]]; then
     tables="$(psql "$budmon_url" -tAc "SELECT string_agg(tablename, ',' ORDER BY tablename) FROM pg_tables WHERE schemaname = 'public'" 2>/dev/null || true)"
     if [[ "$tables" == "currencies,exchange_rates,idempotency_records,rate_limit_counters" ]]; then
-      echo "TP-2.18: passed after ${elapsed}s (dev secrets created; budmon has the four platform tables)"
+      if ! cmp -s "$checkout/.env.example" "$checkout/.env"; then
+        echo "TP-2.18: .env wasn't created as a copy of .env.example" >&2
+        exit 1
+      fi
+      echo "TP-2.18: passed after ${elapsed}s (.env and dev secrets created; budmon has the four platform tables)"
       exit 0
     fi
   fi
