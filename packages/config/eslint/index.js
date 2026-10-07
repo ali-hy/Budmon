@@ -131,7 +131,10 @@ export function createBudmonEslintConfig({ tsconfigRootDir }) {
     // 4. Web.
     {
       files: ["apps/web/src/**/*.{ts,tsx}"],
-      settings: { formatjs: { additionalFunctionNames: ["t"] } },
+      settings: {
+        formatjs: { additionalFunctionNames: ["t"] },
+        "jsx-a11y": { components: { Icon: "svg" }, attributes: { for: ["for"] } },
+      },
       plugins: {
         formatjs,
         "jsx-a11y": jsxA11y,
@@ -151,7 +154,10 @@ export function createBudmonEslintConfig({ tsconfigRootDir }) {
         "budmon/no-physical-tailwind": "error",
         "budmon/icon-from-registry": "error",
         "jsx-a11y/alt-text": "error",
-        "jsx-a11y/control-has-associated-label": "error",
+        "jsx-a11y/control-has-associated-label": [
+          "error",
+          { labelAttributes: ["label"], ignoreElements: ["input", "select", "textarea"] },
+        ],
         "jsx-a11y/label-has-associated-control": "error",
         "jsx-a11y/aria-props": "error",
         "jsx-a11y/aria-proptypes": "error",
