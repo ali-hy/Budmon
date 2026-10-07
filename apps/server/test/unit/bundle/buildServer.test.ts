@@ -110,7 +110,7 @@ describe("TP-2.27: buildServer", () => {
     expect([...result.external].sort()).toEqual([...keys, ...keys.map((k) => `${k}/*`)].sort());
   });
 
-  it("TP-2.34x: the entry points are the S-2 main/ files except the development-only ones", () => {
+  it("TP-2.37x: the entry points are the S-2 main/ files except the development-only ones", () => {
     expect([...result.entryPoints].map((e) => e.replaceAll("\\", "/")).sort()).toEqual(
       ENTRY_NAMES.map((n) => `src/main/${n}.ts`).sort(),
     );

@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# TP-2.18 (S-2, A-55, A-63): from a fresh clone (no .env), `pnpm dev` creates .env from
+# TP-2.18 (S-2, A-55, A-63, A-73): from a fresh clone (no .env), `pnpm dev` creates .env from
 # .env.example, creates .data/dev-secrets/*, starts Postgres, and creates and pushes database
-# `budmon` (the four platform tables) within 90 s. Code review B-4: the api and the worker it
-# starts must accept their configuration: the output never contains "Configuration invalid", and
-# both report a valid start (S-2: "api: configuration is valid" / "worker: configuration is
-# valid"; from S-4/S-6 their `api_started` / `worker_started` events).
+# `budmon` (the four platform tables) within 90 s. The api and the worker it starts (working
+# directory: the repository root, A-73) accept their configuration: the output never contains
+# "Configuration invalid", and both report a valid start (S-2: "api: configuration is valid" /
+# "worker: configuration is valid"; from S-4/S-6 their `api_started` / `worker_started` events).
 # From S-4, TP-4.23 adds `/health/ready` answering 200 within the same 90 s.
 #
 # Runs in CI's `dev-smoke` job (main only). It clones the committed state of this repository (HEAD,

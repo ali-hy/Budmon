@@ -29,7 +29,7 @@ describe("TP-2.17: test tooling", () => {
     expect(rows[0]?.["su"]).toBe(false);
   });
 
-  it("TP-2.37x: the copy holds the template's schema and reference data", async () => {
+  it("TP-2.40x: the copy holds the template's schema and reference data", async () => {
     const { rows } = await testDb.database.handle.executeSql(
       "SELECT minor_units FROM currencies WHERE code = 'EGP'",
     );
@@ -37,7 +37,7 @@ describe("TP-2.17: test tooling", () => {
     expect(rows).toEqual([{ minor_units: 2 }]);
   });
 
-  it("TP-2.37x: resetBetweenTests truncates platform tables and keeps currencies", async () => {
+  it("TP-2.40x: resetBetweenTests truncates platform tables and keeps currencies", async () => {
     const app = testDb.database.handle;
     await app.executeSql(
       "INSERT INTO rate_limit_counters (bucket_key, window_start, hits, expires_at) VALUES ('t:x', now(), 1, now() + interval '10 minutes')",

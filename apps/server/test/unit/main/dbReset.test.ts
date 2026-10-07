@@ -170,7 +170,7 @@ describe("TP-2.29: runDbResetCli arguments and environment", () => {
     expect(await runDbResetCli([], h.deps)).toBe(1);
   });
 
-  it("TP-2.49x: ROLE_SECRETS_FILE, when set, is the file read", async () => {
+  it("TP-2.52x: ROLE_SECRETS_FILE, when set, is the file read", async () => {
     const h = harness({ DEV_SUPERUSER_URL: SUPERUSER_URL, ROLE_SECRETS_FILE: "/tmp/roles.json" });
 
     await runDbResetCli([], h.deps);

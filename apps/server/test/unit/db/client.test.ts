@@ -63,7 +63,7 @@ describe("TP-2.19: createDatabase pool options", () => {
     await database.close();
   });
 
-  it("TP-2.34x: construction opens no connection and the handle isn't in a transaction", async () => {
+  it("TP-2.37x: construction opens no connection and the handle isn't in a transaction", async () => {
     const database = createDatabase(dbConfig({ host: "203.0.113.1" }), {
       applicationName: "budmon-api",
     });

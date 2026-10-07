@@ -79,6 +79,15 @@ export async function query<R extends Record<string, unknown> = Record<string, u
 export interface FreshPostgres extends Endpoint {
   superuserUrl: (database?: string) => string;
   superuserClient: (database?: string) => Promise<pg.Client>;
+  /** The container's superuser name (for psql inside the container). */
+  superuserName: string;
+  /** Runs a command inside the container, with extra environment variables. */
+  exec: (
+    command: readonly string[],
+    env?: Record<string, string>,
+  ) => Promise<{ exitCode: number; output: string }>;
+  /** Copies a host file into the container. */
+  copyFile: (source: string, target: string) => Promise<void>;
   stop: () => Promise<void>;
 }
 
@@ -92,6 +101,14 @@ export async function startFreshPostgres(): Promise<FreshPostgres> {
   return {
     ...endpoint,
     superuserUrl,
+    superuserName: container.getUsername(),
+    exec: async (command, env) => {
+      const result = await container.exec([...command], env === undefined ? {} : { env });
+      return { exitCode: result.exitCode, output: result.output };
+    },
+    copyFile: async (source, target) => {
+      await container.copyFilesToContainer([{ source, target }]);
+    },
     superuserClient: async (database?: string) => {
       const client = new pg.Client({ connectionString: superuserUrl(database) });
       await client.connect();

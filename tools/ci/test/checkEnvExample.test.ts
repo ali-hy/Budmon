@@ -1,5 +1,5 @@
 // F-7 checkEnvExample. TP-2.7, TP-2.30 (the committed .env.example against F-10's allConfigKeys,
-// including DEV_SUPERUSER_URL, A-59), plus extra cases TP-2.47x.
+// including DEV_SUPERUSER_URL, A-59), plus extra cases TP-2.50x.
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -24,7 +24,7 @@ describe("TP-2.7: checkEnvExample", () => {
     });
   });
 
-  it("TP-2.47x: comments and blank lines are ignored, and an empty value counts as present", () => {
+  it("TP-2.50x: comments and blank lines are ignored, and an empty value counts as present", () => {
     const example = "# Database\n\nA=1\n  # indented comment\nB=\n";
 
     expect(checkEnvExample(["A", "B"], example)).toEqual({
@@ -54,7 +54,7 @@ describe("TP-2.7: checkEnvExample", () => {
     );
   });
 
-  it("TP-2.47x: allConfigKeys is sorted and includes the variables of every kind", () => {
+  it("TP-2.50x: allConfigKeys is sorted and includes the variables of every kind", () => {
     const keys = allConfigKeys();
 
     expect(keys).toEqual([...keys].sort());

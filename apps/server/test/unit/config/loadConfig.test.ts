@@ -1,5 +1,5 @@
-// F-10 / F-11 loadConfig. TP-2.1 to TP-2.5, TP-2.21 to TP-2.23, TP-2.30 (config part), plus extra
-// cases TP-2.33x.
+// F-10 / F-11 loadConfig. TP-2.1 to TP-2.5, TP-2.21 to TP-2.23, TP-2.30 (config part), TP-2.33,
+// TP-2.35, plus extra cases TP-2.36x and TP-2.57x.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { describe, expect, it } from "vitest";
 import { ConfigError, loadConfig } from "../../../src/platform/config/loadConfig.js";
@@ -126,14 +126,14 @@ describe("TP-2.1: a valid development configuration per process kind", () => {
     expect(load(devMigrate()).migrate?.previousPassword).toBeUndefined();
   });
 
-  it("TP-2.33x: a *_FILE value has one trailing newline trimmed, no more", () => {
+  it("TP-2.36x: a *_FILE value has one trailing newline trimmed, no more", () => {
     const f = devApi();
     withFile(f, "DB_PASSWORD_FILE", "pw\n\n");
 
     expect(load(f).db.password.reveal()).toBe("pw\n");
   });
 
-  it("TP-2.33x: a Config doesn't reveal secrets when serialised", () => {
+  it("TP-2.36x: a Config doesn't reveal secrets when serialised", () => {
     const text = JSON.stringify(load(devApi()));
 
     expect(text).not.toContain("db-password");
@@ -156,7 +156,7 @@ describe("TP-2.2: missing and invalid variables", () => {
     expect(JSON.stringify(error.problems)).not.toContain("S3NT1NEL");
   });
 
-  it("TP-2.33x: one problem per failing variable", () => {
+  it("TP-2.36x: one problem per failing variable", () => {
     const f = devApi();
     delete f.env["DB_HOST"];
     delete f.env["DB_NAME"];
@@ -168,7 +168,7 @@ describe("TP-2.2: missing and invalid variables", () => {
   });
 
   it.each([["__FILL_ME__\n"], ["__FILL_ME__"]])(
-    'TP-2.33x: a file holding the placeholder %j is "placeholder not filled"',
+    'TP-2.36x: a file holding the placeholder %j is "placeholder not filled"',
     (content) => {
       const f = devApi();
       withFile(f, "CURSOR_KEY_FILE", content);
@@ -180,7 +180,7 @@ describe("TP-2.2: missing and invalid variables", () => {
     },
   );
 
-  it('TP-2.33x: a plain variable set to __FILL_ME__ is "placeholder not filled"', () => {
+  it('TP-2.36x: a plain variable set to __FILL_ME__ is "placeholder not filled"', () => {
     const f = devApi();
     f.env["DB_HOST"] = "__FILL_ME__";
 
@@ -191,7 +191,7 @@ describe("TP-2.2: missing and invalid variables", () => {
 describe("TP-2.3: production-only rules, each separately", () => {
   const RULES = ["not allowed in production", "required"];
 
-  it("TP-2.33x: the production fixtures are valid as they are", () => {
+  it("TP-2.36x: the production fixtures are valid as they are", () => {
     for (const f of [prodApi(), prodWorkerGeneral(), prodWorkerCapture(), prodMigrate()]) {
       expect(problemsOf(f)).toEqual([]);
     }
@@ -304,7 +304,7 @@ describe("TP-2.21: GOOGLE_OAUTH_REDIRECT_ORIGIN (production)", () => {
     expect(load(f).api?.googleOAuthRedirectOrigin.origin).toBe("https://a.ts.net");
   });
 
-  it("TP-2.33x: a capture worker's origin is in capture.oauth.redirectOrigin", () => {
+  it("TP-2.36x: a capture worker's origin is in capture.oauth.redirectOrigin", () => {
     expect(load(prodWorkerCapture()).capture?.oauth?.redirectOrigin.origin).toBe(
       "http://localhost:8080",
     );
@@ -371,7 +371,7 @@ describe("TP-2.22: SMTP_URL, SMTP_PASSWORD_FILE, EMAIL_FROM and the worker's PUB
       "smtps://smtp.example.com:2465",
       { security: "implicit_tls", host: "smtp.example.com", port: 2465 },
     ],
-  ])("TP-2.33x: SMTP_URL %s gives smtpTransport %o", (url, transport) => {
+  ])("TP-2.36x: SMTP_URL %s gives smtpTransport %o", (url, transport) => {
     const f = prodWorkerGeneral();
     f.env["SMTP_URL"] = url;
 
@@ -399,8 +399,8 @@ describe("TP-2.22: SMTP_URL, SMTP_PASSWORD_FILE, EMAIL_FROM and the worker's PUB
     expect(JSON.stringify(error.problems)).not.toContain("Pw7f3aSECRET");
   });
 
-  // TP-2.54x (code review B-5): decoding the user name must not escape as a URIError.
-  it("TP-2.54x: a malformed percent-escape in SMTP_URL's user is a ConfigError naming SMTP_URL, without the value", () => {
+  // TP-2.57x (code review B-5): decoding the user name must not escape as a URIError.
+  it("TP-2.57x: a malformed percent-escape in SMTP_URL's user is a ConfigError naming SMTP_URL, without the value", () => {
     const f = prodWorkerGeneral();
     f.env["SMTP_URL"] = "smtp://%E0%A4%A@smtp.example.com";
 
@@ -425,7 +425,7 @@ describe("TP-2.22: SMTP_URL, SMTP_PASSWORD_FILE, EMAIL_FROM and the worker's PUB
     expect(problemsOf(f)).toEqual([{ variable, rule: "required" }]);
   });
 
-  it("TP-2.33x: plain SMTP to localhost is accepted in development, without TLS", () => {
+  it("TP-2.36x: plain SMTP to localhost is accepted in development, without TLS", () => {
     const f = devWorker();
     f.env["SMTP_URL"] = "smtp://localhost:1025";
 
@@ -514,5 +514,76 @@ describe("TP-2.30: DEV_SUPERUSER_URL is a development-tools variable, not config
 
     expect(JSON.stringify(config)).not.toContain("s3cr3tSuperUser");
     expect(JSON.stringify(config)).not.toContain("localhost:5432/postgres");
+  });
+});
+
+describe("TP-2.33: *_FILE paths (A-73)", () => {
+  it('TP-2.33 (a): a relative *_FILE in production is "must be an absolute path", without the value', () => {
+    const f = prodApi();
+    const content = f.files.get(f.env["CURSOR_KEY_FILE"] ?? "") ?? "";
+    f.files.set("keys/cursor", content);
+    f.env["CURSOR_KEY_FILE"] = "keys/cursor";
+
+    const error = caughtConfigError(f);
+
+    expect(error.problems).toEqual([
+      { variable: "CURSOR_KEY_FILE", rule: "must be an absolute path" },
+    ]);
+    expect(error.message).not.toContain("keys/cursor");
+  });
+
+  it("TP-2.33 (b): in development, relative paths are read as given (resolved by the working directory)", () => {
+    const f = devApi();
+    const relative = new Map<string, string>();
+    for (const [variable, value] of Object.entries(f.env)) {
+      if (!variable.endsWith("_FILE") || value === undefined) continue;
+      const rel = `.data/dev-secrets/${variable.toLowerCase()}`;
+      relative.set(rel, f.files.get(value) ?? "");
+      f.env[variable] = rel;
+    }
+    const read: string[] = [];
+    const readFile = (file: string): Buffer => {
+      read.push(file);
+      const content = relative.get(file);
+      if (content === undefined) throw new Error(`ENOENT: ${file}`);
+      return Buffer.from(content, "utf8");
+    };
+
+    loadConfig("api", f.env, readFile);
+
+    expect(read.sort()).toEqual([...relative.keys()].sort());
+  });
+});
+
+describe("TP-2.35: APP_ENV=test allows the local origin and no OAuth client id (A-76)", () => {
+  it("TP-2.35: api with PUBLIC_ORIGIN=http://localhost:5173 is accepted in test", () => {
+    const f = devApi();
+    f.env["APP_ENV"] = "test";
+    f.env["PUBLIC_ORIGIN"] = "http://localhost:5173";
+
+    expect(problemsOf(f)).toEqual([]);
+  });
+
+  it("TP-2.35: worker-capture without GOOGLE_OAUTH_CLIENT_ID is accepted in test", () => {
+    const f = devWorker();
+    f.env["APP_ENV"] = "test";
+    f.env["WORKER_ROLES"] = "capture";
+    delete f.env["GOOGLE_OAUTH_CLIENT_ID"];
+
+    expect(problemsOf(f)).toEqual([]);
+  });
+
+  it("TP-2.35: the same api origin is a problem in production", () => {
+    const f = prodApi();
+    f.env["PUBLIC_ORIGIN"] = "http://localhost:5173";
+
+    expect(problemsOf(f).map((p) => p.variable)).toContain("PUBLIC_ORIGIN");
+  });
+
+  it("TP-2.35: worker-capture without GOOGLE_OAUTH_CLIENT_ID is a problem in production", () => {
+    const f = prodWorkerCapture();
+    delete f.env["GOOGLE_OAUTH_CLIENT_ID"];
+
+    expect(problemsOf(f).map((p) => p.variable)).toContain("GOOGLE_OAUTH_CLIENT_ID");
   });
 });
