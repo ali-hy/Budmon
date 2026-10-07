@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import type { Config } from "../../src/platform/config/schema.js";
 import { createDatabase } from "../../src/platform/db/client.js";
 import type { runSchemaStep } from "../../src/platform/db/schemaStep.js";
+import type { Logger } from "../../src/platform/observability/logger.js";
 import type { Database } from "../../src/platform/db/types.js";
 import iso4217 from "../../src/platform/fx/iso4217.json" with { type: "json" };
 import { Secret } from "../../src/platform/observability/redaction.js";
@@ -13,7 +14,7 @@ import { testRoleSecrets } from "./postgres.js";
 export const SERVER_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
 type SchemaStepInput = Parameters<typeof runSchemaStep>[0];
-export type TestLogger = SchemaStepInput["logger"];
+export type TestLogger = Logger;
 
 export interface LoggedLine {
   level: "debug" | "info" | "warn" | "error";
@@ -21,7 +22,8 @@ export interface LoggedLine {
   fields: unknown;
 }
 
-/** A Logger (F-31's interface) that records calls instead of writing them. */
+/** A Logger (F-31's interface, created in S-2 by A-51) that records calls instead of writing them.
+ * Each line keeps the child bindings and the fields: `fields: { bindings, fields }`. */
 export function recordingLogger(lines: LoggedLine[] = []): TestLogger & { lines: LoggedLine[] } {
   const make = (bindings: unknown): TestLogger & { lines: LoggedLine[] } => ({
     lines,
@@ -67,18 +69,20 @@ export function referenceData(): SchemaStepInput["referenceData"] {
 }
 
 /**
- * runSchemaStep's input for a test cluster: password-form role secrets, appEnv "test", the
- * server's (empty) drizzle folder, the ISO 4217 file and a recording logger.
+ * runSchemaStep's S-2 input (A-49: no jobRegistry until S-6) for a test cluster: password-form
+ * role secrets, appEnv "test", the server's (empty) drizzle folder or `migrationsFolder`, the
+ * ISO 4217 file and a recording logger.
  */
 export function schemaStepInput(
   database: Database,
   mode: "push" | "migrate",
   logger: TestLogger = recordingLogger(),
+  migrationsFolder: string = path.join(SERVER_DIR, "drizzle"),
 ): SchemaStepInput {
   return {
     mode,
     database,
-    migrationsFolder: path.join(SERVER_DIR, "drizzle"),
+    migrationsFolder,
     roleSecrets: testRoleSecrets(),
     appEnv: "test",
     referenceData: referenceData(),

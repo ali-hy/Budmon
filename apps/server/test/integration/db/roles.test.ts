@@ -1,13 +1,11 @@
 // F-15 applyRolesAndPrivileges. TP-2.10 (fresh container), plus extra cases TP-2.38x.
-//
-// TP-2.10 (a)'s span and log assertions need the in-memory span exporter and log capture from
-// S-3 (F-31, F-36) and are added there; the pg_stat_statements part is checked here.
+// The span check of TP-2.10 (a) is TP-3.12 in S-3 (A-51).
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { bootstrapCluster } from "../../../src/platform/db/clusterBootstrap.js";
 import { applyRolesAndPrivileges } from "../../../src/platform/db/roles.js";
 import { SchemaStepError } from "../../../src/platform/db/schemaStep.js";
 import type { Database } from "../../../src/platform/db/types.js";
-import { connectDatabase } from "../../support/platform.js";
+import { connectDatabase, recordingLogger, type LoggedLine } from "../../support/platform.js";
 import {
   LOGIN_ROLES,
   connectionString,
@@ -27,6 +25,7 @@ type Secrets = Parameters<typeof applyRolesAndPrivileges>[1];
 
 let pg: FreshPostgres;
 let migrator: Database;
+const firstRunLines: LoggedLine[] = [];
 
 /** `password` for every role except budmon_migrator, which keeps the password the test logs in
  * with (F-15 sets the migrator's password too). */
@@ -74,7 +73,12 @@ beforeAll(async () => {
   await superuserQuery("SELECT pg_stat_statements_reset()");
   migrator = connectDatabase(pg, "budmon_migrator", MIGRATOR_PASSWORD, DATABASE);
   // (a) runs first: every later case depends on the roles existing.
-  await applyRolesAndPrivileges(migrator.handle, passwordSecrets(CANARY_TOKEN), "test");
+  await applyRolesAndPrivileges(
+    migrator.handle,
+    passwordSecrets(CANARY_TOKEN),
+    "test",
+    recordingLogger(firstRunLines),
+  );
 });
 
 afterAll(async () => {
@@ -92,6 +96,19 @@ describe("TP-2.10: roles and passwords", () => {
     expect(rows).toEqual(
       [...LOGIN_ROLES].sort().map((rolname) => ({ rolname, rolcanlogin: true, rolinherit: false })),
     );
+  });
+
+  it("TP-2.10 (a): one role_password_set per role, naming only the role", () => {
+    const events = firstRunLines.filter((l) => l.event === "role_password_set");
+
+    expect(events.map((l) => l.level)).toEqual(LOGIN_ROLES.map(() => "info"));
+    expect(
+      events.map((l) => (l.fields as { fields?: { role?: unknown } }).fields?.role).sort(),
+    ).toEqual([...LOGIN_ROLES].sort());
+  });
+
+  it("TP-2.10 (a): the canary password is in no log call", () => {
+    expect(JSON.stringify(firstRunLines)).not.toContain(CANARY_TOKEN);
   });
 
   it("TP-2.10 (a): the canary password is in no pg_stat_statements query", async () => {
@@ -119,7 +136,7 @@ describe("TP-2.10: roles and passwords", () => {
     const secrets = passwordSecrets(CANARY_TOKEN);
     secrets.budmon_app = { verifier: testScramVerifier("app-password-from-verifier") };
 
-    await applyRolesAndPrivileges(migrator.handle, secrets, "test");
+    await applyRolesAndPrivileges(migrator.handle, secrets, "test", recordingLogger());
 
     const url = connectionString(pg, "budmon_app", "app-password-from-verifier", DATABASE);
     expect(await query(url, "SELECT current_user AS u")).toEqual([{ u: "budmon_app" }]);
@@ -130,9 +147,13 @@ describe("TP-2.10: roles and passwords", () => {
     const secrets = passwordSecrets("changed-password");
     secrets.budmon_app = { verifier: "SCRAM-SHA-256$bad" };
 
-    const error = await schemaStepError(applyRolesAndPrivileges(migrator.handle, secrets, "test"));
+    const error = await schemaStepError(
+      applyRolesAndPrivileges(migrator.handle, secrets, "test", recordingLogger()),
+    );
 
     expect(error).toMatchObject({ code: "invalid_verifier", subject: "budmon_app" });
+    expect(error.name).toBe("SchemaStepError");
+    expect(error.message).toBe("schema step failed: invalid_verifier (budmon_app)");
     expect(await rolePasswords()).toEqual(before);
   });
 
@@ -140,7 +161,12 @@ describe("TP-2.10: roles and passwords", () => {
     const before = await rolePasswords();
 
     const error = await schemaStepError(
-      applyRolesAndPrivileges(migrator.handle, passwordSecrets("prod-password"), "production"),
+      applyRolesAndPrivileges(
+        migrator.handle,
+        passwordSecrets("prod-password"),
+        "production",
+        recordingLogger(),
+      ),
     );
 
     expect(error.code).toBe("password_form_in_production");
@@ -189,7 +215,12 @@ describe("TP-2.38x: the rest of F-15", () => {
 
   it("TP-2.38x: a second identical run succeeds (idempotent)", async () => {
     await expect(
-      applyRolesAndPrivileges(migrator.handle, passwordSecrets(CANARY_TOKEN), "test"),
+      applyRolesAndPrivileges(
+        migrator.handle,
+        passwordSecrets(CANARY_TOKEN),
+        "test",
+        recordingLogger(),
+      ),
     ).resolves.toBeUndefined();
   });
 });

@@ -1,4 +1,5 @@
-// F-10 / F-11 loadConfig. TP-2.1 to TP-2.5, TP-2.21 to TP-2.23, plus extra cases TP-2.29x.
+// F-10 / F-11 loadConfig. TP-2.1 to TP-2.5, TP-2.21 to TP-2.23, TP-2.30 (config part), plus extra
+// cases TP-2.29x.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { describe, expect, it } from "vitest";
 import { ConfigError, loadConfig } from "../../../src/platform/config/loadConfig.js";
@@ -281,11 +282,26 @@ describe("TP-2.5: unreadable *_FILE", () => {
 });
 
 describe("TP-2.21: GOOGLE_OAUTH_REDIRECT_ORIGIN (production)", () => {
+  it("TP-2.21: unset on the api, it defaults to PUBLIC_ORIGIN's origin", () => {
+    const f = prodApi();
+    delete f.env["GOOGLE_OAUTH_REDIRECT_ORIGIN"];
+    f.env["PUBLIC_ORIGIN"] = "https://a.ts.net";
+
+    expect(load(f).api?.googleOAuthRedirectOrigin.origin).toBe("https://a.ts.net");
+  });
+
+  it("TP-2.29x: a capture worker's origin is in capture.oauth.redirectOrigin", () => {
+    expect(load(prodWorkerCapture()).capture?.oauth?.redirectOrigin.origin).toBe(
+      "http://localhost:8080",
+    );
+  });
+
   it.each([["http://localhost:8080"]])("TP-2.21: %s is accepted for the api", (origin) => {
     const f = prodApi();
     f.env["GOOGLE_OAUTH_REDIRECT_ORIGIN"] = origin;
 
     expect(problemsOf(f)).toEqual([]);
+    expect(load(f).api?.googleOAuthRedirectOrigin.origin).toBe(origin);
   });
 
   it.each([
@@ -309,15 +325,43 @@ describe("TP-2.21: GOOGLE_OAUTH_REDIRECT_ORIGIN (production)", () => {
 
 describe("TP-2.22: SMTP_URL, SMTP_PASSWORD_FILE, EMAIL_FROM and the worker's PUBLIC_ORIGIN (production)", () => {
   it.each([
-    ["smtp://mailpit:1025"],
-    ["smtps://u@smtp.example.com"],
-    ["smtp://u@smtp.example.com:587"],
-  ])("TP-2.22: SMTP_URL %s is accepted", (url) => {
+    ["smtp://mailpit:1025", { security: "none", host: "mailpit", port: 1025 }],
+    [
+      "smtps://u@smtp.example.com",
+      { security: "implicit_tls", host: "smtp.example.com", port: 465, user: "u" },
+    ],
+  ])("TP-2.22: SMTP_URL %s is accepted with smtpTransport %o", (url, transport) => {
     const f = prodWorkerGeneral();
     f.env["SMTP_URL"] = url;
 
-    expect(problemsOf(f)).toEqual([]);
-    expect(load(f).email?.smtpUrl.href).toBe(new URL(url).href);
+    const email = load(f).email;
+
+    expect(email?.smtpTransport).toEqual(transport);
+    expect(email?.smtpUrl.href).toBe(new URL(url).href);
+  });
+
+  it("TP-2.22: SMTP_URL smtp://u@smtp.example.com:587 is accepted with STARTTLS required", () => {
+    const f = prodWorkerGeneral();
+    f.env["SMTP_URL"] = "smtp://u@smtp.example.com:587";
+
+    expect(load(f).email?.smtpTransport).toMatchObject({
+      security: "starttls",
+      port: 587,
+      user: "u",
+    });
+  });
+
+  it.each([
+    ["smtp://smtp.example.com", { security: "starttls", host: "smtp.example.com", port: 587 }],
+    [
+      "smtps://smtp.example.com:2465",
+      { security: "implicit_tls", host: "smtp.example.com", port: 2465 },
+    ],
+  ])("TP-2.29x: SMTP_URL %s gives smtpTransport %o", (url, transport) => {
+    const f = prodWorkerGeneral();
+    f.env["SMTP_URL"] = url;
+
+    expect(load(f).email?.smtpTransport).toEqual(transport);
   });
 
   it.each([
@@ -355,11 +399,15 @@ describe("TP-2.22: SMTP_URL, SMTP_PASSWORD_FILE, EMAIL_FROM and the worker's PUB
     expect(problemsOf(f)).toEqual([{ variable, rule: "required" }]);
   });
 
-  it("TP-2.29x: plain SMTP to localhost is accepted in development", () => {
+  it("TP-2.29x: plain SMTP to localhost is accepted in development, without TLS", () => {
     const f = devWorker();
     f.env["SMTP_URL"] = "smtp://localhost:1025";
 
-    expect(problemsOf(f)).toEqual([]);
+    expect(load(f).email?.smtpTransport).toEqual({
+      security: "none",
+      host: "localhost",
+      port: 1025,
+    });
   });
 });
 
@@ -428,5 +476,17 @@ describe("TP-2.23: GOOGLE_SIGNIN_* and RECOVERY_CODE_HMAC_KEYS_FILE (api, produc
     const config = load(devApi());
 
     expect(config.api?.googleSignIn).toBeUndefined();
+  });
+});
+
+describe("TP-2.30: DEV_SUPERUSER_URL is a development-tools variable, not configuration (A-59)", () => {
+  it("TP-2.30: with DEV_SUPERUSER_URL set, the api config is accepted and holds no field for it", () => {
+    const f = devApi();
+    f.env["DEV_SUPERUSER_URL"] = "postgres://postgres:s3cr3tSuperUser@localhost:5432/postgres";
+
+    const config = load(f);
+
+    expect(JSON.stringify(config)).not.toContain("s3cr3tSuperUser");
+    expect(JSON.stringify(config)).not.toContain("localhost:5432/postgres");
   });
 });

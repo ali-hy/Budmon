@@ -14,9 +14,9 @@ import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testconta
 import { bootstrapCluster } from "../../src/platform/db/clusterBootstrap.js";
 import { runSchemaStep } from "../../src/platform/db/schemaStep.js";
 import { connectDatabase, schemaStepInput } from "../support/platform.js";
+import { POSTGRES_IMAGE } from "./postgresImage.js";
 import {
   POSTGRES_COMMAND,
-  POSTGRES_IMAGE,
   TEST_ROLE_PASSWORDS,
   connectionString,
   type Endpoint,

@@ -1,4 +1,4 @@
-// F-24 buildServer (A-43). TP-2.27.
+// F-24 buildServer (A-43, A-56, A-62). TP-2.27. S-6 adds cli and healthcheck to ENTRY_NAMES.
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { isBuiltin } from "node:module";
 import { tmpdir } from "node:os";
@@ -8,7 +8,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { buildServer } from "../../../scripts/build.js";
 
 const SERVER_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
-const ENTRY_NAMES = ["api", "worker", "migrate", "cli", "healthcheck"];
+const ENTRY_NAMES = ["api", "worker", "migrate"];
+const DEVELOPMENT_ONLY = ["dev", "dbReset"];
 
 function dependencyKeys(): string[] {
   const pkg = JSON.parse(readFileSync(path.join(SERVER_DIR, "package.json"), "utf8")) as {
@@ -51,12 +52,15 @@ describe("TP-2.27: buildServer", () => {
     rmSync(outdir, { recursive: true, force: true });
   });
 
-  it("TP-2.27: writes api, worker, migrate, cli and healthcheck with linked source maps", () => {
+  it("TP-2.27: writes api, worker and migrate with linked source maps, and no dev or dbReset", () => {
     const files = new Set(readdirSync(outdir));
 
     for (const name of ENTRY_NAMES) {
       expect(files).toContain(`${name}.js`);
       expect(files).toContain(`${name}.js.map`);
+    }
+    for (const name of DEVELOPMENT_ONLY) {
+      expect(files).not.toContain(`${name}.js`);
     }
   });
 
@@ -64,7 +68,10 @@ describe("TP-2.27: buildServer", () => {
     const problems: string[] = [];
     for (const file of jsFiles(outdir)) {
       for (const specifier of importSpecifiers(readFileSync(file, "utf8"))) {
-        if (specifier.startsWith("@budmon/") || (specifier.startsWith(".") && specifier.endsWith(".ts"))) {
+        if (
+          specifier.startsWith("@budmon/") ||
+          (specifier.startsWith(".") && specifier.endsWith(".ts"))
+        ) {
           problems.push(`${path.relative(outdir, file)}: ${specifier}`);
         }
       }
@@ -73,7 +80,7 @@ describe("TP-2.27: buildServer", () => {
     expect(problems).toEqual([]);
   });
 
-  it("TP-2.27: every bare specifier left is a Node builtin or a package in dependencies", () => {
+  it("TP-2.27: every bare specifier left is a Node builtin (with or without node:) or a package in dependencies", () => {
     const allowed = new Set(dependencyKeys());
     const problems: string[] = [];
     for (const file of jsFiles(outdir)) {
@@ -95,7 +102,7 @@ describe("TP-2.27: buildServer", () => {
     expect([...result.external].sort()).toEqual([...keys, ...keys.map((k) => `${k}/*`)].sort());
   });
 
-  it("TP-2.30x: the entry points are the five main/ files", () => {
+  it("TP-2.30x: the entry points are the S-2 main/ files except the development-only ones", () => {
     expect([...result.entryPoints].map((e) => e.replaceAll("\\", "/")).sort()).toEqual(
       ENTRY_NAMES.map((n) => `src/main/${n}.ts`).sort(),
     );

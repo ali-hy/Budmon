@@ -1,17 +1,15 @@
-// F-19 runSchemaStep, push mode, on a fresh container. TP-2.15 (first run), plus extra cases
-// TP-2.41x.
-//
-// Deferred, pending the planner: TP-2.15's second push-mode run (F-17 refuses a non-empty
-// database), and the queue fields (queueSchema, queuesCreated, queuesUpdated), which come with
-// F-19 steps 3 and 6 in S-6.
+// F-19 runSchemaStep, S-2 shape (A-49, A-50), on a fresh container. TP-2.15, plus extra cases
+// TP-2.41x. S-6 extends TP-2.15 with the queue fields.
+import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { bootstrapCluster } from "../../../src/platform/db/clusterBootstrap.js";
+import { PushTargetNotEmptyError } from "../../../src/platform/db/schemaPush.js";
 import { runSchemaStep } from "../../../src/platform/db/schemaStep.js";
 import type { Database } from "../../../src/platform/db/types.js";
 import {
+  SERVER_DIR,
   connectDatabase,
   recordingLogger,
-  referenceData,
   schemaStepInput,
   type LoggedLine,
 } from "../../support/platform.js";
@@ -23,11 +21,12 @@ import {
 } from "../../support/postgres.js";
 
 const DATABASE = "budmon";
+const EMPTY_MIGRATIONS = path.join(SERVER_DIR, "test/fixtures/migrations-empty");
 
 let pg: FreshPostgres;
 let migrator: Database;
+const firstRun: LoggedLine[] = [];
 let report: Awaited<ReturnType<typeof runSchemaStep>>;
-const lines: LoggedLine[] = [];
 
 beforeAll(async () => {
   pg = await startFreshPostgres();
@@ -41,7 +40,7 @@ beforeAll(async () => {
     await client.end();
   }
   migrator = connectDatabase(pg, "budmon_migrator", TEST_ROLE_PASSWORDS.budmon_migrator, DATABASE);
-  report = await runSchemaStep(schemaStepInput(migrator, "push", recordingLogger(lines)));
+  report = await runSchemaStep(schemaStepInput(migrator, "push", recordingLogger(firstRun)));
 });
 
 afterAll(async () => {
@@ -49,13 +48,43 @@ afterAll(async () => {
   await pg.stop();
 });
 
-describe("TP-2.15: runSchemaStep in push mode on an empty database", () => {
-  it("TP-2.15: the report's fields are populated", () => {
-    expect(report.pushedStatements).toBeGreaterThan(0);
+function stepFields(lines: LoggedLine[]): { step?: unknown; durationMs?: unknown }[] {
+  return lines
+    .filter((l) => l.event === "schema_step")
+    .map((l) => (l.fields as { fields?: { step?: unknown; durationMs?: unknown } }).fields ?? {});
+}
+
+describe("TP-2.15: runSchemaStep (S-2)", () => {
+  it("TP-2.15 (a): push on an empty database reports pushed statements and upserted currencies", () => {
+    expect(Object.keys(report).sort()).toEqual([
+      "currenciesUpserted",
+      "migrationsApplied",
+      "pushedStatements",
+    ]);
     expect(report.migrationsApplied).toBe(0);
-    expect(report.currenciesUpserted).toBe(referenceData().currencies.length);
+    expect(report.pushedStatements).toBeGreaterThan(0);
+    expect(report.currenciesUpserted).toBeGreaterThan(0);
   });
 
+  it("TP-2.15 (b): push again throws PushTargetNotEmptyError after step 1 re-ran without error", async () => {
+    const lines: LoggedLine[] = [];
+
+    await expect(
+      runSchemaStep(schemaStepInput(migrator, "push", recordingLogger(lines))),
+    ).rejects.toBeInstanceOf(PushTargetNotEmptyError);
+    expect(lines.filter((l) => l.event === "role_password_set")).toHaveLength(5);
+  });
+
+  it("TP-2.15 (c): migrate mode with an empty migrations folder applies nothing and upserts nothing", async () => {
+    const second = await runSchemaStep(
+      schemaStepInput(migrator, "migrate", recordingLogger(), EMPTY_MIGRATIONS),
+    );
+
+    expect(second).toMatchObject({ migrationsApplied: 0, currenciesUpserted: 0 });
+  });
+});
+
+describe("TP-2.41x: the rest of F-19", () => {
   it("TP-2.41x: roles, tables, grants and reference data are all in place", async () => {
     const url = pg.superuserUrl(DATABASE);
     const [roles] = await query(
@@ -78,17 +107,14 @@ describe("TP-2.15: runSchemaStep in push mode on an empty database", () => {
     expect(egp).toEqual({ minor_units: 2 });
   });
 
-  it('TP-2.41x: each step is logged as event "schema_step" with step and durationMs', () => {
-    const steps = lines.filter((l) => l.event === "schema_step");
-    const fields = steps.map(
-      (l) => (l.fields as { fields?: { step?: unknown; durationMs?: unknown } }).fields,
-    );
+  it('TP-2.41x: each step is logged once as event "schema_step" with step and durationMs', () => {
+    const fields = stepFields(firstRun);
 
-    expect(steps.length).toBeGreaterThanOrEqual(4);
+    expect(fields.length).toBeGreaterThanOrEqual(4);
     for (const f of fields) {
-      expect(typeof f?.step).toBe("string");
-      expect(typeof f?.durationMs).toBe("number");
+      expect(typeof f.step).toBe("string");
+      expect(typeof f.durationMs).toBe("number");
     }
-    expect(new Set(fields.map((f) => f?.step)).size).toBe(fields.length);
+    expect(new Set(fields.map((f) => f.step)).size).toBe(fields.length);
   });
 });

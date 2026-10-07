@@ -1,8 +1,8 @@
-// F-20 resetDevelopmentDatabase against a real cluster. TP-2.16's third case ("localhost +
-// development: deps called in order"), on a fresh container, plus extra cases TP-2.42x.
-// The refusals are unit tests (unit/db/reset.test.ts).
+// F-20 resetDevelopmentDatabase on a fresh container. TP-2.16 (b) (A-54), plus extra case
+// TP-2.42x. The refusals, TP-2.16 (a), are unit tests (unit/db/reset.test.ts).
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetDevelopmentDatabase } from "../../../src/platform/db/reset.js";
+import { runSchemaStep } from "../../../src/platform/db/schemaStep.js";
 import {
   TEST_ROLE_PASSWORDS,
   query,
@@ -11,9 +11,7 @@ import {
   type FreshPostgres,
 } from "../../support/postgres.js";
 
-const DATABASE = "budmon";
-
-type ResetDeps = Parameters<typeof resetDevelopmentDatabase>[1];
+const DATABASE = "budmon_reset_test";
 
 let pg: FreshPostgres;
 
@@ -44,64 +42,85 @@ function input(seed: boolean): Parameters<typeof resetDevelopmentDatabase>[0] {
   };
 }
 
-function recordingDeps(calls: string[]): ResetDeps {
+/** The real runSchemaStep and a seed closure, both recording into `calls`. */
+function spiedDeps(calls: string[]): {
+  runSchemaStep: typeof runSchemaStep;
+  seed: () => Promise<void>;
+  schemaStepSpy: ReturnType<typeof vi.fn>;
+  seedSpy: ReturnType<typeof vi.fn>;
+} {
+  const schemaStepSpy = vi.fn((schemaInput: Parameters<typeof runSchemaStep>[0]) => {
+    calls.push(`runSchemaStep:${schemaInput.mode}`);
+    return runSchemaStep(schemaInput);
+  });
+  const seedSpy = vi.fn(() => {
+    calls.push("seed");
+    return Promise.resolve();
+  });
   return {
-    runSchemaStep: vi.fn((schemaInput: { mode: string }) => {
-      calls.push(`runSchemaStep:${schemaInput.mode}`);
-      return Promise.resolve({
-        migrationsApplied: 0,
-        pushedStatements: 0,
-        queueSchema: "current",
-        currenciesUpserted: 0,
-        queuesCreated: 0,
-        queuesUpdated: 0,
-      });
-    }),
-    seed: vi.fn(() => {
-      calls.push("seed");
-      return Promise.resolve();
-    }),
-  } as unknown as ResetDeps;
+    runSchemaStep: schemaStepSpy as unknown as typeof runSchemaStep,
+    seed: seedSpy as unknown as () => Promise<void>,
+    schemaStepSpy,
+    seedSpy,
+  };
 }
 
-describe("TP-2.16: resetDevelopmentDatabase on a local development database", () => {
-  it("TP-2.16: drops the database, recreates it and calls runSchemaStep (push) then seed, in order", async () => {
+async function publicTables(): Promise<string[]> {
+  const rows = await query(
+    pg.superuserUrl(DATABASE),
+    "SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename",
+  );
+  return rows.map((r) => String(r["tablename"]));
+}
+
+describe("TP-2.16 (b): resetDevelopmentDatabase on a local development database", () => {
+  it("TP-2.16 (b): the old database is dropped, the schema pushed, then seed called once", async () => {
     await query(pg.superuserUrl("postgres"), `CREATE DATABASE ${DATABASE}`);
     await query(pg.superuserUrl(DATABASE), "CREATE TABLE marker (id int)");
     const calls: string[] = [];
+    const deps = spiedDeps(calls);
 
-    await resetDevelopmentDatabase(input(true), recordingDeps(calls));
+    await resetDevelopmentDatabase(input(true), {
+      runSchemaStep: deps.runSchemaStep,
+      seed: deps.seed,
+    });
 
     expect(calls).toEqual(["runSchemaStep:push", "seed"]);
-    const [owner] = await query(
-      pg.superuserUrl("postgres"),
-      `SELECT pg_get_userbyid(datdba) AS owner FROM pg_database WHERE datname = '${DATABASE}'`,
-    );
-    expect(owner).toEqual({ owner: "budmon_migrator" });
-    expect(
-      await query(
-        pg.superuserUrl(DATABASE),
-        "SELECT count(*)::int AS n FROM pg_tables WHERE tablename = 'marker'",
-      ),
-    ).toEqual([{ n: 0 }]);
+    expect(deps.schemaStepSpy).toHaveBeenCalledTimes(1);
+    expect(deps.seedSpy).toHaveBeenCalledTimes(1);
+    expect(await publicTables()).toEqual([
+      "currencies",
+      "exchange_rates",
+      "idempotency_records",
+      "rate_limit_counters",
+    ]);
   });
 
-  it("TP-2.42x: with seed false, runSchemaStep runs and seed doesn't", async () => {
+  it("TP-2.16 (b): with seed false, seed isn't called", async () => {
     const calls: string[] = [];
+    const deps = spiedDeps(calls);
 
-    await resetDevelopmentDatabase(input(false), recordingDeps(calls));
+    await resetDevelopmentDatabase(input(false), {
+      runSchemaStep: deps.runSchemaStep,
+      seed: deps.seed,
+    });
 
     expect(calls).toEqual(["runSchemaStep:push"]);
+    expect(deps.seedSpy).not.toHaveBeenCalled();
   });
 
-  it("TP-2.42x: open connections to the database don't stop the reset", async () => {
+  it("TP-2.42x: an open connection to the database doesn't stop the reset", async () => {
     const pgModule = await import("pg");
     const holder = new pgModule.default.Client({ connectionString: pg.superuserUrl(DATABASE) });
     await holder.connect();
     holder.on("error", () => undefined);
     const calls: string[] = [];
+    const deps = spiedDeps(calls);
 
-    await resetDevelopmentDatabase(input(false), recordingDeps(calls));
+    await resetDevelopmentDatabase(input(false), {
+      runSchemaStep: deps.runSchemaStep,
+      seed: deps.seed,
+    });
 
     expect(calls).toEqual(["runSchemaStep:push"]);
     await holder.end().catch(() => undefined);

@@ -1,6 +1,5 @@
-// F-20 guards. TP-2.16 (refusals; the "deps called in order" case is the integration test
-// integration/db/reset.test.ts) and TP-2.24 (a) to (d) for seedDevelopmentDatabase, plus extra
-// cases TP-2.31x for the rest of step 1's guard.
+// F-20 guards. TP-2.16 (a) (the refusals; (b) is integration/db/reset.test.ts) and TP-2.24 (a)
+// to (d) for seedDevelopmentDatabase, plus extra cases TP-2.31x for the rest of step 1's guard.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ResetRefusedError,
@@ -53,12 +52,12 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-describe("TP-2.16: resetDevelopmentDatabase refuses before any connection", () => {
+describe("TP-2.16 (a): resetDevelopmentDatabase refuses before any connection", () => {
   it.each([
     ['appEnv "production" on localhost', "production", "localhost"],
     ["host db.example.com in development", "development", "db.example.com"],
   ])(
-    "TP-2.16: %s throws ResetRefusedError and calls no dependency",
+    "TP-2.16 (a): %s throws ResetRefusedError and calls no dependency",
     async (_label, appEnv, host) => {
       const deps = fakeResetDeps();
 

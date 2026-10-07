@@ -1,5 +1,5 @@
-// F-7 checkEnvExample. TP-2.7, plus extra cases TP-2.43x (parsing rules, and the repository's
-// own .env.example against F-10's allConfigKeys).
+// F-7 checkEnvExample. TP-2.7, TP-2.30 (the committed .env.example against F-10's allConfigKeys,
+// including DEV_SUPERUSER_URL, A-59), plus extra cases TP-2.43x.
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -33,13 +33,25 @@ describe("TP-2.7: checkEnvExample", () => {
     });
   });
 
-  it("TP-2.43x: the repository's .env.example lists exactly F-10's variables", () => {
+  it("TP-2.30: the committed .env.example lists exactly F-10's variables", () => {
     const example = readFileSync(path.join(ROOT, ".env.example"), "utf8");
 
     expect(checkEnvExample(allConfigKeys(), example)).toEqual({
       missingInExample: [],
       unknownInExample: [],
     });
+  });
+
+  it("TP-2.30: allConfigKeys includes DEV_SUPERUSER_URL", () => {
+    expect(allConfigKeys()).toContain("DEV_SUPERUSER_URL");
+  });
+
+  it("TP-2.30: .env.example sets DEV_SUPERUSER_URL to the local superuser", () => {
+    const example = readFileSync(path.join(ROOT, ".env.example"), "utf8");
+
+    expect(example.split(/\r?\n/)).toContain(
+      "DEV_SUPERUSER_URL=postgres://postgres:postgres@localhost:5432/postgres",
+    );
   });
 
   it("TP-2.43x: allConfigKeys is sorted and includes the variables of every kind", () => {

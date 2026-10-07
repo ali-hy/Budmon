@@ -1,7 +1,6 @@
 // Postgres for integration tests (§10.1), owned by the test-architect.
 //
-// - POSTGRES_IMAGE: postgres 18, pinned by digest. §10.1 asks for the same digest as
-//   images/postgres's base; that image arrives in S-15, which must keep the two equal.
+// - POSTGRES_IMAGE: re-exported from setup/postgresImage.ts, the digest's source of truth (A-61).
 // - POSTGRES_COMMAND: pg_stat_statements loaded with track_utility off (F-15, TP-2.10).
 // - TEST_ROLE_PASSWORDS: the password form of every login role, used by the global setup's schema
 //   step and by tests that log in as a role (appEnv "test", so password forms are allowed).
@@ -10,8 +9,8 @@
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import pg from "pg";
 
-export const POSTGRES_IMAGE =
-  "postgres:18@sha256:74935e72241653ca55e0414067e6d8763aceb8a810eb51b452253ec3dcfc4336";
+export { POSTGRES_IMAGE } from "../setup/postgresImage.js";
+import { POSTGRES_IMAGE } from "../setup/postgresImage.js";
 
 export const POSTGRES_COMMAND = [
   "postgres",
