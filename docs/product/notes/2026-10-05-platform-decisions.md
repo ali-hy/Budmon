@@ -71,3 +71,15 @@ User: "before inviting people I will initially be testing on my own, and during 
 | Accessibility (Q-21) | Baseline accepted: "yes pay attention to it, just note that it's not a showstopper". |
 | Connection pooler | "we can take this into consideration later when we start thinking about making the application go public". |
 | RTL list | "this is basically an exhaustive list"; lint guards and the pseudo-RTL test from day one: "yes please". |
+
+## Stage 0 runs on the owner's laptop (2026-10-07)
+
+Hetzner's cheap tier became unavailable (whole CX/CAX line marked unavailable since early September 2026; stock intermittent). User: "for the first version, we're not going to use a vps. I'm scratching that for now. first version, the just me, it can just run on my laptop".
+
+| Topic | Answer |
+| ----- | ------ |
+| Stage 0 host | The owner's laptop. OS: **Windows**. |
+| Phone access | Recommended accepted: Tailscale for phone ↔ laptop access away from home (LAN at home); offline entry covers the laptop being off. |
+| Off-site backups in stage 0 | Declined: "except for the off-site backup, I don't care enough about it right now". |
+| Domain | Not needed until the first server (Google OAuth allows localhost redirects). |
+| HLD | "just go ahead and update the hld with the planner agent". |
