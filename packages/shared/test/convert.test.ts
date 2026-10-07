@@ -42,6 +42,32 @@ describe("F-303 convertWithRates", () => {
     ).toBe(m);
   });
 
+  it.each([
+    ["from", -1],
+    ["from", 1.5],
+    ["from", 5],
+    ["to", -1],
+    ["from", Number.NaN],
+    ["to", 5],
+  ])(
+    'TP-1.6 (A-46): the EGP→JPY vector with %s.minorUnits %d throws RangeError("Invalid minor units")',
+    (side, minorUnits) => {
+      const from = {
+        unitsPerUsd: parseDecimal("48.5"),
+        minorUnits: side === "from" ? minorUnits : 2,
+      };
+      const to = {
+        currency: asCurrencyCode("JPY"),
+        unitsPerUsd: parseDecimal("149.25"),
+        minorUnits: side === "to" ? minorUnits : 0,
+      };
+
+      expect(() => convertWithRates(Money.of(12345n, EGP), from, to)).toThrow(
+        new RangeError("Invalid minor units"),
+      );
+    },
+  );
+
   it("TP-1.6: a target unitsPerUsd of 0 throws RangeError", () => {
     expect(() =>
       convertWithRates(Money.of(100n, EGP), EGP_RATE, {

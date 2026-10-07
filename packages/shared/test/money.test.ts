@@ -2,7 +2,7 @@
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { inspect } from "node:util";
 import { describe, expect, it } from "vitest";
-import { asCurrencyCode } from "../src/money/currency.js";
+import { asCurrencyCode, type CurrencyCode } from "../src/money/currency.js";
 import {
   add,
   compare,
@@ -51,6 +51,38 @@ describe("F-301 redaction", () => {
     expect(text).toContain("[redacted]");
     expect(text).not.toContain("987654321");
   });
+});
+
+describe("F-301 opacity (A-47)", () => {
+  const m = Money.of(987654321n, EGP);
+
+  it("TP-1.3 (A-47): Object.keys(m) is []", () => {
+    expect(Object.keys(m)).toEqual([]);
+  });
+
+  it('TP-1.3 (A-47): JSON.stringify({ ...m }) is "{}"', () => {
+    // eslint-disable-next-line @typescript-eslint/no-misused-spread -- TP-1.3 spreads Money on purpose (A-47)
+    expect(JSON.stringify({ ...m })).toBe("{}");
+  });
+
+  it("TP-1.3 (A-47): minor and currency are readable, non-enumerable and read-only own properties", () => {
+    expect(m.minor).toBe(987654321n);
+    expect(m.currency).toBe("EGP");
+    for (const key of ["minor", "currency"]) {
+      const descriptor = Object.getOwnPropertyDescriptor(m, key);
+      expect(descriptor?.enumerable).toBe(false);
+      expect(descriptor?.writable === true || descriptor?.set !== undefined).toBe(false);
+    }
+  });
+
+  it.each([["egp"], ["EGPX"]])(
+    'TP-1.3 (A-47): Money.of(1n, %j) throws TypeError("Invalid currency code")',
+    (code) => {
+      expect(() => Money.of(1n, code as CurrencyCode)).toThrow(
+        new TypeError("Invalid currency code"),
+      );
+    },
+  );
 });
 
 describe("F-301 currency mismatches", () => {

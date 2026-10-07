@@ -33,6 +33,21 @@ describe("F-302 allocate", () => {
     expect(() => allocate(Money.of(100n, EGP), weights)).toThrow(RangeError);
   });
 
+  it.each([
+    ["[1 (number), 1n]", [1 as unknown as bigint, 1n]],
+    ['["1"]', ["1" as unknown as bigint]],
+  ])('TP-1.5 (A-46): weights %s throw TypeError("Weights must be bigints")', (_label, weights) => {
+    expect(() => allocate(Money.of(100n, EGP), weights)).toThrow(
+      new TypeError("Weights must be bigints"),
+    );
+  });
+
+  it("TP-1.18x: the bigint check runs before the RangeError checks (A-46)", () => {
+    expect(() => allocate(Money.of(100n, EGP), [-1n, 1 as unknown as bigint])).toThrow(
+      new TypeError("Weights must be bigints"),
+    );
+  });
+
   it("TP-1.18x: a negative weight next to positive ones throws RangeError", () => {
     expect(() => allocate(Money.of(100n, EGP), [2n, -1n])).toThrow(RangeError);
   });

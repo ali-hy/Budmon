@@ -67,6 +67,29 @@ describe("F-306 canonicalJson", () => {
     expect(canonicalJson({ p: x, q: x })).toBe('{"p":{"v":1},"q":{"v":1}}');
   });
 
+  function nestedArrays(depth: number): unknown {
+    let value: unknown = 1;
+    for (let i = 0; i < depth; i += 1) value = [value];
+    return value;
+  }
+
+  function nestedObjects(depth: number): unknown {
+    let value: unknown = 1;
+    for (let i = 0; i < depth; i += 1) value = { a: value };
+    return value;
+  }
+
+  it("TP-1.9 (A-48): 100 nested arrays around 1 are written", () => {
+    expect(canonicalJson(nestedArrays(100))).toBe(`${"[".repeat(100)}1${"]".repeat(100)}`);
+  });
+
+  it.each([
+    ["101 nested arrays", () => nestedArrays(101)],
+    ["10 000 nested objects", () => nestedObjects(10_000)],
+  ])('TP-1.9 (A-48): %s throw TypeError("Structure too deep"), not RangeError', (_label, build) => {
+    expect(() => canonicalJson(build())).toThrow(new TypeError("Structure too deep"));
+  });
+
   it.each([
     ["Infinity", Number.POSITIVE_INFINITY],
     ["-Infinity", Number.NEGATIVE_INFINITY],
