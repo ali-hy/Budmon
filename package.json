@@ -14,8 +14,12 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "typecheck": "tsc -p tsconfig.json",
-    "test:coverage": "vitest run --project=shared --coverage"
+    "typecheck": "tsc -p tsconfig.json && tsc -p apps/server/tsconfig.json",
+    "test:coverage": "vitest run --project=shared --coverage",
+    "dev": "pnpm --filter @budmon/server dev",
+    "db:reset": "pnpm --filter @budmon/server db:reset",
+    "db:seed": "pnpm --filter @budmon/server db:seed",
+    "db:migrate": "pnpm --filter @budmon/server db:migrate"
   },
   "devDependencies": {
     "@budmon/config": "workspace:*",
@@ -28,5 +32,13 @@
     "typescript": "5.9.3",
     "vitest": "5.0.3",
     "yaml": "2.9.1"
+  },
+  "pnpm": {
+    "ignoredBuiltDependencies": [
+      "esbuild",
+      "cpu-features",
+      "protobufjs",
+      "ssh2"
+    ]
   }
 }

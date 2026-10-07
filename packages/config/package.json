@@ -12,7 +12,7 @@
       "types": "./prettier/index.d.ts",
       "default": "./prettier/index.js"
     },
-    "./tsconfig/*": "./tsconfig/*.json"
+    "./tsconfig/*.json": "./tsconfig/*.json"
   },
   "dependencies": {
     "@eslint-community/eslint-plugin-eslint-comments": "4.8.1",
