@@ -29,6 +29,8 @@ function declaredVersions(name: string): string[] {
     .filter((version): version is string => version !== undefined);
 }
 
+// TP-0.20 (b) and (c) clone HEAD: they test the committed tree, so uncommitted changes in this
+// checkout (package.json, pnpm-workspace.yaml, the lockfile) don't affect them until committed.
 /** Clones HEAD (the committed tree, no node_modules) into a temporary directory, runs `pnpm install <args>` there and
  * returns the exit status and combined output. */
 function installInCleanClone(args: readonly string[]): { status: number | null; output: string } {

@@ -54,6 +54,16 @@ describe("F-1 logging", () => {
       expect(errorRuleIds(messages, file)).toContain("no-restricted-imports");
     });
 
+    // JavaScript files are restricted too: the rule names no file type (B-3).
+    it.each([["packages/shared/src/x.js"], ["tools/ci/x.mjs"]])(
+      "TP-0.9x: importing pino in the JavaScript file %s is a no-restricted-imports error",
+      async (file) => {
+        const messages = await lintFixture({ [file]: PINO_IMPORT });
+
+        expect(errorRuleIds(messages, file)).toContain("no-restricted-imports");
+      },
+    );
+
     it("TP-0.9x: console.log under tools/ is allowed", async () => {
       const messages = await lintFixture({ "tools/ci/x.ts": CONSOLE_LOG });
 

@@ -112,6 +112,13 @@ describe("F-1 layering (no-restricted-imports)", () => {
       expect(errorRuleIds(messages, file)).not.toContain("no-restricted-imports");
     });
 
+    it("TP-0.8x: platform/http/sub/xService.ts is outside both service globs, so drizzle-orm isn't restricted there", async () => {
+      const file = "apps/server/src/platform/http/sub/xService.ts";
+      const messages = await lintFixture({ [file]: DRIZZLE_IMPORT });
+
+      expect(errorRuleIds(messages, file)).not.toContain("no-restricted-imports");
+    });
+
     it("TP-0.8x: a file under platform/http importing a repo is an error", async () => {
       const messages = await lintFixture({
         "apps/server/src/x/xRepo.ts": REPO,
