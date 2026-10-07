@@ -150,7 +150,8 @@ describe("TP-2.29: runDbResetCli arguments and environment", () => {
       (error: unknown) => error,
     );
     expect(refused).toBeInstanceOf(ResetRefusedError);
-    const h = harness(undefined, () => Promise.reject(refused as Error));
+    if (!(refused instanceof ResetRefusedError)) throw new Error("expected a ResetRefusedError");
+    const h = harness(undefined, () => Promise.reject(refused));
 
     expect(await runDbResetCli([], h.deps)).toBe(2);
   });

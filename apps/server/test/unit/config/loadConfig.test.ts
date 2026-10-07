@@ -394,7 +394,7 @@ describe("TP-2.22: SMTP_URL, SMTP_PASSWORD_FILE, EMAIL_FROM and the worker's PUB
 
   it.each([["EMAIL_FROM"], ["PUBLIC_ORIGIN"]])('TP-2.22: %s unset is "required"', (variable) => {
     const f = prodWorkerGeneral();
-    delete f.env[variable];
+    f.env[variable] = undefined;
 
     expect(problemsOf(f)).toEqual([{ variable, rule: "required" }]);
   });

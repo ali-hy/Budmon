@@ -58,8 +58,8 @@ function spiedDeps(calls: string[]): {
     return Promise.resolve();
   });
   return {
-    runSchemaStep: schemaStepSpy as unknown as typeof runSchemaStep,
-    seed: seedSpy as unknown as () => Promise<void>,
+    runSchemaStep: schemaStepSpy,
+    seed: seedSpy,
     schemaStepSpy,
     seedSpy,
   };

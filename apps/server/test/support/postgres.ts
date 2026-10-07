@@ -106,7 +106,7 @@ export async function startFreshPostgres(): Promise<FreshPostgres> {
 /** A pg error's SQLSTATE, for asserting e.g. 42501 (insufficient_privilege). */
 export function sqlState(error: unknown): string | undefined {
   if (typeof error === "object" && error !== null && "code" in error) {
-    const code = (error as { code: unknown }).code;
+    const code = error.code;
     return typeof code === "string" ? code : undefined;
   }
   return undefined;

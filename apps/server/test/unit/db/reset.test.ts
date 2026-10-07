@@ -1,6 +1,6 @@
 // F-20 guards. TP-2.16 (a) (the refusals; (b) is integration/db/reset.test.ts) and TP-2.24 (a)
 // to (d) for seedDevelopmentDatabase, plus extra cases TP-2.31x for the rest of step 1's guard.
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import {
   ResetRefusedError,
   resetDevelopmentDatabase,
@@ -25,14 +25,11 @@ function resetInput(appEnv: ResetInput["appEnv"], host: string): ResetInput {
   };
 }
 
-function fakeResetDeps(): ResetDeps & {
-  runSchemaStep: ReturnType<typeof vi.fn>;
-  seed: ReturnType<typeof vi.fn>;
+function fakeResetDeps(): {
+  runSchemaStep: Mock<ResetDeps["runSchemaStep"]>;
+  seed: Mock<ResetDeps["seed"]>;
 } {
-  return { runSchemaStep: vi.fn(), seed: vi.fn() } as unknown as ResetDeps & {
-    runSchemaStep: ReturnType<typeof vi.fn>;
-    seed: ReturnType<typeof vi.fn>;
-  };
+  return { runSchemaStep: vi.fn<ResetDeps["runSchemaStep"]>(), seed: vi.fn<ResetDeps["seed"]>() };
 }
 
 async function rejection(promise: Promise<unknown>): Promise<unknown> {
