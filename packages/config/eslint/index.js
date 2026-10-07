@@ -65,7 +65,7 @@ export function createBudmonEslintConfig({ tsconfigRootDir }) {
     // 1. Layering, and 2. logging (pino only under observability). `no-restricted-imports` is one
     // rule per file, so every block lists the pino restriction too.
     {
-      files: ["**/*.{ts,tsx,mts,cts}"],
+      files: ["**/*.{ts,tsx,mts,cts,js,mjs,cjs}"],
       ignores: [`${SERVER_SRC}/platform/observability/**`],
       rules: { "no-restricted-imports": restricted({}) },
     },
@@ -82,7 +82,7 @@ export function createBudmonEslintConfig({ tsconfigRootDir }) {
       rules: { "no-restricted-imports": restricted({ patterns: HTTP_PATTERNS }) },
     },
     {
-      files: [`${SERVER_SRC}/platform/http/**/*Service.ts`],
+      files: [`${SERVER_SRC}/platform/http/*Service.ts`],
       rules: {
         "no-restricted-imports": restricted({
           paths: ["pg"],
@@ -104,7 +104,7 @@ export function createBudmonEslintConfig({ tsconfigRootDir }) {
           ...["Number", "globalThis", "window"].map((object) => ({
             object,
             property: "parseFloat",
-            message: "parseFloat is forbidden; use the money helpers.",
+            message: "parseFloat is forbidden; use the money helpers",
           })),
         ],
         "no-restricted-syntax": [
@@ -112,12 +112,12 @@ export function createBudmonEslintConfig({ tsconfigRootDir }) {
           {
             selector: "UnaryExpression[operator='+']",
             message:
-              "Unary + conversion is forbidden; use the money helpers or Number.parseInt with a reason.",
+              "Unary + conversion is forbidden; use the money helpers or Number.parseInt with a reason",
           },
           {
             selector: "CallExpression[callee.name='Number']",
             message:
-              "Number() conversion is forbidden; use the money helpers or Number.parseInt with a reason.",
+              "Number() conversion is forbidden; use the money helpers or Number.parseInt with a reason",
           },
           {
             selector:
