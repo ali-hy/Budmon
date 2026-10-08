@@ -2,7 +2,7 @@
 module: platform
 doc: lld
 status: approved # draft | in-review | approved
-version: 0.33
+version: 0.34
 hld_version: 1.3
 author: planner
 approved_by: the user (project owner), delegated auto-approval
@@ -99,6 +99,7 @@ Nothing in that list changes application code (D-29 rule 2).
 | 0.31    | 2026-10-08 | Implementation-time amendment A-119 (S-3, after `af1d49d`): A-110's frame `function` rule allows a space only after `async ` or `new `; filename reduction is idempotent. TP-3.5 and TP-3.13 unchanged in intent (the fixture's spaced name is dropped). Approval stands. |
 | 0.32    | 2026-10-08 | Implementation-time amendments A-120, A-121 (test-architect, S-3 leak tests `2228e71`). **A-120:** new F-39 `startupState` and `installFatalHandlers` (`platform/observability/fatal.ts`) with injectable logger destination, exit and event target; how TP-3.16 and TP-3.17 drive them. **A-121:** A-112 tightened: `userId` a UUID, `requestId` 32 lower-case hex, `jobName` F-70's job-name format; `route` and `errorKey` stay shape-checked code constants. Tests: TP-3.6, TP-3.14, TP-3.16, TP-3.17 rewritten. Approval stands. |
 | 0.33    | 2026-10-08 | Implementation-time amendment A-122: F-34 sends the request id as a `request_id` tag, allowed by F-35 under A-121's rule. TP-3.6 wording made exact. Approval stands. |
+| 0.34    | 2026-10-08 | Implementation-time amendments A-123 to A-129 (test-architect, S-4 tests `67e5515`). **A-123:** F-53 exports `requireAuth`, `requireOwner` and `procedureBases(contract)`. **A-124:** F-61 and F-62 move to S-4 (with TP-5.1 to TP-5.4); F-65's coarse limit stays S-5. **A-125:** `registerHealthRoutes` deps defined; `createApiServer` takes `opts.journal`, so TP-4.13 (c) runs over HTTP. **A-126:** F-160 gets injectable catalogues (`createMessageRenderer`); no test message in `en.json`. **A-127:** F-349's `prefix` defined. **A-128:** TP-4.7's version is `API_VERSION`. **A-129:** Kotlin spike toolchain pins. Tests: TP-4.7, TP-4.13, TP-4.20, TP-5.1 to TP-5.4 changed. Approval stands. |
 
 ## Amendments
 
@@ -226,6 +227,13 @@ Nothing in that list changes application code (D-29 rule 2).
 | A-120 | TP-3.17 and TP-3.16's A-115 part can't be written: the LLD names no function for the fatal handlers or the fallback logger; the engineer built `installFatalHandlers` and `startupState` in `platform/observability/fatal.ts` (test-architect, S-3). | **Recorded as new F-39** with these exact signatures: `export interface FatalState { logger: Logger; reporter: ErrorReporter }`; `export function startupState(service: string, env: Readonly<Record<string, string \| undefined>>, opts?: { destination?: import("pino").DestinationStream }): FatalState` (logger with `release` = `BUDMON_RELEASE` if it matches F-10's release pattern, else `"dev"`; a no-op reporter); `export function installFatalHandlers(state: FatalState, exit?: (code: number) => void, target?: Pick<NodeJS.EventEmitter, "on">): void` (defaults `process.exit` and `process`; on `unhandledRejection`/`uncaughtException` it logs `error("unhandled_rejection" \| "uncaught_exception", describeFailure(e), e)` through `state.logger`, awaits `state.reporter.flush(2000)` (a throwing flush is ignored), then calls `exit(1)`). `state` is mutable: F-90/F-91 call both first, then replace `state.logger` and `state.reporter` with the configured ones once `loadConfig` succeeds. The `opts` and `target` parameters are additions for tests. **Tests:** TP-3.16 calls `startupState` with a `logCapture` destination; TP-3.17 (a) unit-tests `installFatalHandlers` with an `EventEmitter` target, a fake `exit` and a recording logger and reporter, and (b) spawns child processes (`tsx` running `apps/server/test/fixtures/fatalChild.ts`, the test-architect's) that call `startupState`, `installFatalHandlers` and optionally set `state.reporter = initSentry({ dsn })` with a DSN pointing at an in-test HTTP server collecting envelopes, then trigger the event; the test reads the child's stdout, stderr, exit code and the collected envelopes. | F-39 (new), F-31, F-90, F-91, TP-3.16, TP-3.17 | none | planner decision |
 | A-121 | Token-shaped canaries pass A-112's rules (`CANARIES.token` as `userId` passes the `id` rule; `CANARIES.payee` as `jobName` passes `token`), so they reach Sentry (test-architect, S-3). | **Tightened**, by the reasoning of A-101 and A-116, to formats real values have and free text doesn't: `userId` must pass F-311 `isUuid`; `requestId` must match `^[0-9a-f]{32}$` (the request id format of §4.0); `jobName` must match F-70's job-name format `^[a-z][a-z0-9-]*\.[a-z][a-z0-9-]*$` (the reporter has no job registry, and the format already rejects the canaries); `errorKey` keeps `^[A-Z][A-Z0-9_]{1,63}$` and `route` the route rule after `stripQuery`; those two are code constants (A-116: error keys and route templates come from code), so an all-caps or path-shaped value from user data is out of contract and is caught by review and the canary suite. A failing value is dropped, in F-34 and again in F-35 (`user.id`, `tags.job`). | F-34, F-35, A-112, TP-3.6, TP-3.14 | none | planner decision |
 | A-122 | TP-3.6 expects the request id "present" in the Sentry event, but F-34 has no field for it (coordinator, S-3). | **F-34 sends it** as the tag `request_id` when `ctx.requestId` passes A-121's rule (`^[0-9a-f]{32}$`), so a Sentry issue can be matched with the logs and with the reference users see on error screens (HLD J-3). F-35's tag allowlist becomes `route`, `job`, `client_kind`, `error_key`, `request_id`; `request_id` is dropped unless it matches the same rule. | F-34, F-35, TP-3.6 | none | planner decision |
+| A-123 | Q-1 (test-architect, S-4): TP-4.8 and TP-4.16 need authed and owner procedures in a test contract, but F-53 exports only bases bound to the application contract. | F-53 (`platform/http/procedures.ts`) also exports the middlewares and a factory: `export const requireAuth` (oRPC middleware on `RequestContext`: `principal` null → `UnauthenticatedError`, else continues with `principal: Principal` non-null in context) and `export const requireOwner` (after `requireAuth`; `!principal.isOwner` → `ForbiddenError`); `export function procedureBases<C extends AnyContractRouter>(contract: C): { base; publicProcedure; authedProcedure; ownerProcedure }`, which returns `implement(contract).$context<RequestContext>()`, then `.use(requireAuth)` and `.use(requireAuth).use(requireOwner)`. The existing exports are `procedureBases(contract)`'s results for F-346's `contract` (`base`, `publicProcedure`, `authedProcedure`, `ownerProcedure`); `PUBLIC_PROCEDURES` is unchanged. Tests build their test contract's bases with `procedureBases(testContract)`. | F-53, TP-4.8, TP-4.16 | none | planner decision |
+| A-124 | Q-2 (test-architect, S-4): F-55 step 2 registers F-61, F-62 and F-65's coarse limit (S-5), while TP-4.19 and TP-4.22 (b) expect them in S-4. | **S-4 delivers F-61 (security headers) and F-62 (body handling)**, which F-55 needs and S-4's body-handling spike (TP-4.19) tests; their tests TP-5.1 to TP-5.4 move to S-4 with them. **F-65's coarse limit stays in S-5** (it needs F-63/F-64): F-55 step 2 registers it only when `c.rateLimiter` is present, and S-5 adds it. S-5 keeps F-63 to F-66. | F-55, S-4, S-5, TP-5.1 to TP-5.4 | none | planner decision |
+| A-125 | Q-3 (test-architect, S-4): `registerHealthRoutes(app, deps)` doesn't define `deps`, and `createApiServer` reads the journal from `drizzle/`, so TP-4.13 (c) calls `checkReadiness` directly. | `registerHealthRoutes(app: FastifyInstance, deps: { db: Database; appEnv: AppEnv; journal: readonly { hash: string; when: number }[]; timeoutMs?: number }): void`, the same inputs as `checkReadiness`. `createApiServer`'s `opts` gains `journal?: readonly { hash: string; when: number }[]` (default `readJournal(join(serverRoot(), "drizzle"))`, F-18, F-25), so TP-4.13 (c) runs over HTTP with an injected journal. Calling `checkReadiness` directly stays acceptable for its unit cases. | F-55, F-57, TP-4.13 | none | planner decision |
+| A-126 | Q-4 (test-architect, S-4): TP-4.20 needs `test.hello` in the shipped `en.json`. | **No test messages in the product catalogue.** F-160 gains `export function createMessageRenderer(catalogs: Readonly<Record<string, Readonly<Record<string, string>>>>): (locale: string, id: string, values?: Record<string, string \| number>) => string` (keys are locale tags; `en` is required, else `TypeError`); `renderMessage` is `createMessageRenderer(<the shipped catalogs>)`. TP-4.20 uses its own catalogues. | F-160, TP-4.20 | none | planner decision |
+| A-127 | Q-5 (test-architect, S-4): F-349's `prefix?` has no stated meaning. | `prefix` (default `""`) is prepended, followed by `.`, to every dotted path, for listing a sub-router under its key: `listProcedures(contract.meta, "meta")` returns `meta.clientConfig`, the same as listing the whole contract. Methods and routes are unaffected. | F-349 | none | planner decision |
+| A-128 | Q-6 (test-architect, S-4): TP-4.7 says `"1.0"`; the test asserts `API_VERSION`. | **Confirmed.** The expected header and `apiVersion` are `API_VERSION` (F-341, `"1." + API_MINOR`), which is `"1.0"` while `API_MINOR` is 0; asserting the constant keeps the test right after a bump. | TP-4.7 | none | planner decision |
+| A-129 | The Kotlin spike's toolchain (TP-4.3) isn't pinned; §2.4 says "latest stable" (test-architect, S-4). | §2.4 records the spike's toolchain: Kotlin **2.2.20**, kotlinx-serialization **1.9.0**, with OkHttp 5.5.0 and Retrofit 3.0.0 (already listed). S-13 starts from these pins; moving to a newer Kotlin there is a reviewed change recorded in §2.4. | §2.4 | none | planner decision |
 
 ## 1. Deviations from the HLD, and decisions the HLD left open
 
@@ -388,7 +396,7 @@ Versions were checked against npm and Maven Central on 2026-10-05. Exact version
 | Web | `solid-js` 1.9.15, `vite` 8.3.2, `vite-plugin-solid` 2.11.14, `@tanstack/solid-router` 1.170.38, `@tanstack/solid-query` 5.104.1, `@orpc/tanstack-query` 1.15.4, `@tanstack/solid-table` 9.2.x, `@tanstack/solid-virtual` 3.13.x, `@tanstack/solid-form` 1.33.x, `@kobalte/core` 0.13.14, `@formatjs/intl` 6.1.2, `@sentry/solid` 11.4.0, `tailwindcss` 4.3.3 |
 | Lint | `eslint` 10.12.0, `typescript-eslint` 8.71.0, `eslint-plugin-formatjs` **8.1.1** (peer `eslint 9 || 10`), `eslint-plugin-jsx-a11y` **6.10.2** (declares an ESLint 9 peer; accepted for ESLint 10 through `pnpm-workspace.yaml` `peerDependencyRules`, A-13), `eslint-plugin-solid` (latest), `stylelint` 17.16.0, `stylelint-use-logical` 2.1.3, `prettier` 3.x |
 | Tests | `vitest` 5.0.3, `@vitest/coverage-v8` 5.0.3 (always equal to `vitest`, A-35), `testcontainers` and `@testcontainers/postgresql` 12.2.0, `@playwright/test` 1.63.0, `@axe-core/playwright` 4.13.0, `msw` 3.0.2, `@solidjs/testing-library` 0.8.10, `node-pty` 1.1.0 (release tooling) |
-| Android | Kotlin 2.x latest stable (not a pre-release), AGP latest stable, Compose BOM latest stable, Room, WorkManager and Paging 3 latest stable, Hilt 2.60.1, OkHttp 5.5.0, Retrofit 3.0.0, kotlinx.serialization (latest stable), OpenAPI Generator Gradle plugin 7.14.0, Sentry Android 8.59.0, Robolectric 4.17, MockK 1.14.11, Turbine 1.2.1, ktlint 1.8.0 |
+| Android | Kotlin **2.2.20** and kotlinx-serialization **1.9.0** (pinned by S-4's spike, A-129; S-13 starts from them), formerly Kotlin 2.x latest stable (not a pre-release), AGP latest stable, Compose BOM latest stable, Room, WorkManager and Paging 3 latest stable, Hilt 2.60.1, OkHttp 5.5.0, Retrofit 3.0.0, kotlinx.serialization (latest stable), OpenAPI Generator Gradle plugin 7.14.0, Sentry Android 8.59.0, Robolectric 4.17, MockK 1.14.11, Turbine 1.2.1, ktlint 1.8.0 |
 | Infrastructure (stage 0) | Postgres **18** (image pinned by digest), Mailpit `axllent/mailpit` 1.x (pinned by digest; A-2), pgBackRest 2.x from PGDG apt (installed, unused until stage 1), Caddy 2.x, Docker Desktop with the WSL2 backend and Compose v2, Tailscale (Windows client), bats-core, shellcheck (pinned by version in CI). Alloy, Squid, cosign, crane, sops, age and OpenTofu are stage-1 tools (stage-1 LLD). |
 
 ## 3. Database
@@ -1337,6 +1345,9 @@ Pure functions with no I/O. Imported by the server and the web app. Android mirr
   export const authedProcedure: …;  // base.use(requireAuth): ctx.principal: Principal (non-null)
   export const ownerProcedure: …;   // authed + requireOwner
   export const PUBLIC_PROCEDURES: ReadonlySet<string>; // dotted contract paths; platform: { "meta.clientConfig" }
+  export const requireAuth: Middleware;   // A-123: principal null → UnauthenticatedError; context.principal non-null after
+  export const requireOwner: Middleware;  // A-123: used after requireAuth; !isOwner → ForbiddenError
+  export function procedureBases<C extends AnyContractRouter>(contract: C): { base; publicProcedure; authedProcedure; ownerProcedure }; // A-123; the constants above = procedureBases(contract)
   ```
 - **Behaviour:** `requireAuth` throws `UnauthenticatedError` when `principal` is null. `requireOwner` throws `ForbiddenError` when `!principal.isOwner`. Modules implement procedures only from these bases. Procedures on `publicProcedure` must be listed in `PUBLIC_PROCEDURES`; modules add entries in their own slices.
 
@@ -1347,10 +1358,10 @@ Pure functions with no I/O. Imported by the server and the web app. Android mirr
 
 #### F-55: `createApiServer`
 - **File:** `platform/http/server.ts` · **Layer:** router (composition)
-- **Signature:** `export async function createApiServer(c: ApiContainer, opts?: { contract?: AnyContractRouter; router?: Router<any, RequestContext> }): Promise<import("fastify").FastifyInstance>`. `opts.contract` defaults to F-346's `contract` and `opts.router` to F-59's `appRouter` (A-26); tests pass test-only contracts and routers (S-4 AC 1).
+- **Signature:** `export async function createApiServer(c: ApiContainer, opts?: { contract?: AnyContractRouter; router?: Router<any, RequestContext>; journal?: readonly { hash: string; when: number }[] /* A-125, default readJournal(join(serverRoot(), "drizzle")) */ }): Promise<import("fastify").FastifyInstance>`. `opts.contract` defaults to F-346's `contract` and `opts.router` to F-59's `appRouter` (A-26); tests pass test-only contracts and routers (S-4 AC 1).
 - **Behaviour,** in registration order:
   1. `Fastify({ logger: false, disableRequestLogging: true, trustProxy: c.config.api.trustedProxy.length ? c.config.api.trustedProxy : false, bodyLimit: 102400, connectionTimeout: 30000, requestTimeout: 30000, return503OnClosing: true, genReqId: () => <request id per RequestContext> })`.
-  2. F-61 (headers), F-62 (body handling), the coarse in-memory rate limit (F-65's global part), `@fastify/cookie`.
+  2. F-61 (headers), F-62 (body handling) (both delivered in S-4, A-124), the coarse in-memory rate limit (F-65's global part; registered only when `c.rateLimiter` is present, from S-5, A-124), `@fastify/cookie`.
   3. The `onRequest` hook builds the request context: parses `X-Budmon-Client` (F-56), creates the commit tracker (F-13), calls `authHook.authenticate`, and binds a child logger with `requestId`.
   4. F-57 health routes (`GET /health/live`, `GET /health/ready`).
   4b. **Module routes (A-26):** calls each `c.moduleRoutes[i](app)` in array order (identity registers `GET /api/v1/auth/google/callback` this way). They're plain Fastify routes on the same instance, so steps 2 and 3, F-38 and step 8 apply to them; they're outside oRPC, so F-52's interceptor and F-56's middleware don't, and each route answers its own errors. A static path wins over step 5's `/api/v1/*` wildcard in Fastify's router whatever the order; registering them first keeps the order explicit. A registration that throws (for example a duplicate route) rejects `createApiServer`.
@@ -1371,7 +1382,7 @@ Pure functions with no I/O. Imported by the server and the web app. Android mirr
 
 #### F-57: health and readiness
 - **File:** `platform/http/health.ts`
-- **Signatures:** `export function schemaWindow(applied: readonly { hash: string; createdAt: number }[], journal: readonly { hash: string; when: number }[]): "ok" | "behind" | "ahead"`, `export async function checkReadiness(deps: { db: Database; appEnv: AppEnv; journal: readonly { hash: string; when: number }[]; timeoutMs?: number }): Promise<{ ready: true } | { ready: false; reason: "database_unreachable" | "schema_behind" | "schema_ahead" }>`, `export function registerHealthRoutes(app: FastifyInstance, deps: …): void`
+- **Signatures:** `export function schemaWindow(applied: readonly { hash: string; createdAt: number }[], journal: readonly { hash: string; when: number }[]): "ok" | "behind" | "ahead"`, `export async function checkReadiness(deps: { db: Database; appEnv: AppEnv; journal: readonly { hash: string; when: number }[]; timeoutMs?: number }): Promise<{ ready: true } | { ready: false; reason: "database_unreachable" | "schema_behind" | "schema_ahead" }>`, `export function registerHealthRoutes(app: FastifyInstance, deps: { db: Database; appEnv: AppEnv; journal: readonly { hash: string; when: number }[]; timeoutMs?: number }): void` (A-125)
 - **Behaviour:**
   - `schemaWindow`:
     - `"behind"` if any journal entry isn't applied;
@@ -2062,9 +2073,9 @@ Pure functions with no I/O. Imported by the server and the web app. Android mirr
 
 #### F-160: server message rendering
 - **File:** `apps/server/src/i18n/render.ts`
-- **Signature:** `export function renderMessage(locale: string, id: string, values?: Record<string, string | number>): string`
+- **Signatures:** `export function renderMessage(locale: string, id: string, values?: Record<string, string | number>): string`; `export function createMessageRenderer(catalogs: Readonly<Record<string, Readonly<Record<string, string>>>>): typeof renderMessage` (A-126; `en` required, else `TypeError`); `renderMessage` = `createMessageRenderer(<shipped catalogs>)`.
 - **Behaviour:** resolves the locale with F-312 against the catalogs present in `apps/server/src/i18n/messages/`, then formats with `@formatjs/intl`'s `createIntl`. String values are wrapped with F-312 `isolate`.
-- **Errors:** an id that isn't in `en.json` throws `Error("unknown message id")` (a programming error).
+- **Errors:** an id that isn't in the `en` catalogue throws `Error("unknown message id")` (a programming error).
 
 ### 4.14 Contract package `@budmon/contract` (S-4)
 
@@ -2141,7 +2152,7 @@ Pure functions with no I/O. Imported by the server and the web app. Android mirr
 #### F-349: `listProcedures`
 - **File:** `packages/contract/src/rules/listProcedures.ts`
 - **Signature:** `export function listProcedures(c: AnyContractRouter, prefix?: string): { path: string; method: string; route: string }[]`
-- **Behaviour:** walks the router and returns the dotted path (e.g. `meta.clientConfig`), HTTP method and OpenAPI path for every procedure. Used by the default-deny test and F-348's tests.
+- **Behaviour:** walks the router and returns the dotted path (e.g. `meta.clientConfig`), HTTP method and OpenAPI path for every procedure. `prefix` (default `""`) is prepended with a `.` to every dotted path, for listing a sub-router under its key (`listProcedures(contract.meta, "meta")` → `meta.clientConfig`) (A-127). Used by the default-deny test and F-348's tests.
 
 ### 4.15 Images and the stage-0 laptop stack (S-15)
 
@@ -3130,7 +3141,7 @@ The platform's slices are **capability slices** rather than one story each. Each
 
 ### S-4: Contract, OpenAPI, API server and error model (US-3, US-9)
 - **Depends on:** S-3
-- **Functions:** F-8, F-51 to F-59 (F-50 is S-3's, A-100) (F-59 `appRouter`, A-26), F-90 (complete), F-96 (API members used so far, plus `moduleRoutes`, A-26), F-160, F-340 to F-349, root script `contract:openapi` (§2.2.2, A-14), CI step 2 (contract checks: drift, `oasdiff`, F-8, F-348).
+- **Functions:** F-8, F-51 to F-59 (F-50 is S-3's, A-100), F-61 and F-62 (moved from S-5, A-124) (F-59 `appRouter`, A-26), F-90 (complete), F-96 (API members used so far, plus `moduleRoutes`, A-26), F-160, F-340 to F-349, root script `contract:openapi` (§2.2.2, A-14), CI step 2 (contract checks: drift, `oasdiff`, F-8, F-348).
 - **Scenarios:**
 
 | Scenario | Happy / unhappy | Expected | Tests |
@@ -3150,6 +3161,8 @@ The platform's slices are **capability slices** rather than one story each. Each
 | Invalid `BudmonError` construction | unhappy | `TypeError`. | TP-4.18 |
 | Body handling order (Fastify parser before oRPC) | unhappy | As in F-55. | TP-4.19 |
 | Server message rendering | happy and unhappy | As in F-160. | TP-4.20 |
+| Security headers (F-61, moved from S-5, A-124) | happy | Present on API responses. | TP-5.1 |
+| Malformed JSON, large body, unsupported content type (F-62, moved from S-5, A-124) | unhappy | 400 / 413 / 400 envelopes; no echo of the body. | TP-5.2 to TP-5.4 |
 | Default router `appRouter`; module routes before the catch-all; duplicate module route (A-26) | happy and unhappy | As in F-55 step 4b and F-59. | TP-4.22 |
 | No unexpected span-attribute drops through the real instrumented stack | happy | As in F-40. | TP-4.21 |
 | `pnpm dev` serves `/health/ready` (A-55) | happy | 200 within 90 s. | TP-4.23 |
@@ -3160,13 +3173,11 @@ The platform's slices are **capability slices** rather than one story each. Each
 
 ### S-5: Security baseline (US-13)
 - **Depends on:** S-4
-- **Functions:** F-61 to F-66, F-80 (rate-limit purge only, scheduled once S-6 lands).
+- **Functions:** F-63 to F-66 and F-55's coarse-limit registration (F-61 and F-62 moved to S-4, A-124), F-80 (rate-limit purge only, scheduled once S-6 lands).
 - **Scenarios:**
 
 | Scenario | Happy / unhappy | Expected | Tests |
 | -------- | --------------- | -------- | ----- |
-| Security headers | happy | Present on API responses. | TP-5.1 |
-| Malformed JSON, large body, unsupported content type | unhappy | 400 / 413 / 400 envelopes; no echo of the body. | TP-5.2 to TP-5.4 |
 | Shared limiter: within limit, exceeded, new window, HMAC keys, counts survive rollback | happy and unhappy | As in F-63. | TP-5.5 |
 | A rate-limited procedure | unhappy | 429 with `Retry-After`. | TP-5.6 |
 | Coarse per-IP limit; health exempt | unhappy | 429 on request 301. | TP-5.7 |
@@ -3577,27 +3588,27 @@ Types: **U** unit, **I** integration (real Postgres and/or HTTP in-process), **E
 | TP-4.4 | S-4 | U | contract types | spike contract | `expectTypeOf<InferContractRouterOutputs<typeof spike>["p"]["amount"]>().toEqualTypeOf<number>()` | Type-checks |
 | TP-4.5 | S-4 | U | F-348 | fixture documents | One violating each of R1 to R6, one clean | One violation each with rule and location; clean → [] |
 | TP-4.6 | S-4 | U | F-8 | base/head documents | Same content; changed with minor 0→1; changed with minor unchanged | ok; ok; not ok |
-| TP-4.7 | S-4 | I | §5.2 | API in-process, `CLIENT_MIN_ANDROID=3`, `CLIENT_LATEST_ANDROID=5` | `GET /api/v1/meta/client-config` | 200 with the exact body; `X-Request-Id` (32 hex); `X-Budmon-API-Version: 1.0` |
+| TP-4.7 | S-4 | I | §5.2 | API in-process, `CLIENT_MIN_ANDROID=3`, `CLIENT_LATEST_ANDROID=5` | `GET /api/v1/meta/client-config` | 200 with the exact body; `X-Request-Id` (32 hex); `X-Budmon-API-Version` and `apiVersion` equal to `API_VERSION` (F-341; `"1.0"` while `API_MINOR` is 0, A-128) |
 | TP-4.8 | S-4 | I | F-53 default deny | test contract + router: the platform contract plus `test.authedThing` (GET) and `test.createThing` (create) | For each `listProcedures` entry not in `PUBLIC_PROCEDURES`, call without credentials | 401 envelope `UNAUTHENTICATED` for all |
 | TP-4.9 | S-4 | U | F-52 `mapError` | none | BudmonError; input validation error with `cause.issues` containing the canary as received value; output validation (committed true); oRPC NOT_FOUND; pg `57P01`; plain Error (committed false / true) | Exact key, status, data; issues have fixed messages and no canary; INTERNAL `{outcome:"unknown"}`; NOT_FOUND; 503 `{outcome}`; INTERNAL `not_applied` / `unknown`; `report` flags as in F-52 |
 | TP-4.10 | S-4 | I | F-52 interceptor | test router whose handlers throw: `RateLimitedError(30)`, `new Error(CANARIES.message)` | Call through HTTP | 429 with `Retry-After: 30`, no report; 500 envelope `{"defined":true,"code":"INTERNAL","status":500,"message":"Internal error","data":{"outcome":"not_applied"}}`, one report without the canary, one `request_failed` log line |
 | TP-4.11 | S-4 | U+I | F-56 | min android 5, min web 2 | Headers `android/4`, `android/5`, `web/1`, `ios/1`, missing; and `android/1` on `meta.clientConfig` | 400 `CLIENT_UPDATE_REQUIRED` `{minimumVersion:5}`; pass; 400 `{minimumVersion:2}`; pass (other); pass; pass |
 | TP-4.12 | S-4 | U | F-57 `schemaWindow` | journals | applied = journal; journal + 1 extra; + 2 extra; missing one | ok; ok; ahead; behind |
-| TP-4.13 | S-4 | I | F-57 routes | (a) database up; (b) pool pointed at a closed port; (c) `appEnv: "production"` with the journal one entry ahead of the database | `GET /health/ready`, `GET /health/live` | (a) 200 ready; (b) 503 `database_unreachable`; (c) 503 `schema_behind`; live always 200; `Cache-Control: no-store` |
+| TP-4.13 | S-4 | I | F-57 routes | (a) database up; (b) pool pointed at a closed port; (c) `appEnv: "production"` with the journal one entry ahead of the database, injected through `createApiServer`'s `opts.journal` (A-125) | `GET /health/ready`, `GET /health/live` | (a) 200 ready; (b) 503 `database_unreachable`; (c) 503 `schema_behind`; live always 200; `Cache-Control: no-store` |
 | TP-4.14 | S-4 | I | F-55 | API | `OPTIONS /api/v1/meta/client-config` with `Origin: https://evil.example` | 404 envelope; no `Access-Control-*` headers |
 | TP-4.15 | S-4 | I | F-52 | API | `GET /api/v1/nope` | 404, body exactly `{"defined":true,"code":"NOT_FOUND","status":404,"message":"Not found"}` |
 | TP-4.16 | S-4 | I | F-53, F-54 | test router with authed and owner procedures, whose handlers echo `ctx.principal`; auth hooks returning `testPrincipal({ sessionId: "s-1" })`, a non-owner, or throwing | Call | 200 with `{ userId, isOwner, sessionId: "s-1" }` echoed unchanged (A-1); owner procedure → 403 `FORBIDDEN`; throwing hook → 500 INTERNAL |
 | TP-4.17 | S-4 | I | F-38 | `logCapture` | `GET /api/v1/meta/client-config?x=CANARY` | One `http_request` line with route `/meta/client-config`, status 200, no `x`, no canary; `http_server_requests_total` incremented |
 | TP-4.18 | S-3 (A-100) | U | F-50 | none | `new BudmonError("bad key", 400)`; `("OK_KEY", 200)` | `TypeError` ×2 |
 | TP-4.19 | S-4 | I | F-55 body handling (spike) | API with a test create procedure | Valid JSON; malformed JSON; 100 KiB + 1 body; valid JSON with an extra unknown field | 201; F-62's 400 `invalid_json` (oRPC handler never invoked: interceptor spy not called); 413; 400 `VALIDATION_FAILED` from oRPC with code `unrecognized_keys` |
-| TP-4.20 | S-4 | U | F-160 | catalogs `en.json` with `test.hello` = `Hello {name}`; `ar` missing | `renderMessage("en","test.hello",{name:"Ali"})`; `("ar-EG", …)`; unknown id | `Hello \u2068Ali\u2069`; falls back to `en`; throws |
+| TP-4.20 | S-4 | U | F-160 | `createMessageRenderer({ en: { "test.hello": "Hello {name}" } })` (A-126; the shipped `en.json` is not touched); `ar` missing; also `createMessageRenderer({ ar: {} })` | `renderMessage("en","test.hello",{name:"Ali"})`; `("ar-EG", …)`; unknown id | `Hello \u2068Ali\u2069`; falls back to `en`; throws; `TypeError` (no `en`) |
 | TP-4.21 | S-4 | I | F-40 with real instrumentation | full API with `startTelemetry` and an in-memory trace exporter; `onDrop` spy | `GET /api/v1/meta/client-config?x=1` with a `User-Agent`; a request that runs a query | `onDrop("unexpected", n)` never called with n > 0; exported spans contain no `url.full`, `user_agent.original` or `x=1` |
 | TP-4.22 | S-4 | I | F-55, F-59, F-96 (A-26) | (a) `buildApiContainer()`; (b) the same with `moduleRoutes: [app => app.get("/api/v1/test/module-route", async () => ({ ok: true }))]`; (c) one whose module route registers `GET /health/live` again | (a) `createApiServer(c)` without `opts`, then `GET /api/v1/meta/client-config`; read `c.moduleRoutes` and `c.authHook`; `Object.keys(appRouter)`; (b) `GET /api/v1/test/module-route`, `GET /api/v1/test/other`; (c) `createApiServer(c)` | (a) 200 with §5.2's body (served by `appRouter`); `[]` and `noAuthHook`; sorted keys equal `Object.keys(contract)` sorted; (b) 200 `{"ok":true}` with `X-Request-Id` and F-61's headers and one `http_request` log line with status 200; 404 `NOT_FOUND` envelope; (c) rejects |
 | TP-4.23 | S-4 | E | F-22, F-57 (A-55) | CI `dev-smoke`; fresh clone | `pnpm dev &`, poll `/health/ready` | 200 within 90 s |
-| TP-5.1 | S-5 | I | F-61 | API | `GET /api/v1/meta/client-config` | `content-security-policy` contains `default-src 'none'`; HSTS max-age 31536000; `referrer-policy: no-referrer`; `x-content-type-options: nosniff` |
-| TP-5.2 | S-5 | I | F-62 | API | `POST` to a test create with body `{"a":"CANARY` (invalid JSON) | 400 `VALIDATION_FAILED`, issues `[{path:[],code:"invalid_json",message:"Request body is not valid JSON."}]`; no canary in the response or logs |
-| TP-5.3 | S-5 | I | F-62 | API | 100 KiB + 1 body | 413 `PAYLOAD_TOO_LARGE` |
-| TP-5.4 | S-5 | I | F-62 | API | `POST` with `Content-Type: text/plain` | 400, issue code `unsupported_media_type` |
+| TP-5.1 | S-4 (A-124) | I | F-61 | API | `GET /api/v1/meta/client-config` | `content-security-policy` contains `default-src 'none'`; HSTS max-age 31536000; `referrer-policy: no-referrer`; `x-content-type-options: nosniff` |
+| TP-5.2 | S-4 (A-124) | I | F-62 | API | `POST` to a test create with body `{"a":"CANARY` (invalid JSON) | 400 `VALIDATION_FAILED`, issues `[{path:[],code:"invalid_json",message:"Request body is not valid JSON."}]`; no canary in the response or logs |
+| TP-5.3 | S-4 (A-124) | I | F-62 | API | 100 KiB + 1 body | 413 `PAYLOAD_TOO_LARGE` |
+| TP-5.4 | S-4 (A-124) | I | F-62 | API | `POST` with `Content-Type: text/plain` | 400, issue code `unsupported_media_type` |
 | TP-5.5 | S-5 | I | F-63 | clock at `…:00:10`, spec limit 2, window 60 | hit ×3 with subject `CANARY@example`; advance 60 s, hit; inside a rolled-back transaction, then hit | allowed, allowed, `{allowed:false, retryAfterSeconds:50}`; allowed (new window); the counter row's `bucket_key` doesn't contain the subject; the rolled-back hit still counted |
 | TP-5.6 | S-5 | I | F-65 | test procedure with `rateLimited({spec:{limiter:"test",limit:1,windowSeconds:600}, subject: ip})` | Call twice | Second: 429 `RATE_LIMITED`, `data.retryAfterSeconds` ≥ 1, `Retry-After` header; `rate_limited_total{limiter="test"}` = 1 |
 | TP-5.7 | S-5 | I | F-65 coarse | API | 301 × `GET /api/v1/meta/client-config` from one IP; 301 × `/health/live` | 301st → 429 envelope; health never 429 |
