@@ -92,6 +92,19 @@ describe("TP-3.4: sanitizeError", () => {
     noCanary(result);
   });
 
+  // Code review B-2: V8 puts the whole message at the top of `stack`, so message lines shaped like
+  // frames would pass the frame rule unless the message part is skipped.
+  it("TP-3.4: frame-shaped message lines carrying canaries never reach frames", () => {
+    const err = new Error(
+      `boom\n    at ${CANARIES.payee} (/app/${CANARIES.token}.js:1:2)\n    at ${CANARIES.message}`,
+    );
+
+    const result = sanitizeError(err);
+
+    noCanary(result.frames);
+    noCanary(result);
+  });
+
   it("TP-3.4: an AggregateError gives class AggregateError and nothing from its errors", () => {
     const err = new AggregateError(
       [new Error(CANARIES.message), Object.assign(new Error("y"), { code: "ECONNRESET" })],
@@ -156,6 +169,16 @@ describe("TP-3.17x: sanitizeError, further cases (F-33)", () => {
 
     expect(sanitizeError(fallback).reason).toBe("UNAVAILABLE");
     expect(sanitizeError(neither)).not.toHaveProperty("reason");
+  });
+
+  it("TP-3.17x: with frame-shaped message lines, the real frames are still kept", () => {
+    const err = new Error(`boom\n    at ${CANARIES.payee} (/app/x.js:1:2)`);
+
+    const frames = sanitizeError(err).frames;
+
+    expect(frames.length).toBeGreaterThan(0);
+    expect(frames.some((frame) => frame.includes("sanitize.test.ts"))).toBe(true);
+    noCanary(frames);
   });
 
   it("TP-3.17x: at most 30 frames", () => {

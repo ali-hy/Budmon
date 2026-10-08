@@ -28,14 +28,25 @@ export const CANARIES: Canaries = Object.freeze({
 });
 
 /**
- * The raw value, its base64 form and its URL-encoded form, without repeats. The base64 form covers
- * only the whole 3-byte groups, so it also matches when the canary starts a longer encoded payload
- * (the last, partial group depends on the bytes that follow).
+ * The raw value, its URL-encoded form and its base64 forms, without repeats.
+ *
+ * Inside a longer base64 payload the canary can start at any byte offset, and its encoding depends
+ * on that offset modulo 3. For each of the three alignments this encodes the canary after 0, 1 or
+ * 2 filler bytes and keeps only the characters that depend on the canary's bytes alone: it drops
+ * the leading characters that mix in the filler and the trailing ones that would mix in whatever
+ * follows the canary.
  */
 function forms(value: string): string[] {
   const bytes = Buffer.from(value, "utf8");
-  const base64 = bytes.subarray(0, bytes.length - (bytes.length % 3)).toString("base64");
-  return [...new Set([value, base64, encodeURIComponent(value)])].filter((f) => f !== "");
+  const base64Forms = [0, 1, 2].map((pad) => {
+    const encoded = Buffer.concat([Buffer.alloc(pad), bytes]).toString("base64");
+    const start = [0, 2, 3][pad] ?? 0;
+    const end = Math.floor((bytes.length + pad) / 3) * 4;
+    return encoded.slice(start, end);
+  });
+  return [...new Set([value, encodeURIComponent(value), ...base64Forms])].filter(
+    (form) => form.length >= 4,
+  );
 }
 
 /**

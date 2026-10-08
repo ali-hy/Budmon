@@ -69,11 +69,40 @@ describe("TP-3.13x: CANARIES and scanForCanaries, further cases", () => {
     ]);
   });
 
-  it("TP-3.13x: a base64 canary inside a longer base64 payload is found when it starts the payload", () => {
-    const text = base64(`${CANARIES.token} and more`);
+  // Code review B-3: a canary is found in a base64 payload at every byte offset, not only when its
+  // offset is a multiple of 3.
+  it.each([0, 1, 2, 3, 4, 5])(
+    "TP-3.13x: a canary %i bytes into a base64-encoded JSON payload is found",
+    (fillerLength) => {
+      const json = JSON.stringify({ [`k${"x".repeat(fillerLength)}`]: CANARIES.payee });
+      const text = base64(json);
 
-    const hits = scanForCanaries([{ name: "b64", text }], CANARIES);
+      expect(scanForCanaries([{ name: "b64", text }], CANARIES).map((h) => h.canary)).toEqual([
+        "payee",
+      ]);
+    },
+  );
 
-    expect(hits.map((h) => h.canary)).toContain("token");
-  });
+  it.each([['{"xy":"'], ['{"xyz":"'], ['{"x":"']])(
+    "TP-3.13x: the review's payload %s<payee>\"} is found",
+    (prefix) => {
+      const text = base64(`${prefix}${CANARIES.payee}"}`);
+
+      expect(scanForCanaries([{ name: "b64", text }], CANARIES)).toHaveLength(1);
+    },
+  );
+
+  it.each([["amountMinor"], ["payee"], ["email"], ["token"], ["message"]] as const)(
+    "TP-3.13x: the %s canary is found at each of the three alignments",
+    (canary) => {
+      for (const filler of ["", "a", "ab"]) {
+        const text = base64(`${filler}${CANARIES[canary]}tail`);
+
+        expect(
+          scanForCanaries([{ name: "b64", text }], CANARIES).map((h) => h.canary),
+          `filler ${JSON.stringify(filler)}`,
+        ).toContain(canary);
+      }
+    },
+  );
 });

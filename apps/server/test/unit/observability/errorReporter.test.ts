@@ -3,59 +3,14 @@
 //
 // The "Sentry test transport" is a local HTTP server: the DSN points at it, so the real Sentry
 // client sends its envelopes there and the test reads exactly what would leave the process.
-import { createServer, type Server } from "node:http";
-import { gunzipSync } from "node:zlib";
 import { CANARIES, scanForCanaries } from "@budmon/test-support";
 import { afterEach, describe, expect, it } from "vitest";
 import { initSentry } from "../../../src/platform/observability/sentry.js";
-
-interface FakeSentry {
-  dsn: string;
-  bodies: string[];
-  close(): Promise<void>;
-}
-
-async function fakeSentry(): Promise<FakeSentry> {
-  const bodies: string[] = [];
-  const server: Server = createServer((req, res) => {
-    const chunks: Buffer[] = [];
-    req.on("data", (chunk: Buffer) => chunks.push(chunk));
-    req.on("end", () => {
-      const raw = Buffer.concat(chunks);
-      const body = req.headers["content-encoding"] === "gzip" ? gunzipSync(raw) : raw;
-      bodies.push(body.toString("utf8"));
-      res.writeHead(200, { "content-type": "application/json" });
-      res.end("{}");
-    });
-  });
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const address = server.address();
-  const port = typeof address === "object" && address !== null ? address.port : 0;
-  return {
-    dsn: `http://publickey@127.0.0.1:${String(port)}/1`,
-    bodies,
-    close: () =>
-      new Promise<void>((resolve) => {
-        server.close(() => {
-          resolve();
-        });
-      }),
-  };
-}
-
-/** The event items of every envelope received (an envelope is newline-delimited JSON). */
-function eventsOf(bodies: readonly string[]): Record<string, unknown>[] {
-  const events: Record<string, unknown>[] = [];
-  for (const body of bodies) {
-    const lines = body.split("\n").filter((l) => l !== "");
-    for (let i = 1; i + 1 < lines.length; i += 2) {
-      const header = JSON.parse(lines[i] ?? "{}") as { type?: string };
-      if (header.type === "event")
-        events.push(JSON.parse(lines[i + 1] ?? "{}") as Record<string, unknown>);
-    }
-  }
-  return events;
-}
+import {
+  sentryEvents as eventsOf,
+  startFakeSentry as fakeSentry,
+  type FakeSentry,
+} from "../../support/fakeSentry.js";
 
 let servers: FakeSentry[] = [];
 
