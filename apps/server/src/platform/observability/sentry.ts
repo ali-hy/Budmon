@@ -3,7 +3,7 @@ import * as Sentry from "@sentry/node";
 import type { AppEnv } from "../config/schema.js";
 import { buildReportEvent, type ErrorReporter } from "./errorReporter.js";
 import { isUuid } from "@budmon/shared";
-import { ERROR_KEY, JOB_NAME, ROUTE, TOKEN } from "./safeFields.js";
+import { ERROR_KEY, JOB_NAME, REQUEST_ID, ROUTE, TOKEN } from "./safeFields.js";
 import {
   buildErrorEvent,
   FRAME_FILENAME,
@@ -62,6 +62,8 @@ function checkedTags(tags: Json | undefined): Json {
   if (typeof job === "string" && JOB_NAME.test(job)) out["job"] = job;
   const clientKind = tags["client_kind"];
   if (typeof clientKind === "string" && TOKEN.test(clientKind)) out["client_kind"] = clientKind;
+  const requestId = tags["request_id"];
+  if (typeof requestId === "string" && REQUEST_ID.test(requestId)) out["request_id"] = requestId;
   const errorKey = tags["error_key"];
   if (typeof errorKey === "string" && ERROR_KEY.test(errorKey)) out["error_key"] = errorKey;
   return out;

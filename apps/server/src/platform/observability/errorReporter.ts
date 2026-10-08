@@ -46,6 +46,7 @@ export function buildReportEvent(err: unknown, ctx: ErrorContext): Record<string
   if (checked.route !== undefined) tags["route"] = checked.route;
   if (checked.jobName !== undefined) tags["job"] = checked.jobName;
   if (checked.errorKey !== undefined) tags["error_key"] = checked.errorKey;
+  if (checked.requestId !== undefined) tags["request_id"] = checked.requestId;
   return {
     level: "error",
     exception: { values: [buildErrorEvent(err)] },
