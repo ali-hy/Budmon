@@ -406,6 +406,16 @@ function rsaModulusBits(pem: string): number | undefined {
 export const SENTRY_DSN_PATTERN =
   /^https:\/\/[A-Za-z0-9]{1,64}@[A-Za-z0-9.-]{1,253}(:\d{1,5})?\/\d{1,20}$/;
 
+/** A-141: a local http DSN, accepted only in development and test. */
+export const LOCAL_SENTRY_DSN_PATTERN =
+  /^http:\/\/[A-Za-z0-9]{1,64}@(localhost|127\.0\.0\.1):\d{1,5}\/\d{1,20}$/;
+
+/** A-131, A-141: whether `dsn` is an acceptable `SENTRY_DSN` in `appEnv`. */
+export function isValidSentryDsn(dsn: string, appEnv: AppEnv): boolean {
+  if (SENTRY_DSN_PATTERN.test(dsn)) return true;
+  return (appEnv === "development" || appEnv === "test") && LOCAL_SENTRY_DSN_PATTERN.test(dsn);
+}
+
 const OTLP_HEADER_NAME = /^[A-Za-z0-9-]{1,64}$/;
 
 /** A-138: https, or http://localhost:<port> in development and test; no query or fragment. */
@@ -429,7 +439,8 @@ function readOtlpEndpoint(r: Reader): URL | undefined {
     return undefined;
   }
   if (url.username !== "" || url.password !== "") {
-    r.fail(variable, "must not contain credentials");
+    // A-142: credentials count as a wrong URL.
+    r.fail(variable, "must be an https URL");
     return undefined;
   }
   return url;
@@ -960,7 +971,7 @@ export function parseConfig(
   const otlpHeaders = readOtlpHeaders(r);
   const sentryDsn = r.get("SENTRY_DSN");
   // A-131: the value is never echoed.
-  if (sentryDsn !== undefined && !SENTRY_DSN_PATTERN.test(sentryDsn))
+  if (sentryDsn !== undefined && !isValidSentryDsn(sentryDsn, r.appEnv))
     r.fail("SENTRY_DSN", "invalid DSN");
 
   const roles = kind === "worker" ? readWorkerRoles(r) : undefined;

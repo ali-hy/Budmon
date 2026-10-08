@@ -60,7 +60,6 @@ export async function createApiServer(
   // 1.
   const app = Fastify({
     logger: false,
-    disableRequestLogging: true,
     trustProxy: trustedProxy.length > 0 ? trustedProxy : false,
     bodyLimit: BODY_LIMIT,
     connectionTimeout: 30000,

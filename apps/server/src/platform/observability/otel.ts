@@ -149,20 +149,26 @@ export function maskQueryText(text: string): string | null {
     }
     return -1;
   };
+  /** A removed comment and the whitespace around it become one space (none at the end). */
+  const joinAfterComment = (before: string): string => {
+    while (i < n && /\s/.test(text[i] ?? "")) i += 1;
+    const trimmed = before.trimEnd();
+    return i < n && trimmed !== "" ? `${trimmed} ` : trimmed;
+  };
   while (i < n) {
     const ch = text[i] ?? "";
     const next = text[i + 1];
     if (ch === "-" && next === "-") {
       const end = text.indexOf("\n", i);
       i = end === -1 ? n : end;
-      out += " ";
+      out = joinAfterComment(out);
       continue;
     }
     if (ch === "/" && next === "*") {
       const end = text.indexOf("*/", i + 2);
       if (end === -1) return null;
       i = end + 2;
-      out += " ";
+      out = joinAfterComment(out);
       continue;
     }
     if ((ch === "E" || ch === "e") && next === "'" && !IDENT_PART.test(text[i - 1] ?? " ")) {

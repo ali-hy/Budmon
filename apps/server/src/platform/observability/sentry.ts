@@ -1,6 +1,6 @@
 // F-34 initSentry and F-35's scrubbers: the only fields that may reach Sentry.
 import * as Sentry from "@sentry/node";
-import { SENTRY_DSN_PATTERN, type AppEnv } from "../config/schema.js";
+import { isValidSentryDsn, type AppEnv } from "../config/schema.js";
 import { buildReportEvent, type ErrorReporter } from "./errorReporter.js";
 import { isUuid } from "@budmon/shared";
 import { ERROR_KEY, isRoute, JOB_NAME, REQUEST_ID, TOKEN } from "./safeFields.js";
@@ -164,7 +164,7 @@ export function initSentry(cfg: {
   httpsProxy?: string;
 }): ErrorReporter {
   // A-131: an invalid DSN never reaches Sentry.init, which would print it with its key.
-  if (cfg.dsn === undefined || !SENTRY_DSN_PATTERN.test(cfg.dsn)) {
+  if (cfg.dsn === undefined || !isValidSentryDsn(cfg.dsn, cfg.environment)) {
     return { report: () => undefined, flush: () => Promise.resolve() };
   }
   const client = Sentry.init({
