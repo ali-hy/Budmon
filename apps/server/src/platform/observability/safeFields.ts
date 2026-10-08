@@ -90,7 +90,7 @@ export type SafeFieldName =
 export type SafeFields = Partial<Record<SafeFieldName, string | number | boolean>>;
 
 export const TOKEN = /^[A-Za-z0-9_.:-]{1,64}$/;
-const ROUTE = /^\/[A-Za-z0-9_./:{}-]{0,200}$/;
+export const ROUTE = /^\/[A-Za-z0-9_./:{}-]{0,200}$/;
 export const ERROR_KEY = /^[A-Z][A-Z0-9_]{1,63}$/;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 

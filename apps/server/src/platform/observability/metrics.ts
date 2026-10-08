@@ -1,6 +1,6 @@
 // F-41 createMetrics and F-42 registerPlatformMetrics: instruments with a closed set of labels.
 import type { Meter } from "@opentelemetry/api";
-import { TOKEN } from "./safeFields.js";
+import { ROUTE, TOKEN } from "./safeFields.js";
 
 export const METRIC_LABELS: ReadonlySet<string> = new Set([
   "service",
@@ -56,7 +56,8 @@ export function createMetrics(meter: Meter, onDrop: (n: number) => void): Metric
           onDrop(1);
           continue;
         }
-        if (TOKEN.test(value)) {
+        // http_route holds a route template; every other label a token (A-111).
+        if ((key === "http_route" ? ROUTE : TOKEN).test(value)) {
           clean[key] = value;
         } else {
           clean[key] = "invalid";

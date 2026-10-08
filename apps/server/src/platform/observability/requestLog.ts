@@ -31,7 +31,7 @@ export function registerRequestLog(
   deps: { logger: Logger; metrics: PlatformMetrics },
 ): void {
   app.addHook("onResponse", (request, reply) => {
-    const route = request.orpcRoute ?? request.routeOptions?.url ?? "unmatched";
+    const route = request.orpcRoute ?? request.routeOptions?.url ?? "/unmatched";
     const status = reply.statusCode;
     const statusClass = `${String(Math.floor(status / 100))}xx`;
     const clientKind = request.clientKind ?? "other";

@@ -188,6 +188,9 @@ export interface RawConfigInput {
   files: Readonly<Record<string, string | null>>;
 }
 
+/** F-10's release rule. */
+export const RELEASE_PATTERN = /^(v\d+\.\d+\.\d+(-(hotfix|infra)\.\d+)?|dev)$/;
+
 const PLACEHOLDER = "__FILL_ME__";
 const SIGNIN_SUFFIX = ".apps.googleusercontent.com";
 const ROLES: readonly DbLoginRole[] = [
@@ -886,7 +889,7 @@ export function parseConfig(
   if (release === undefined) {
     if (r.prod) r.fail("BUDMON_RELEASE", "required");
     release = "dev";
-  } else if (!/^(v\d+\.\d+\.\d+(-(hotfix|infra)\.\d+)?|dev)$/.test(release)) {
+  } else if (!RELEASE_PATTERN.test(release)) {
     r.fail("BUDMON_RELEASE", "must be a release version or dev");
   } else if (r.prod && release === "dev") {
     r.fail("BUDMON_RELEASE", "not allowed in production");

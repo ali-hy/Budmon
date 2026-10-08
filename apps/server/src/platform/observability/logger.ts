@@ -16,6 +16,21 @@ export interface Logger {
 
 type Level = "debug" | "info" | "warn" | "error";
 
+const FIXED_KEYS = new Set(["level", "time", "service", "release", "event"]);
+
+/** A field named like a fixed key is dropped and counted (A-113). */
+function withoutFixedKeys(
+  sanitized: ReturnType<typeof sanitizeFields>,
+): ReturnType<typeof sanitizeFields> {
+  const fields: Record<string, string | number | boolean> = {};
+  let dropped = sanitized.dropped;
+  for (const [key, value] of Object.entries(sanitized.fields)) {
+    if (FIXED_KEYS.has(key)) dropped += 1;
+    else fields[key] = value;
+  }
+  return { fields, dropped };
+}
+
 export function createLogger(opts: {
   service: string;
   release: string;
@@ -40,14 +55,15 @@ export function createLogger(opts: {
       try {
         if (!base.isLevelEnabled(level)) return;
         const validEvent = TOKEN.test(event);
-        const sanitized = sanitizeFields(fields ?? {});
+        const sanitized = withoutFixedKeys(sanitizeFields(fields ?? {}));
         const dropped = sanitized.dropped + (validEvent ? 0 : 1);
+        // The fixed keys are written last, so they always win (A-113).
         const line: Record<string, unknown> = {
+          ...bindings,
+          ...sanitized.fields,
           service: opts.service,
           release: opts.release,
           event: validEvent ? event : "invalid_event",
-          ...bindings,
-          ...sanitized.fields,
         };
         if (err !== undefined) line["err"] = sanitizeError(err);
         if (dropped > 0) {
@@ -73,7 +89,7 @@ export function createLogger(opts: {
         write("error", event, fields, err);
       },
       child: (childBindings) => {
-        const sanitized = sanitizeFields(childBindings);
+        const sanitized = withoutFixedKeys(sanitizeFields(childBindings));
         if (sanitized.dropped > 0) opts.onDrop?.(sanitized.dropped);
         return make({ ...bindings, ...sanitized.fields });
       },

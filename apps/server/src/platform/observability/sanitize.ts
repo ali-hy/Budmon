@@ -1,4 +1,7 @@
-// F-33 sanitizeError and F-37 stripQuery: what may leave the process about an error or a URL.
+// F-33 sanitizeError and buildErrorEvent, and F-37 stripQuery: what may leave the process about
+// an error or a URL.
+import path from "node:path";
+import { serverRoot } from "../config/serverRoot.js";
 import { BudmonError } from "../errors/BudmonError.js";
 import { ERROR_KEY, TOKEN } from "./safeFields.js";
 
@@ -11,10 +14,22 @@ export interface SanitizedError {
   frames: string[];
 }
 
+export interface EventFrame {
+  function?: string;
+  filename: string;
+  lineno: number;
+  colno: number;
+}
+
 const SQLSTATE = /^[0-9A-Z]{5}$/;
 const SYSTEM_CODE = /^E[A-Z0-9_]{1,30}$/;
-const FRAME = /^at [^()]{0,200}( \([^()]*:\d+:\d+\))?$/;
 const MAX_FRAMES = 30;
+
+/** V8's frame grammar: `at <fn> (<file>:<line>:<col>)` or `at <file>:<line>:<col>`. */
+const V8_FRAME = /^at (?:(.+) \((.+):(\d+):(\d+)\)|(.+):(\d+):(\d+))$/;
+/** A-110's rules for the parts a frame is rebuilt from. */
+export const FRAME_FUNCTION = /^[A-Za-z_$][A-Za-z0-9_$.<>[\] ]{0,99}$/;
+export const FRAME_FILENAME = /^[A-Za-z0-9_@./<>:-]{1,200}$/;
 
 function get(value: unknown, key: string): unknown {
   if (typeof value !== "object" || value === null) return undefined;
@@ -29,6 +44,72 @@ function validStatus(value: unknown): number | undefined {
 
 function token(value: unknown): string | undefined {
   return typeof value === "string" && TOKEN.test(value) ? value : undefined;
+}
+
+let rootCache: string | null | undefined;
+
+function repositoryRoot(): string | null {
+  if (rootCache === undefined) {
+    try {
+      rootCache = path.join(serverRoot(), "../..");
+    } catch {
+      rootCache = null;
+    }
+  }
+  return rootCache;
+}
+
+/** Reduces a frame's location to something that can't carry user text (A-110). */
+export function reduceFilename(raw: string): string {
+  const file = raw.startsWith("file://") ? raw.slice("file://".length) : raw;
+  const modules = file.indexOf("/node_modules/");
+  if (modules >= 0) return file.slice(modules + 1);
+  const root = repositoryRoot();
+  if (root !== null && file.startsWith(`${root}/`)) return file.slice(root.length + 1);
+  if (file.startsWith("node:")) return file;
+  // Already reduced (a repository-relative or node_modules/ path): unchanged, so the reduction can
+  // be applied twice (F-35 re-checks frames).
+  if (!file.startsWith("/") && !file.includes(":") && !file.includes("\\")) return file;
+  return "<unknown>";
+}
+
+function parseFrame(line: string): EventFrame | null {
+  const match = V8_FRAME.exec(line);
+  if (match === null) return null;
+  const fn = match[1];
+  const location = match[2] ?? match[5] ?? "";
+  const lineno = Number.parseInt(match[3] ?? match[6] ?? "", 10);
+  const colno = Number.parseInt(match[4] ?? match[7] ?? "", 10);
+  if (fn !== undefined && !FRAME_FUNCTION.test(fn)) return null;
+  const filename = reduceFilename(location);
+  if (!FRAME_FILENAME.test(filename)) return null;
+  return { ...(fn === undefined ? {} : { function: fn }), filename, lineno, colno };
+}
+
+function frameLine(frame: EventFrame): string {
+  const location = `${frame.filename}:${String(frame.lineno)}:${String(frame.colno)}`;
+  return frame.function === undefined ? `at ${location}` : `at ${frame.function} (${location})`;
+}
+
+/** The parsed frames of an error's stack, newest first, taken only after the header. */
+function stackFrames(err: Error): EventFrame[] {
+  let header: string;
+  let stack: unknown;
+  try {
+    header = String(err);
+    stack = err.stack;
+  } catch {
+    return [];
+  }
+  // A replaced or custom stack can't be split safely from the message (A-110).
+  if (typeof stack !== "string" || !stack.startsWith(`${header}\n`)) return [];
+  const frames: EventFrame[] = [];
+  for (const line of stack.slice(header.length + 1).split("\n")) {
+    const frame = parseFrame(line.trim());
+    if (frame !== null) frames.push(frame);
+    if (frames.length >= MAX_FRAMES) break;
+  }
+  return frames;
 }
 
 export function sanitizeError(err: unknown): SanitizedError {
@@ -59,29 +140,23 @@ export function sanitizeError(err: unknown): SanitizedError {
     if (reason !== undefined) result.reason = reason;
   }
 
-  if (isError && typeof err.stack === "string") {
-    // V8's stack starts with String(err), the class line and the message, which can itself
-    // contain lines shaped like frames. Frames are taken only after those lines (B-1).
-    result.frames = err.stack
-      .split("\n")
-      .slice(headerLineCount(err))
-      .filter((line) => line.startsWith("    at "))
-      .map((line) => line.trim())
-      .filter((line) => FRAME.test(line))
-      .slice(0, MAX_FRAMES);
-  }
+  if (isError) result.frames = stackFrames(err).map(frameLine);
   return result;
 }
 
-function headerLineCount(err: Error): number {
-  let message = "";
-  try {
-    message = typeof err.message === "string" ? err.message : "";
-  } catch {
-    message = "";
-  }
-  // The class line holds the first line of the message; each further message line is one more.
-  return message.split("\n").length;
+/** The Sentry exception for an error, from the sanitised parts only (A-110). Frames are innermost
+ * last, as Sentry expects. */
+export function buildErrorEvent(err: unknown): {
+  type: string;
+  value: string;
+  stacktrace: { frames: EventFrame[] };
+} {
+  const s = sanitizeError(err);
+  return {
+    type: s.class,
+    value: s.key ?? s.code ?? s.class,
+    stacktrace: { frames: err instanceof Error ? stackFrames(err).reverse() : [] },
+  };
 }
 
 /** `scheme://host[:port]/path`, without user info, query or fragment. */
@@ -93,4 +168,9 @@ export function stripQuery(url: string): string {
   } catch {
     return "[invalid-url]";
   }
+}
+
+/** A path without its query or fragment (F-37's rule applied to a route or `url.path`). */
+export function stripPathQuery(value: string): string {
+  return value.split(/[?#]/)[0] ?? "";
 }

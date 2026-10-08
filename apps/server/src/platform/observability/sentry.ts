@@ -1,9 +1,16 @@
 // F-34 initSentry and F-35's scrubbers: the only fields that may reach Sentry.
 import * as Sentry from "@sentry/node";
 import type { AppEnv } from "../config/schema.js";
-import { buildErrorEvent, type ErrorReporter } from "./errorReporter.js";
-import { ERROR_KEY } from "./safeFields.js";
-import { stripQuery } from "./sanitize.js";
+import { buildReportEvent, type ErrorReporter } from "./errorReporter.js";
+import { ERROR_KEY, ROUTE, TOKEN } from "./safeFields.js";
+import {
+  buildErrorEvent,
+  FRAME_FILENAME,
+  FRAME_FUNCTION,
+  reduceFilename,
+  stripPathQuery,
+  stripQuery,
+} from "./sanitize.js";
 
 type Json = Record<string, unknown>;
 
@@ -24,7 +31,40 @@ function pick(source: Json | undefined, keys: readonly string[]): Json {
 
 const EVENT_KEYS = ["event_id", "timestamp", "platform", "level", "release", "environment"];
 const FRAME_KEYS = ["filename", "function", "lineno", "colno", "in_app"];
-const TAG_KEYS = ["route", "job", "client_kind", "error_key"];
+function withReducedFilename(frame: Json): Json {
+  const filename = frame["filename"];
+  return typeof filename === "string" ? { ...frame, filename: reduceFilename(filename) } : frame;
+}
+
+/** A frame survives only when its parts pass A-110's patterns. */
+function frameIsSafe(frame: Json): boolean {
+  const fn = frame["function"];
+  const filename = frame["filename"];
+  return (
+    (fn === undefined || (typeof fn === "string" && FRAME_FUNCTION.test(fn))) &&
+    typeof filename === "string" &&
+    FRAME_FILENAME.test(filename) &&
+    (frame["lineno"] === undefined || typeof frame["lineno"] === "number") &&
+    (frame["colno"] === undefined || typeof frame["colno"] === "number")
+  );
+}
+
+/** Tags restricted to their keys and F-30's rules; failing values are dropped (A-112). */
+function checkedTags(tags: Json | undefined): Json {
+  const out: Json = {};
+  if (tags === undefined) return out;
+  const route = tags["route"];
+  if (typeof route === "string" && ROUTE.test(stripPathQuery(route))) {
+    out["route"] = stripPathQuery(route);
+  }
+  for (const key of ["job", "client_kind"]) {
+    const value = tags[key];
+    if (typeof value === "string" && TOKEN.test(value)) out[key] = value;
+  }
+  const errorKey = tags["error_key"];
+  if (typeof errorKey === "string" && ERROR_KEY.test(errorKey)) out["error_key"] = errorKey;
+  return out;
+}
 
 export function scrubBreadcrumb(b: Record<string, unknown>): Record<string, unknown> | null {
   const category = b["category"];
@@ -59,18 +99,22 @@ export function scrubSentryEvent(event: Record<string, unknown>): Record<string,
         };
         const frames = record(entry["stacktrace"])?.["frames"];
         if (Array.isArray(frames)) {
-          kept["stacktrace"] = { frames: frames.map((f: unknown) => pick(record(f), FRAME_KEYS)) };
+          kept["stacktrace"] = {
+            frames: frames
+              .map((f: unknown) => withReducedFilename(pick(record(f), FRAME_KEYS)))
+              .filter((f) => frameIsSafe(f)),
+          };
         }
         return kept;
       }),
     };
   }
 
-  const tags = pick(record(event["tags"]), TAG_KEYS);
+  const tags = checkedTags(record(event["tags"]));
   if (Object.keys(tags).length > 0) out["tags"] = tags;
 
   const userId = record(event["user"])?.["id"];
-  if (userId !== undefined) out["user"] = { id: userId };
+  if (typeof userId === "string" && TOKEN.test(userId)) out["user"] = { id: userId };
 
   const trace = record(record(event["contexts"])?.["trace"]);
   if (trace !== undefined) out["contexts"] = { trace: pick(trace, ["trace_id", "span_id"]) };
@@ -119,18 +163,24 @@ export function initSentry(cfg: {
     enableOpenTelemetrySetup: false,
     integrations: [
       Sentry.linkedErrorsIntegration({ limit: 1 }),
-      Sentry.onUncaughtExceptionIntegration(),
-      Sentry.onUnhandledRejectionIntegration(),
+      Sentry.onUncaughtExceptionIntegration({ exitEvenIfOtherHandlersAreRegistered: false }),
+      Sentry.onUnhandledRejectionIntegration({ mode: "none" }),
     ],
     beforeSend: (event, hint) => {
       // Events Sentry built itself (uncaught exceptions, unhandled rejections) carry frames parsed
       // from err.stack, which can hold message text. Their exception is rebuilt from the original
       // error through F-33, so Sentry's own parsing is never used (B-1).
       const raw = event as unknown as Json;
-      const source =
-        hint.originalException === undefined
-          ? raw
-          : { ...raw, exception: buildErrorEvent(hint.originalException, {})["exception"] };
+      const values = record(raw["exception"])?.["values"];
+      const exception =
+        hint.originalException !== undefined
+          ? { values: [buildErrorEvent(hint.originalException)] }
+          : {
+              values: Array.isArray(values)
+                ? values.map((v: unknown) => pick(record(v), ["type"]))
+                : [],
+            };
+      const source = { ...raw, exception };
       return scrubSentryEvent(source) as unknown as typeof event;
     },
     beforeBreadcrumb: (crumb) => scrubBreadcrumb(crumb as unknown as Json),
@@ -139,7 +189,8 @@ export function initSentry(cfg: {
   return {
     report(err, ctx) {
       // The original error object never reaches Sentry: only the event built from F-33.
-      client?.captureEvent(buildErrorEvent(err, ctx));
+      // The hint lets beforeSend rebuild the exception from the error, as for Sentry's own events.
+      client?.captureEvent(buildReportEvent(err, ctx), { originalException: err });
     },
     async flush(timeoutMs) {
       await client?.flush(timeoutMs);

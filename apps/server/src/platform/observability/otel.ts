@@ -151,7 +151,14 @@ export class AllowlistSpanExporter implements SpanExporter {
         endTime: span.endTime,
         status: { code: span.status.code, message: "" },
         attributes,
-        links: span.links,
+        // Links keep their trace and span ids; their attributes go (A-114).
+        links: span.links.map((link) => {
+          for (const key of Object.keys(link.attributes ?? {})) {
+            if (isExpectedDrop(key)) expected += 1;
+            else unexpected += 1;
+          }
+          return { context: link.context };
+        }),
         events: [],
         duration: span.duration,
         ended: span.ended,

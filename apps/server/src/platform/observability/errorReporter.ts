@@ -1,6 +1,7 @@
-// F-34: the error reporter interface, the event built from F-33 only, and the in-memory reporter
-// for tests and the canary suite.
-import { sanitizeError } from "./sanitize.js";
+// F-34: the error reporter interface, the report event, and the in-memory reporter for tests and
+// the canary suite.
+import { ERROR_KEY, ROUTE, TOKEN } from "./safeFields.js";
+import { buildErrorEvent, stripPathQuery } from "./sanitize.js";
 import { scrubSentryEvent } from "./sentry.js";
 
 export interface ErrorContext {
@@ -16,47 +17,39 @@ export interface ErrorReporter {
   flush(timeoutMs: number): Promise<void>;
 }
 
-const FRAME = /^at (?:(.*?) \((.*):(\d+):(\d+)\)|(.*):(\d+):(\d+))$/;
-
-function parseFrame(line: string): Record<string, unknown> {
-  const match = FRAME.exec(line);
-  if (match === null) return { function: line.slice(3) };
-  if (match[2] !== undefined) {
-    return {
-      function: match[1],
-      filename: match[2],
-      lineno: Number.parseInt(match[3] ?? "0", 10),
-      colno: Number.parseInt(match[4] ?? "0", 10),
-    };
-  }
-  return {
-    filename: match[5],
-    lineno: Number.parseInt(match[6] ?? "0", 10),
-    colno: Number.parseInt(match[7] ?? "0", 10),
-  };
+function valid(value: string | undefined, rule: RegExp): string | undefined {
+  return value !== undefined && rule.test(value) ? value : undefined;
 }
 
-/** The Sentry event for an error: built from F-33's result only, never from the error itself. */
-export function buildErrorEvent(err: unknown, ctx: ErrorContext): Record<string, unknown> {
-  const s = sanitizeError(err);
+/** The context values that pass F-30's rules; a failing value is dropped (A-112). */
+export function checkedContext(ctx: ErrorContext): ErrorContext {
+  const route = ctx.route === undefined ? undefined : valid(stripPathQuery(ctx.route), ROUTE);
+  const checked: ErrorContext = {};
+  const requestId = valid(ctx.requestId, TOKEN);
+  const userId = valid(ctx.userId, TOKEN);
+  const jobName = valid(ctx.jobName, TOKEN);
+  const errorKey = valid(ctx.errorKey, ERROR_KEY);
+  if (requestId !== undefined) checked.requestId = requestId;
+  if (userId !== undefined) checked.userId = userId;
+  if (route !== undefined) checked.route = route;
+  if (jobName !== undefined) checked.jobName = jobName;
+  if (errorKey !== undefined) checked.errorKey = errorKey;
+  return checked;
+}
+
+/** The Sentry event for a report: built from F-33's parts and the checked context only, never
+ * from the error object itself. */
+export function buildReportEvent(err: unknown, ctx: ErrorContext): Record<string, unknown> {
+  const checked = checkedContext(ctx);
   const tags: Record<string, string> = {};
-  if (ctx.route !== undefined) tags["route"] = ctx.route;
-  if (ctx.jobName !== undefined) tags["job"] = ctx.jobName;
-  if (ctx.errorKey !== undefined) tags["error_key"] = ctx.errorKey;
+  if (checked.route !== undefined) tags["route"] = checked.route;
+  if (checked.jobName !== undefined) tags["job"] = checked.jobName;
+  if (checked.errorKey !== undefined) tags["error_key"] = checked.errorKey;
   return {
     level: "error",
-    exception: {
-      values: [
-        {
-          type: s.class,
-          value: s.key ?? s.code ?? s.class,
-          // Sentry lists frames oldest first; a stack lists the newest first.
-          stacktrace: { frames: [...s.frames].reverse().map(parseFrame) },
-        },
-      ],
-    },
+    exception: { values: [buildErrorEvent(err)] },
     tags,
-    ...(ctx.userId === undefined ? {} : { user: { id: ctx.userId } }),
+    ...(checked.userId === undefined ? {} : { user: { id: checked.userId } }),
   };
 }
 
@@ -67,7 +60,7 @@ export function createMemoryErrorReporter(): ErrorReporter & {
   return {
     events,
     report(err, ctx) {
-      const event = scrubSentryEvent(buildErrorEvent(err, ctx));
+      const event = scrubSentryEvent(buildReportEvent(err, ctx));
       if (event !== null) events.push(event);
     },
     flush: () => Promise.resolve(),
