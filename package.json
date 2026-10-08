@@ -19,7 +19,8 @@
     "dev": "pnpm --filter @budmon/server dev",
     "db:reset": "pnpm --filter @budmon/server db:reset",
     "db:seed": "pnpm --filter @budmon/server db:seed",
-    "db:migrate": "pnpm --filter @budmon/server db:migrate"
+    "db:migrate": "pnpm --filter @budmon/server db:migrate",
+    "contract:openapi": "pnpm --filter @budmon/contract contract:openapi"
   },
   "devDependencies": {
     "@budmon/config": "workspace:*",

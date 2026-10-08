@@ -79,4 +79,14 @@ export async function applyTableGrants(
       }
     }
   }
+
+  // 5. The API's readiness check reads the migrations table (A-130). Push-mode databases have no
+  // drizzle schema and skip this.
+  const drizzle = await migrator.executeSql(
+    "SELECT to_regclass('drizzle.__drizzle_migrations') IS NOT NULL AS present",
+  );
+  if (drizzle.rows[0]?.["present"] === true) {
+    await migrator.executeSql("GRANT USAGE ON SCHEMA drizzle TO budmon_app");
+    await migrator.executeSql("GRANT SELECT ON drizzle.__drizzle_migrations TO budmon_app");
+  }
 }

@@ -1,0 +1,88 @@
+// F-61 security headers and F-62 body handling (delivered in S-4, A-124).
+import helmet from "@fastify/helmet";
+import type { FastifyError, FastifyInstance } from "fastify";
+import type { ErrorReporter } from "../observability/errorReporter.js";
+import type { Logger } from "../observability/logger.js";
+
+export async function registerSecurityHeaders(app: FastifyInstance): Promise<void> {
+  await app.register(helmet, {
+    contentSecurityPolicy: {
+      useDefaults: false,
+      directives: { "default-src": ["'none'"], "frame-ancestors": ["'none'"] },
+    },
+    strictTransportSecurity: { maxAge: 31536000, includeSubDomains: true },
+    referrerPolicy: { policy: "no-referrer" },
+    crossOriginResourcePolicy: { policy: "same-origin" },
+    xContentTypeOptions: true,
+  });
+}
+
+export const BODY_LIMIT = 102400;
+
+class InvalidJsonError extends Error {
+  readonly code = "BUDMON_INVALID_JSON";
+}
+
+function validationFailed(code: string, message: string) {
+  return {
+    defined: true,
+    code: "VALIDATION_FAILED",
+    status: 400,
+    message: "Validation failed",
+    data: { issues: [{ path: [], code, message }] },
+  };
+}
+
+export function registerBodyHandling(
+  app: FastifyInstance,
+  deps?: { reporter: ErrorReporter; logger: Logger },
+): void {
+  // JSON is the only body type: no text/plain parser, and the parser's own message is never used.
+  app.removeAllContentTypeParsers();
+  app.addContentTypeParser(
+    "application/json",
+    { parseAs: "string", bodyLimit: BODY_LIMIT },
+    (_request, body, done) => {
+      const text = typeof body === "string" ? body : body.toString("utf8");
+      if (text.trim() === "") {
+        done(null, undefined);
+        return;
+      }
+      try {
+        done(null, JSON.parse(text) as unknown);
+      } catch {
+        done(new InvalidJsonError("invalid json"), undefined);
+      }
+    },
+  );
+
+  app.setErrorHandler((error: FastifyError, request, reply) => {
+    if (error.code === "BUDMON_INVALID_JSON") {
+      return reply
+        .code(400)
+        .send(validationFailed("invalid_json", "Request body is not valid JSON."));
+    }
+    if (error.code === "FST_ERR_CTP_BODY_TOO_LARGE") {
+      return reply.code(413).send({
+        defined: true,
+        code: "PAYLOAD_TOO_LARGE",
+        status: 413,
+        message: "Payload too large",
+      });
+    }
+    if (error.code === "FST_ERR_CTP_INVALID_MEDIA_TYPE") {
+      return reply
+        .code(400)
+        .send(validationFailed("unsupported_media_type", "Unsupported content type."));
+    }
+    deps?.reporter.report(error, { requestId: request.id });
+    deps?.logger.error("request_failed", { errorKey: "INTERNAL", requestId: request.id }, error);
+    return reply.code(500).send({
+      defined: true,
+      code: "INTERNAL",
+      status: 500,
+      message: "Internal error",
+      data: { outcome: "not_applied" },
+    });
+  });
+}
