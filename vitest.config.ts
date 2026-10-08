@@ -52,7 +52,11 @@ export default defineConfig({
         test: {
           name: "server-int",
           environment: "node",
-          include: ["apps/server/test/integration/**/*.test.ts"],
+          // S-3: the privacy canary suite (§10.1, apps/server/test/privacy/) runs here too.
+          include: [
+            "apps/server/test/integration/**/*.test.ts",
+            "apps/server/test/privacy/**/*.test.ts",
+          ],
           // §10.1: one Postgres (Testcontainers, or TEST_DATABASE_URL) with budmon_template built
           // by bootstrapCluster + runSchemaStep; each test file copies it (createTestDatabase).
           globalSetup: ["apps/server/test/setup/globalSetup.ts"],
@@ -68,6 +72,8 @@ export default defineConfig({
             "tools/*/test/**/*.test.ts",
             "infra/budmonctl/test/**/*.test.ts",
             "packages/config/test/**/*.test.ts",
+            // S-3: @budmon/test-support's own tests (F-198, TP-16.1).
+            "packages/test-support/test/**/*.test.ts",
           ],
           // Type-aware ESLint and `tsc` runs start a TypeScript program per test.
           testTimeout: 60_000,

@@ -1,12 +1,12 @@
 // F-26 describeFailure (A-81). TP-2.36, plus extra cases TP-2.71x.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
-// The LLD's CANARIES (F-198) arrive in S-3, so this file uses its own canary token.
+import { CANARIES } from "@budmon/test-support";
 import { describe, expect, it } from "vitest";
 import { SchemaStepError } from "../../../src/platform/db/schemaStepError.js";
 import { ResetRefusedError, seedDevelopmentDatabase } from "../../../src/platform/db/reset.js";
 import { describeFailure } from "../../../src/platform/observability/describeFailure.js";
 
-const CANARY_TOKEN = "bmt_CANARY7f3a9c2e1d";
+const CANARY_TOKEN = CANARIES.token;
 
 /** F-30's `token` rule: what every value in the result must match. */
 const TOKEN = /^[A-Za-z0-9_.:-]{1,64}$/;

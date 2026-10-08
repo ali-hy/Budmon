@@ -1,5 +1,6 @@
 // F-15 applyRolesAndPrivileges. TP-2.10 (fresh container), plus extra cases TP-2.51x.
 // The span check of TP-2.10 (a) is TP-3.12 in S-3 (A-51).
+import { CANARIES } from "@budmon/test-support";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { bootstrapCluster } from "../../../src/platform/db/clusterBootstrap.js";
 import { applyRolesAndPrivileges } from "../../../src/platform/db/roles.js";
@@ -18,8 +19,8 @@ import { testScramVerifier } from "../../support/scram.js";
 
 const DATABASE = "budmon";
 const MIGRATOR_PASSWORD = "roles-migrator-password";
-// F-198's CANARIES.token (@budmon/test-support arrives in S-3).
-const CANARY_TOKEN = "ya29.CANARYTOKEN7f3a";
+// F-198's canary token.
+const CANARY_TOKEN = CANARIES.token;
 
 type Secrets = Parameters<typeof applyRolesAndPrivileges>[1];
 
