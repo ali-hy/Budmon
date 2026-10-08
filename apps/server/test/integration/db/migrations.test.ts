@@ -6,7 +6,7 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { bootstrapCluster } from "../../../src/platform/db/clusterBootstrap.js";
 import {
   UnknownMigrationError,
@@ -23,7 +23,19 @@ const FIXTURE = path.resolve(
 );
 const NO_JOURNAL = path.resolve(path.dirname(FIXTURE), "migrations-no-journal");
 const MISSING_FOLDER = path.resolve(path.dirname(FIXTURE), "migrations-that-do-not-exist");
+const EMPTY_JOURNAL = path.resolve(path.dirname(FIXTURE), "migrations-empty");
 const MIGRATOR_PASSWORD = "migrations-migrator-password";
+
+// Drizzle's migrate, wrapped in a spy: F-18 calls it only when the journal has entries (A-80, A-146).
+vi.mock("drizzle-orm/node-postgres/migrator", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("drizzle-orm/node-postgres/migrator")>();
+  return { ...actual, migrate: vi.fn(actual.migrate) };
+});
+const { migrate: drizzleMigrate } = await import("drizzle-orm/node-postgres/migrator");
+
+beforeEach(() => {
+  vi.mocked(drizzleMigrate).mockClear();
+});
 
 let pg: FreshPostgres;
 
@@ -62,6 +74,7 @@ describe("TP-2.13: applyCommittedMigrations", () => {
       const second = await applyCommittedMigrations(database, FIXTURE);
 
       expect(first).toMatchObject({ applied: 2 });
+      expect(drizzleMigrate).toHaveBeenCalled();
       expect(second).toEqual({ applied: 0, verified: 2 });
       const tables = await query(
         pg.superuserUrl("migrate_twice"),
@@ -91,12 +104,17 @@ describe("TP-2.13: applyCommittedMigrations", () => {
   });
 });
 
-async function migrationsTableExists(databaseName: string): Promise<boolean> {
-  const rows = await query<{ exists: boolean }>(
+async function migrationsRows(databaseName: string): Promise<number | null> {
+  const [exists] = await query<{ exists: boolean }>(
     pg.superuserUrl(databaseName),
     "SELECT to_regclass('drizzle.__drizzle_migrations') IS NOT NULL AS exists",
   );
-  return rows[0]?.exists === true;
+  if (exists?.exists !== true) return null;
+  const [row] = await query<{ n: string }>(
+    pg.superuserUrl(databaseName),
+    "SELECT count(*) AS n FROM drizzle.__drizzle_migrations",
+  );
+  return Number.parseInt(row?.n ?? "0", 10);
 }
 
 describe("TP-2.13: a folder without meta/_journal.json means zero migrations (A-80)", () => {
@@ -110,8 +128,9 @@ describe("TP-2.13: a folder without meta/_journal.json means zero migrations (A-
       const report = await applyCommittedMigrations(database, NO_JOURNAL);
 
       expect(report).toEqual({ applied: 0, verified: 0 });
-      // Drizzle's migrate creates drizzle.__drizzle_migrations; skipping it leaves none.
-      expect(await migrationsTableExists("no_journal_fresh")).toBe(false);
+      expect(drizzleMigrate).not.toHaveBeenCalled();
+      // A-146: F-18 creates schema drizzle and an empty table whatever the journal holds.
+      expect(await migrationsRows("no_journal_fresh")).toBe(0);
     } finally {
       await database.close();
     }
@@ -131,19 +150,38 @@ describe("TP-2.13: a folder without meta/_journal.json means zero migrations (A-
   });
 });
 
+describe("TP-2.13: an existing journal with no entries (A-146)", () => {
+  it("TP-2.13: on a fresh database, run twice: { applied: 0, verified: 0 } both times, an empty table after the first, Drizzle's migrate never called", async () => {
+    const database = await freshDatabase("empty_journal_twice");
+    try {
+      const first = await applyCommittedMigrations(database, EMPTY_JOURNAL);
+      const rowsAfterFirst = await migrationsRows("empty_journal_twice");
+      const second = await applyCommittedMigrations(database, EMPTY_JOURNAL);
+
+      expect(first).toEqual({ applied: 0, verified: 0 });
+      expect(rowsAfterFirst).toBe(0);
+      expect(second).toEqual({ applied: 0, verified: 0 });
+      expect(drizzleMigrate).not.toHaveBeenCalled();
+    } finally {
+      await database.close();
+    }
+  });
+});
+
 describe("TP-2.70x: a migrations folder that doesn't exist means zero migrations (A-80)", () => {
   it("TP-2.70x: readJournal returns []", () => {
     expect(readJournal(MISSING_FOLDER)).toEqual([]);
   });
 
-  it("TP-2.70x: on a fresh database it returns { applied: 0, verified: 0 } and creates no migrations table", async () => {
+  it("TP-2.70x: on a fresh database it returns { applied: 0, verified: 0 } and an empty migrations table (A-146)", async () => {
     const database = await freshDatabase("no_folder_fresh");
     try {
       expect(await applyCommittedMigrations(database, MISSING_FOLDER)).toEqual({
         applied: 0,
         verified: 0,
       });
-      expect(await migrationsTableExists("no_folder_fresh")).toBe(false);
+      expect(drizzleMigrate).not.toHaveBeenCalled();
+      expect(await migrationsRows("no_folder_fresh")).toBe(0);
     } finally {
       await database.close();
     }

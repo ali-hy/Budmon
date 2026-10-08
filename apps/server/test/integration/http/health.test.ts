@@ -3,7 +3,7 @@
 //
 // (c) runs over HTTP with the journal injected through createApiServer's opts.journal (A-125) and
 // a production configuration. The container connects as budmon_app, like the real API (A-130);
-// schema drizzle and its table are created as Drizzle's migrator does, with F-16's grant.
+// the database has been through the schema step in migrate mode (A-146).
 import { createServer } from "node:net";
 import type { FastifyInstance } from "fastify";
 import { afterAll, describe, expect, it } from "vitest";
@@ -11,10 +11,17 @@ import { checkReadiness } from "../../../src/platform/http/health.js";
 import { createApiServer } from "../../../src/platform/http/server.js";
 import { buildApiContainer, injectJson, type BuiltContainer } from "../../support/api.js";
 import { prodApi } from "../../support/configEnv.js";
-import { applyTableGrants } from "../../../src/platform/db/grants.js";
-import { connectDatabase } from "../../support/platform.js";
+import path from "node:path";
+import { runSchemaStep } from "../../../src/platform/db/schemaStep.js";
+import {
+  SERVER_DIR,
+  connectDatabase,
+  recordingLogger,
+  schemaStepInput,
+} from "../../support/platform.js";
 import { TEST_ROLE_PASSWORDS } from "../../support/postgres.js";
 
+const EMPTY_JOURNAL = path.join(SERVER_DIR, "test/fixtures/migrations-empty");
 const cleanups: (() => Promise<void>)[] = [];
 
 afterAll(async () => {
@@ -84,23 +91,24 @@ describe("TP-4.13 (b): the pool points at a closed port", () => {
 });
 
 /**
- * A production api container connected as budmon_app, on a database with schema drizzle and its
- * migrations table (created with Drizzle's DDL, as its migrator does in migrate mode), F-16's grants
- * applied (A-130), and one recorded migration h0.
+ * A production api container connected as budmon_app, on a database the schema step has run on in
+ * migrate mode with an empty journal (schema drizzle, its table and F-16's grant, A-130, A-146),
+ * with the recorded migrations given.
  */
-async function migratedProductionContainer(): Promise<BuiltContainer> {
+async function migratedProductionContainer(
+  recorded: readonly string[] = ["h0"],
+): Promise<BuiltContainer> {
   const built = await buildApiContainer({}, {}, prodApi);
   cleanups.push(() => built.close());
   const migrator = built.testDb.connectAs("budmon_migrator");
   try {
-    await migrator.handle.executeSql("CREATE SCHEMA IF NOT EXISTS drizzle");
-    await migrator.handle.executeSql(
-      "CREATE TABLE IF NOT EXISTS drizzle.__drizzle_migrations (id SERIAL PRIMARY KEY, hash text NOT NULL, created_at bigint)",
-    );
-    await applyTableGrants(migrator.handle);
-    await migrator.handle.executeSql(
-      "INSERT INTO drizzle.__drizzle_migrations (hash, created_at) VALUES ('h0', 1760000000000)",
-    );
+    await runSchemaStep(schemaStepInput(migrator, "migrate", recordingLogger(), EMPTY_JOURNAL));
+    for (const hash of recorded) {
+      await migrator.handle.executeSql(
+        "INSERT INTO drizzle.__drizzle_migrations (hash, created_at) VALUES ($1, 1760000000000)",
+        [hash],
+      );
+    }
   } finally {
     await migrator.close();
   }
@@ -139,6 +147,19 @@ describe("TP-4.13 (c): production with the journal one entry ahead of the databa
     });
 
     expect(result).toEqual({ ready: true });
+  });
+});
+
+describe("TP-4.13 (d): production, migrate mode, an empty table and an empty journal (A-146)", () => {
+  it("TP-4.13 (d): /health/ready is 200 ready", async () => {
+    const built = await migratedProductionContainer([]);
+    const app = await createApiServer(built.container, { journal: [] });
+    cleanups.push(() => app.close());
+
+    const ready = await injectJson(app, "GET", "/health/ready");
+
+    expect([ready.status, ready.json()]).toEqual([200, { status: "ready" }]);
+    expect(ready.headers["cache-control"]).toBe("no-store");
   });
 });
 

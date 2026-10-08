@@ -1,9 +1,11 @@
 // F-16 tableGrants and applyTableGrants. TP-2.11 (with A-130's drizzle schema grants), plus extra
 // cases TP-2.49x for §3.3's grant table.
+import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { applyTableGrants, tableGrants } from "../../../src/platform/db/grants.js";
-import { SchemaStepError } from "../../../src/platform/db/schemaStep.js";
+import { SchemaStepError, runSchemaStep } from "../../../src/platform/db/schemaStep.js";
 import type { Database } from "../../../src/platform/db/types.js";
+import { SERVER_DIR, recordingLogger, schemaStepInput } from "../../support/platform.js";
 import { failureState } from "../../support/postgres.js";
 import { createTestDatabase, type TestDatabase } from "../../support/testDatabase.js";
 
@@ -131,12 +133,13 @@ describe("TP-2.11: table grants", () => {
   });
 });
 
-// A-130: when schema drizzle exists (Drizzle's migrator creates it in migrate mode, F-18), F-16 lets
-// budmon_app read the migrations table, and nobody else; push-mode databases have no drizzle
-// schema and F-16 must not fail on them. The schema and table are created here with the DDL
-// Drizzle's migrator uses, then F-16 runs: whether F-18 calls Drizzle's migrate for a journal with
-// no entries is raised with the planner, and doesn't change what F-16 must do.
-describe("TP-2.11: the drizzle schema (A-130)", () => {
+// A-130, A-146: migrate mode always creates schema drizzle and its table (F-18), with an empty
+// journal and with a missing one; F-16 then lets budmon_app read the table, and nobody else.
+// Push-mode databases have no drizzle schema, and F-16 must not fail on them.
+describe.each([
+  ["an existing empty journal", "test/fixtures/migrations-empty"],
+  ["a missing journal", "test/fixtures/migrations-no-journal"],
+])("TP-2.11: migrate mode with %s (A-130, A-146)", (_label, folder) => {
   let migrated: TestDatabase;
   let migratedCapture: Database;
   let migratedMigrator: Database;
@@ -145,17 +148,28 @@ describe("TP-2.11: the drizzle schema (A-130)", () => {
     migrated = await createTestDatabase("budmon_app");
     migratedCapture = migrated.connectAs("budmon_capture");
     migratedMigrator = migrated.connectAs("budmon_migrator");
-    await migratedMigrator.handle.executeSql("CREATE SCHEMA IF NOT EXISTS drizzle");
-    await migratedMigrator.handle.executeSql(
-      "CREATE TABLE IF NOT EXISTS drizzle.__drizzle_migrations (id SERIAL PRIMARY KEY, hash text NOT NULL, created_at bigint)",
+    await runSchemaStep(
+      schemaStepInput(
+        migratedMigrator,
+        "migrate",
+        recordingLogger(),
+        path.join(SERVER_DIR, folder),
+      ),
     );
-    await applyTableGrants(migratedMigrator.handle);
   });
 
   afterAll(async () => {
     await migratedCapture.close();
     await migratedMigrator.close();
     await migrated.drop();
+  });
+
+  it("TP-2.11: schema drizzle and its table exist", async () => {
+    const { rows } = await migratedMigrator.handle.executeSql(
+      "SELECT to_regclass('drizzle.__drizzle_migrations') IS NOT NULL AS present",
+    );
+
+    expect(rows[0]?.["present"]).toBe(true);
   });
 
   it("TP-2.11: budmon_app can SELECT hash FROM drizzle.__drizzle_migrations", async () => {
@@ -183,8 +197,10 @@ describe("TP-2.11: the drizzle schema (A-130)", () => {
       ),
     ).toBe("42501");
   });
+});
 
-  it("TP-2.11: F-16 on a push-mode database (no schema drizzle) completes without error", async () => {
+describe("TP-2.11: F-16 on a push-mode database (A-130)", () => {
+  it("TP-2.11: with no schema drizzle, F-16 completes without error", async () => {
     const pushed = await createTestDatabase("budmon_migrator");
     try {
       const { rows } = await pushed.database.handle.executeSql(
