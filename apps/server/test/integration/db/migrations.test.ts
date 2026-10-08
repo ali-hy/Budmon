@@ -1,7 +1,7 @@
 // F-18 applyCommittedMigrations and readJournal. TP-2.13 (fresh container, fixture folder
 // test/fixtures/migrations with two migrations; A-80's folder without a journal is
 // test/fixtures/migrations-no-journal, holding only `.gitkeep` like apps/server/drizzle), plus extra
-// cases TP-2.52x and TP-2.68x. IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
+// cases TP-2.53x and TP-2.69x. IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -131,12 +131,12 @@ describe("TP-2.13: a folder without meta/_journal.json means zero migrations (A-
   });
 });
 
-describe("TP-2.68x: a migrations folder that doesn't exist means zero migrations (A-80)", () => {
-  it("TP-2.68x: readJournal returns []", () => {
+describe("TP-2.69x: a migrations folder that doesn't exist means zero migrations (A-80)", () => {
+  it("TP-2.69x: readJournal returns []", () => {
     expect(readJournal(MISSING_FOLDER)).toEqual([]);
   });
 
-  it("TP-2.68x: on a fresh database it returns { applied: 0, verified: 0 } and creates no migrations table", async () => {
+  it("TP-2.69x: on a fresh database it returns { applied: 0, verified: 0 } and creates no migrations table", async () => {
     const database = await freshDatabase("no_folder_fresh");
     try {
       expect(await applyCommittedMigrations(database, MISSING_FOLDER)).toEqual({
@@ -149,7 +149,7 @@ describe("TP-2.68x: a migrations folder that doesn't exist means zero migrations
     }
   });
 
-  it("TP-2.68x: an empty migrations table with no journal is still zero migrations", async () => {
+  it("TP-2.69x: an empty migrations table with no journal is still zero migrations", async () => {
     const database = await freshDatabase("no_journal_empty_table");
     try {
       await applyCommittedMigrations(database, FIXTURE);
@@ -165,8 +165,8 @@ describe("TP-2.68x: a migrations folder that doesn't exist means zero migrations
   });
 });
 
-describe("TP-2.52x: readJournal", () => {
-  it("TP-2.52x: lists tag, when and the SHA-256 hex of each migration file", () => {
+describe("TP-2.53x: readJournal", () => {
+  it("TP-2.53x: lists tag, when and the SHA-256 hex of each migration file", () => {
     expect(readJournal(FIXTURE)).toEqual([
       { tag: "0000_first", when: 1760000000000, hash: sha256("0000_first.sql") },
       { tag: "0001_second", when: 1760000100000, hash: sha256("0001_second.sql") },

@@ -1,4 +1,5 @@
-// F-94 runDbResetCli (A-58). TP-2.24 (e) to (g) and TP-2.29, plus extra cases TP-2.57x, TP-2.66x and TP-2.74x.
+// F-94 runDbResetCli (A-58). TP-2.24 (e) to (g), TP-2.29 and TP-2.16's A-93 cases, plus extra cases
+// TP-2.58x, TP-2.67x, TP-2.75x and TP-2.77x.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -6,7 +7,11 @@ import { describe, expect, it, vi } from "vitest";
 import { runDbResetCli, seedAll } from "../../../src/main/dbReset.js";
 import { createWorkerContainer } from "../../../src/platform/container.js";
 import { seeders } from "../../../src/platform/db/seed.js";
-import { ResetRefusedError, seedDevelopmentDatabase } from "../../../src/platform/db/reset.js";
+import {
+  ResetRefusedError,
+  resetDevelopmentDatabase,
+  seedDevelopmentDatabase,
+} from "../../../src/platform/db/reset.js";
 
 const SERVER_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const REPO_ROOT = path.resolve(SERVER_DIR, "../..");
@@ -26,6 +31,7 @@ vi.mock("../../../src/platform/container.js", async (importOriginal) => {
 });
 
 type Deps = Parameters<typeof runDbResetCli>[1];
+type ResetDeps = Parameters<typeof resetDevelopmentDatabase>[1];
 
 interface Harness {
   deps: Deps;
@@ -153,7 +159,7 @@ describe("TP-2.29: runDbResetCli arguments and environment", () => {
     },
   );
 
-  it("TP-2.66x: the --seed-only input never carries allowNonLocalHost: true, with TESTCONTAINERS=1 in env (A-79)", async () => {
+  it("TP-2.67x: the --seed-only input never carries allowNonLocalHost: true, with TESTCONTAINERS=1 in env (A-79)", async () => {
     const h = harness({ DEV_SUPERUSER_URL: SUPERUSER_URL, TESTCONTAINERS: "1" });
 
     await runDbResetCli(["--seed-only"], h.deps);
@@ -200,10 +206,10 @@ describe("TP-2.29: runDbResetCli arguments and environment", () => {
     expect(h.stderr).toEqual(["db:reset failed: Error"]);
   });
 
-  // TP-2.74x (A-81, A-91): an unexpected failure is one stderr line
+  // TP-2.75x (A-81, A-91): an unexpected failure is one stderr line
   // `<command> failed: <errorClass>[ <errorCode>]`, with no message and no stack trace.
 
-  it('TP-2.74x: a system error from the seed prints "db:seed failed: Error ECONNREFUSED" and exits 1', async () => {
+  it('TP-2.75x: a system error from the seed prints "db:seed failed: Error ECONNREFUSED" and exits 1', async () => {
     const h = harness();
     h.seed.mockRejectedValue(
       Object.assign(new Error("connect ECONNREFUSED 10.1.2.3:5432"), { code: "ECONNREFUSED" }),
@@ -213,7 +219,7 @@ describe("TP-2.29: runDbResetCli arguments and environment", () => {
     expect(h.stderr).toEqual(["db:seed failed: Error ECONNREFUSED"]);
   });
 
-  it("TP-2.57x: ROLE_SECRETS_FILE, when set, is the file read", async () => {
+  it("TP-2.58x: ROLE_SECRETS_FILE, when set, is the file read", async () => {
     const h = harness({ DEV_SUPERUSER_URL: SUPERUSER_URL, ROLE_SECRETS_FILE: "/tmp/roles.json" });
 
     await runDbResetCli([], h.deps);
@@ -227,5 +233,51 @@ describe("TP-2.29: runDbResetCli arguments and environment", () => {
     await expect(seedAll({})).resolves.toBeUndefined();
 
     expect(vi.mocked(createWorkerContainer)).not.toHaveBeenCalled();
+  });
+});
+
+// TP-2.16 (A-93): an unknown APP_ENV is refused with a fixed phrase that never repeats the value.
+// The fake reset delegates to the real F-20 with recording dependencies, so the case holds
+// whether runDbResetCli or F-20 does the refusing.
+const UNKNOWN_APP_ENV_LINE =
+  "db:reset only runs against a local development or test database: APP_ENV is not a known environment";
+
+describe("TP-2.16 (A-93): an unknown APP_ENV through runDbResetCli", () => {
+  it.each([
+    ["a value with a newline", "secret\nINJECTED", ["secret", "INJECTED"]],
+    ["staging", "staging", ["staging"]],
+  ])("TP-2.16: APP_ENV %s exits 2 with exactly the fixed line", async (_label, appEnv, secrets) => {
+    const h = harness({ DEV_SUPERUSER_URL: SUPERUSER_URL, APP_ENV: appEnv });
+    const runSchemaStep = vi.fn<ResetDeps["runSchemaStep"]>();
+    const seed = vi.fn(() => Promise.resolve());
+    const deps: Deps = {
+      ...h.deps,
+      resetDevelopmentDatabase: (input) => resetDevelopmentDatabase(input, { runSchemaStep, seed }),
+    };
+
+    const code = await runDbResetCli([], deps);
+
+    expect(code).toBe(2);
+    expect(h.stderr).toEqual([UNKNOWN_APP_ENV_LINE]);
+    for (const secret of secrets) expect(h.stderr.join("\n")).not.toContain(secret);
+    expect(runSchemaStep).not.toHaveBeenCalled();
+    expect(seed).not.toHaveBeenCalled();
+  });
+
+  it("TP-2.77x: --seed-only with APP_ENV=staging exits 2 with the db:seed form of the line", async () => {
+    const h = harness({ DEV_SUPERUSER_URL: SUPERUSER_URL, APP_ENV: "staging" });
+    const seed = vi.fn(() => Promise.resolve());
+    const deps: Deps = {
+      ...h.deps,
+      seedDevelopmentDatabase: (input) => seedDevelopmentDatabase(input, { seed }),
+    };
+
+    const code = await runDbResetCli(["--seed-only"], deps);
+
+    expect(code).toBe(2);
+    expect(h.stderr).toEqual([
+      "db:seed only runs against a local development or test database: APP_ENV is not a known environment",
+    ]);
+    expect(seed).not.toHaveBeenCalled();
   });
 });

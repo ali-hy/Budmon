@@ -83,13 +83,13 @@ describe("TP-2.34: cluster-bootstrap.sql through psql", () => {
     ).toEqual([{ owner: "budmon_migrator" }]);
   });
 
-  it("TP-2.64x: a second run with the same password succeeds (idempotent)", async () => {
+  it("TP-2.65x: a second run with the same password succeeds (idempotent)", async () => {
     const result = await pg.exec(psql(), { BUDMON_MIGRATOR_PASSWORD: PASSWORD });
 
     expect(result.exitCode, result.output).toBe(0);
   });
 
-  it("TP-2.64x: the script leaves the same privileges as bootstrapCluster (CREATE on public revoked, amcheck usable)", async () => {
+  it("TP-2.65x: the script leaves the same privileges as bootstrapCluster (CREATE on public revoked, amcheck usable)", async () => {
     const [row] = await query(
       pg.superuserUrl(DATABASE),
       `SELECT pg_get_userbyid(n.nspowner) AS owner,

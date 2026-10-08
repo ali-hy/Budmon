@@ -1,4 +1,4 @@
-// F-22 step 1, waitForPostgres (A-86). TP-2.39 (a) and (b), plus extra cases TP-2.72x for S-2
+// F-22 step 1, waitForPostgres (A-86). TP-2.39 (a) and (b), plus extra cases TP-2.73x for S-2
 // QA's race: the image's init server answers on the socket (so `pg_isready` through
 // `docker compose exec` succeeds) while TCP still refuses or resets connections. The wait must
 // end only on a successful TCP query through `connect`.
@@ -97,8 +97,8 @@ describe("TP-2.39: waitForPostgres", () => {
   });
 });
 
-describe("TP-2.72x: waitForPostgres and the init-server race (A-86)", () => {
-  it("TP-2.72x: connect gets the URL it was given, the one the tools use", async () => {
+describe("TP-2.73x: waitForPostgres and the init-server race (A-86)", () => {
+  it("TP-2.73x: connect gets the URL it was given, the one the tools use", async () => {
     const f = fakes(() => undefined);
 
     await waitForPostgres(URL, f.deps);
@@ -106,7 +106,7 @@ describe("TP-2.72x: waitForPostgres and the init-server race (A-86)", () => {
     expect(f.connects.map((c) => c.url)).toEqual([URL]);
   });
 
-  it("TP-2.72x: ECONNRESET and ECONNREFUSED while the init server runs are retried until a TCP query succeeds", async () => {
+  it("TP-2.73x: ECONNRESET and ECONNREFUSED while the init server runs are retried until a TCP query succeeds", async () => {
     const failures = ["ECONNREFUSED", "ECONNRESET", "ECONNRESET", "ECONNREFUSED"];
     const f = fakes((n) => {
       const code = failures[n - 1];
@@ -119,7 +119,7 @@ describe("TP-2.72x: waitForPostgres and the init-server race (A-86)", () => {
     expect(f.sleeps).toEqual([500, 500, 500, 500]);
   });
 
-  it("TP-2.72x: it doesn't resolve before connect has succeeded", async () => {
+  it("TP-2.73x: it doesn't resolve before connect has succeeded", async () => {
     let succeeded = false;
     const f = fakes((n) => (n < 3 ? systemError("ECONNRESET") : undefined));
     const connect = f.deps.connect.bind(f.deps);
@@ -133,7 +133,7 @@ describe("TP-2.72x: waitForPostgres and the init-server race (A-86)", () => {
     expect(succeeded).toBe(true);
   });
 
-  it("TP-2.72x: a first-try success neither sleeps nor connects again", async () => {
+  it("TP-2.73x: a first-try success neither sleeps nor connects again", async () => {
     const f = fakes(() => undefined);
 
     await waitForPostgres(URL, f.deps);
@@ -141,7 +141,7 @@ describe("TP-2.72x: waitForPostgres and the init-server race (A-86)", () => {
     expect(f.calls).toEqual(["connect"]);
   });
 
-  it("TP-2.72x: opts.intervalMs and opts.timeoutMs replace 500 ms and 60 s", async () => {
+  it("TP-2.73x: opts.intervalMs and opts.timeoutMs replace 500 ms and 60 s", async () => {
     const f = fakes(() => systemError("ECONNREFUSED"));
 
     const error = await rejection(

@@ -1,4 +1,4 @@
-// F-17 pushSchemaOntoEmpty. TP-2.12 (fresh container), plus extra cases TP-2.51x for §3.1.
+// F-17 pushSchemaOntoEmpty. TP-2.12 (fresh container), plus extra cases TP-2.52x for §3.1.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { bootstrapCluster } from "../../../src/platform/db/clusterBootstrap.js";
 import {
@@ -74,14 +74,14 @@ describe("TP-2.12: push onto an empty database", () => {
   });
 });
 
-describe("TP-2.51x: the pushed schema matches §3.1", () => {
-  it("TP-2.51x: the tables belong to budmon_migrator", async () => {
+describe("TP-2.52x: the pushed schema matches §3.1", () => {
+  it("TP-2.52x: the tables belong to budmon_migrator", async () => {
     expect(
       await rows("SELECT DISTINCT tableowner FROM pg_tables WHERE schemaname = 'public'"),
     ).toEqual([{ tableowner: "budmon_migrator" }]);
   });
 
-  it("TP-2.51x: §3.1's check constraints and indexes exist", async () => {
+  it("TP-2.52x: §3.1's check constraints and indexes exist", async () => {
     const checks = await rows(
       "SELECT conname FROM pg_constraint WHERE contype = 'c' AND connamespace = 'public'::regnamespace ORDER BY conname",
     );
@@ -105,7 +105,7 @@ describe("TP-2.51x: the pushed schema matches §3.1", () => {
     ]);
   });
 
-  it("TP-2.51x: columns are snake_case with §3.1's types", async () => {
+  it("TP-2.52x: columns are snake_case with §3.1's types", async () => {
     const columns = await rows(
       `SELECT table_name || '.' || column_name || ':' || data_type AS c FROM information_schema.columns
        WHERE table_schema = 'public' AND table_name = 'exchange_rates' ORDER BY ordinal_position`,
@@ -122,7 +122,7 @@ describe("TP-2.51x: the pushed schema matches §3.1", () => {
     ]);
   });
 
-  it("TP-2.51x: exchange_rates.currency_code references currencies with RESTRICT on delete and update", async () => {
+  it("TP-2.52x: exchange_rates.currency_code references currencies with RESTRICT on delete and update", async () => {
     expect(
       await rows(
         "SELECT confdeltype, confupdtype FROM pg_constraint WHERE contype = 'f' AND conrelid = 'public.exchange_rates'::regclass",

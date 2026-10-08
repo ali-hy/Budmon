@@ -79,7 +79,7 @@ describe("TP-2.14 (I): loadReferenceData", () => {
     expect((await currency("AED"))?.["name"]).not.toBe("UAE Dirham (renamed)");
   });
 
-  it("TP-2.48x: a second identical load upserts nothing and never deletes", async () => {
+  it("TP-2.49x: a second identical load upserts nothing and never deletes", async () => {
     const data = referenceData();
     await loadReferenceData(migrator.handle, data);
     await migrator.handle.executeSql(
@@ -92,7 +92,7 @@ describe("TP-2.14 (I): loadReferenceData", () => {
     expect(await currency("ZZZ")).toBeDefined();
   });
 
-  it("TP-2.48x: an inactive flag change is upserted", async () => {
+  it("TP-2.49x: an inactive flag change is upserted", async () => {
     const data = referenceData();
     const changed = {
       currencies: data.currencies.map((c) => (c.code === "SAR" ? { ...c, active: false } : c)),

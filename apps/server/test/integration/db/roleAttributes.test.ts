@@ -98,7 +98,7 @@ describe("TP-2.10 (e)/(f): existing roles with unexpected attributes (A-77)", ()
     },
   );
 
-  it("TP-2.63x: an existing role with exactly the expected attributes is accepted (positive control)", async () => {
+  it("TP-2.64x: an existing role with exactly the expected attributes is accepted (positive control)", async () => {
     // Created by budmon_migrator, as F-15 itself creates roles (so it holds ADMIN on it).
     await migrator.handle.executeSql(
       "CREATE ROLE budmon_app LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS",

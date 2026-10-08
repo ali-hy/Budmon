@@ -1,4 +1,4 @@
-// F-13 withTransaction and createCommitTracker. TP-2.8, plus extra cases TP-2.46x.
+// F-13 withTransaction and createCommitTracker. TP-2.8, plus extra cases TP-2.47x.
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createCommitTracker, withTransaction } from "../../../src/platform/db/transaction.js";
 import type { DbHandle } from "../../../src/platform/db/types.js";
@@ -124,7 +124,7 @@ describe("TP-2.8: withTransaction", () => {
     expect(sleep).toHaveBeenCalledTimes(3);
   });
 
-  it("TP-2.46x: a 40P01 (deadlock) error is retried too", async () => {
+  it("TP-2.47x: a 40P01 (deadlock) error is retried too", async () => {
     let calls = 0;
 
     const value = await withTransaction(
@@ -143,7 +143,7 @@ describe("TP-2.8: withTransaction", () => {
     expect(calls).toBe(2);
   });
 
-  it("TP-2.46x: another error isn't retried and is rethrown unchanged", async () => {
+  it("TP-2.47x: another error isn't retried and is rethrown unchanged", async () => {
     let calls = 0;
     const failure = Object.assign(new Error("unique violation"), { code: "23505" });
 
@@ -160,7 +160,7 @@ describe("TP-2.8: withTransaction", () => {
     expect(calls).toBe(1);
   });
 
-  it("TP-2.46x: serializable isolation is applied when asked for", async () => {
+  it("TP-2.47x: serializable isolation is applied when asked for", async () => {
     const level = await withTransaction(
       testDb.database,
       async (tx) => {
@@ -173,7 +173,7 @@ describe("TP-2.8: withTransaction", () => {
     expect(level).toBe("serializable");
   });
 
-  it("TP-2.46x: the default isolation is read committed", async () => {
+  it("TP-2.47x: the default isolation is read committed", async () => {
     const level = await withTransaction(testDb.database, async (tx) => {
       const { rows } = await tx.executeSql("SHOW transaction_isolation");
       return rows[0]?.["transaction_isolation"];
@@ -182,7 +182,7 @@ describe("TP-2.8: withTransaction", () => {
     expect(level).toBe("read committed");
   });
 
-  it("TP-2.46x: the pool's client is released after a failure (later transactions still run)", async () => {
+  it("TP-2.47x: the pool's client is released after a failure (later transactions still run)", async () => {
     for (let i = 0; i < 10; i += 1) {
       await withTransaction(testDb.database, () => Promise.reject(new Error("x"))).catch(
         () => undefined,

@@ -1,5 +1,5 @@
 // TP-2.14 (U): invariants of apps/server/src/platform/fx/iso4217.json (§3.3), plus extra cases
-// TP-2.44x for the rest of §3.3's rules.
+// TP-2.45x for the rest of §3.3's rules.
 import { describe, expect, it } from "vitest";
 import iso4217 from "../../../src/platform/fx/iso4217.json" with { type: "json" };
 
@@ -62,11 +62,11 @@ describe("TP-2.14 (U): iso4217.json", () => {
     ["USN"],
     ["UYI"],
     ["UYW"],
-  ])("TP-2.44x: the excluded code %s isn't in the file (§3.3)", (code) => {
+  ])("TP-2.45x: the excluded code %s isn't in the file (§3.3)", (code) => {
     expect(byCode.has(code)).toBe(false);
   });
 
-  it("TP-2.44x: every entry fits the currencies table (code ^[A-Z]{3}$, minor units 0 to 4, a name, a boolean)", () => {
+  it("TP-2.45x: every entry fits the currencies table (code ^[A-Z]{3}$, minor units 0 to 4, a name, a boolean)", () => {
     const bad = entries.filter(
       (e) =>
         !/^[A-Z]{3}$/.test(e.code) ||
@@ -82,13 +82,13 @@ describe("TP-2.14 (U): iso4217.json", () => {
   });
 
   it.each([["EGP"], ["USD"], ["EUR"], ["GBP"], ["JPY"], ["KWD"], ["SAR"]])(
-    "TP-2.44x: the seeded currency %s is active",
+    "TP-2.45x: the seeded currency %s is active",
     (code) => {
       expect(byCode.get(code)?.active).toBe(true);
     },
   );
 
-  it("TP-2.44x: names are CLDR English display names (A-69), e.g. EGP", () => {
+  it("TP-2.45x: names are CLDR English display names (A-69), e.g. EGP", () => {
     expect(byCode.get("EGP")?.name).toBe(
       new Intl.DisplayNames("en", { type: "currency" }).of("EGP"),
     );

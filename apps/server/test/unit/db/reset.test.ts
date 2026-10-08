@@ -1,6 +1,6 @@
 // F-20 guards. TP-2.16 (a) (the refusals; (b) is integration/db/reset.test.ts) and TP-2.24 (a)
-// to (d) for seedDevelopmentDatabase, plus extra cases TP-2.43x, TP-2.65x and TP-2.67x for the
-// rest of step 1's guard. IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
+// to (d) for seedDevelopmentDatabase, plus extra cases TP-2.44x, TP-2.66x, TP-2.68x and TP-2.77x
+// for the rest of step 1's guard. IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 // A-79: F-20 never reads process.env; only the explicit `allowNonLocalHost` input relaxes the host
 // allowlist, and nothing else. A-84: each refusal carries a `reason`, and its message is
 // `<base>: <phrase>`, the phrase fixed per reason, never any part of the URL.
@@ -154,7 +154,7 @@ const TP_2_16_A: RefusalCase[] = [
   },
 ];
 
-// TP-2.67x: the sixth reason, which TP-2.16 has no input for. pg-connection-string's parse
+// TP-2.68x: the sixth reason, which TP-2.16 has no input for. pg-connection-string's parse
 // throws "Invalid URL" on an unclosed IPv6 bracket.
 const UNPARSEABLE: RefusalCase = {
   label: "an unparseable URL",
@@ -220,7 +220,7 @@ describe("TP-2.16 (a): resetDevelopmentDatabase refuses before any connection", 
     ]);
   });
 
-  it("TP-2.67x: an unparseable URL is refused with reason unparseable_url", async () => {
+  it("TP-2.68x: an unparseable URL is refused with reason unparseable_url", async () => {
     const deps = fakeResetDeps();
 
     const error = refused(await rejection(resetDevelopmentDatabase(resetCall(UNPARSEABLE), deps)));
@@ -232,7 +232,7 @@ describe("TP-2.16 (a): resetDevelopmentDatabase refuses before any connection", 
     expect(deps.seed).not.toHaveBeenCalled();
   });
 
-  it("TP-2.65x: allowNonLocalHost: false, given explicitly, still refuses db.example.com", async () => {
+  it("TP-2.66x: allowNonLocalHost: false, given explicitly, still refuses db.example.com", async () => {
     const deps = fakeResetDeps();
 
     const error = refused(
@@ -248,7 +248,7 @@ describe("TP-2.16 (a): resetDevelopmentDatabase refuses before any connection", 
     expect(deps.runSchemaStep).not.toHaveBeenCalled();
   });
 
-  it("TP-2.43x: appEnv rehearsal is refused with reason app_env", async () => {
+  it("TP-2.44x: appEnv rehearsal is refused with reason app_env", async () => {
     const deps = fakeResetDeps();
 
     const error = refused(
@@ -317,7 +317,7 @@ describe("TP-2.24: seedDevelopmentDatabase", () => {
   });
 
   it.each([["127.0.0.1"], ["[::1]"], ["host.docker.internal"]])(
-    "TP-2.43x: the local host %s is allowed in test",
+    "TP-2.44x: the local host %s is allowed in test",
     async (host) => {
       const seed = vi.fn(() => Promise.resolve());
 
@@ -328,7 +328,7 @@ describe("TP-2.24: seedDevelopmentDatabase", () => {
   );
 
   it.each([["development"], ["test"]])(
-    "TP-2.65x: allowNonLocalHost: true lets %s seed on db.example.com",
+    "TP-2.66x: allowNonLocalHost: true lets %s seed on db.example.com",
     async (appEnv) => {
       const seed = vi.fn(() => Promise.resolve());
 
@@ -341,7 +341,7 @@ describe("TP-2.24: seedDevelopmentDatabase", () => {
     },
   );
 
-  it("TP-2.65x: allowNonLocalHost: true doesn't allow production", async () => {
+  it("TP-2.66x: allowNonLocalHost: true doesn't allow production", async () => {
     const seed = vi.fn(() => Promise.resolve());
 
     const error = refused(
@@ -358,9 +358,9 @@ describe("TP-2.24: seedDevelopmentDatabase", () => {
     expect(seed).not.toHaveBeenCalled();
   });
 
-  // TP-2.67x: the seed path refuses the A-74 inputs and an unparseable URL with the same reasons.
+  // TP-2.68x: the seed path refuses the A-74 inputs and an unparseable URL with the same reasons.
   it.each([...TP_2_16_A.slice(5), UNPARSEABLE].map((c) => [c.label, c] as const))(
-    "TP-2.67x: seedDevelopmentDatabase with %s throws ResetRefusedError with its reason and doesn't seed",
+    "TP-2.68x: seedDevelopmentDatabase with %s throws ResetRefusedError with its reason and doesn't seed",
     async (_label, c) => {
       const seed = vi.fn(() => Promise.resolve());
 
@@ -372,6 +372,52 @@ describe("TP-2.24: seedDevelopmentDatabase", () => {
 
       expect(error.reason).toBe(c.reason);
       expect(error.message).toBe(`${SEED_BASE}: ${phrase(c.reason, c.appEnv)}`);
+      expect(seed).not.toHaveBeenCalled();
+    },
+  );
+});
+
+// TP-2.16 (A-93), direct: F-20 applies the rule itself, since its input type can be bypassed.
+describe("TP-2.16 (A-93): F-20 refuses an unknown appEnv without repeating it", () => {
+  it.each([["secret\nINJECTED"], ["staging"]])(
+    "TP-2.16: resetDevelopmentDatabase with appEnv %j refuses with the fixed phrase",
+    async (appEnv) => {
+      const deps = fakeResetDeps();
+
+      const error = refused(
+        await rejection(
+          resetDevelopmentDatabase(
+            { ...resetInput("development", "localhost"), appEnv: appEnv as ResetInput["appEnv"] },
+            deps,
+          ),
+        ),
+      );
+
+      expect(error.reason).toBe("app_env");
+      expect(error.message).toBe(`${RESET_BASE}: APP_ENV is not a known environment`);
+      expect(error.message).not.toContain(appEnv.split("\n")[0] ?? appEnv);
+      expect(error.message).not.toContain("INJECTED");
+      expect(deps.runSchemaStep).not.toHaveBeenCalled();
+      expect(deps.seed).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([["secret\nINJECTED"], ["staging"], [""]])(
+    "TP-2.77x: seedDevelopmentDatabase with appEnv %j refuses with the db:seed fixed phrase",
+    async (appEnv) => {
+      const seed = vi.fn(() => Promise.resolve());
+
+      const error = refused(
+        await rejection(
+          seedDevelopmentDatabase(
+            { appEnv: appEnv as ResetInput["appEnv"], superuserUrl: LOCAL_URL },
+            { seed },
+          ),
+        ),
+      );
+
+      expect(error.reason).toBe("app_env");
+      expect(error.message).toBe(`${SEED_BASE}: APP_ENV is not a known environment`);
       expect(seed).not.toHaveBeenCalled();
     },
   );

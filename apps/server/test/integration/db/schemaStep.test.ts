@@ -1,5 +1,5 @@
 // F-19 runSchemaStep, S-2 shape (A-49, A-50), on a fresh container. TP-2.15, plus extra cases
-// TP-2.53x. S-6 extends TP-2.15 with the queue fields.
+// TP-2.54x. S-6 extends TP-2.15 with the queue fields.
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { bootstrapCluster } from "../../../src/platform/db/clusterBootstrap.js";
@@ -84,8 +84,8 @@ describe("TP-2.15: runSchemaStep (S-2)", () => {
   });
 });
 
-describe("TP-2.53x: the rest of F-19", () => {
-  it("TP-2.53x: roles, tables, grants and reference data are all in place", async () => {
+describe("TP-2.54x: the rest of F-19", () => {
+  it("TP-2.54x: roles, tables, grants and reference data are all in place", async () => {
     const url = pg.superuserUrl(DATABASE);
     const [roles] = await query(
       url,
@@ -107,7 +107,7 @@ describe("TP-2.53x: the rest of F-19", () => {
     expect(egp).toEqual({ minor_units: 2 });
   });
 
-  it('TP-2.53x: each step is logged once as event "schema_step" with step and durationMs', () => {
+  it('TP-2.54x: each step is logged once as event "schema_step" with step and durationMs', () => {
     const fields = stepFields(firstRun);
 
     expect(fields.length).toBeGreaterThanOrEqual(4);

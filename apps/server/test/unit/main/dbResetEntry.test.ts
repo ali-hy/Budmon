@@ -1,4 +1,4 @@
-// TP-2.60x (test-architect addition, not an LLD ID): F-94's entry guard merges <repo>/.env under
+// TP-2.61x (test-architect addition, not an LLD ID): F-94's entry guard merges <repo>/.env under
 // process.env (A-64: the shell wins; .env is never created). It runs `tsx src/main/dbReset.ts`
 // from a temporary copy of the server (so serverRoot() finds the copy, and its "repository root"
 // holds the test's .env), with node_modules linked to the real ones. Only --seed-only paths that
@@ -60,8 +60,8 @@ function runSeedOnly(shell: Record<string, string>): { status: number | null; st
   return { status: result.status, stderr: result.stderr };
 }
 
-describe("TP-2.60x: dbReset's entry guard and <repo>/.env (A-64)", () => {
-  it("TP-2.60x: without .env and without DEV_SUPERUSER_URL in the shell it exits 64", () => {
+describe("TP-2.61x: dbReset's entry guard and <repo>/.env (A-64)", () => {
+  it("TP-2.61x: without .env and without DEV_SUPERUSER_URL in the shell it exits 64", () => {
     writeDotEnv(undefined);
 
     const { status, stderr } = runSeedOnly({});
@@ -70,7 +70,7 @@ describe("TP-2.60x: dbReset's entry guard and <repo>/.env (A-64)", () => {
     expect(stderr).toContain("DEV_SUPERUSER_URL is not set");
   });
 
-  it("TP-2.60x: values from <repo>/.env are used (APP_ENV=production there makes db:seed refuse)", () => {
+  it("TP-2.61x: values from <repo>/.env are used (APP_ENV=production there makes db:seed refuse)", () => {
     writeDotEnv(`DEV_SUPERUSER_URL=${LOCAL_SUPERUSER}\nAPP_ENV=production\n`);
 
     const { status, stderr } = runSeedOnly({});
@@ -79,7 +79,7 @@ describe("TP-2.60x: dbReset's entry guard and <repo>/.env (A-64)", () => {
     expect(stderr).toContain("db:seed only runs against a local development or test database");
   });
 
-  it("TP-2.60x: a variable set in the shell wins over .env", () => {
+  it("TP-2.61x: a variable set in the shell wins over .env", () => {
     writeDotEnv(`DEV_SUPERUSER_URL=${LOCAL_SUPERUSER}\nAPP_ENV=production\n`);
 
     const { status, stderr } = runSeedOnly({ APP_ENV: "development" });
@@ -89,7 +89,7 @@ describe("TP-2.60x: dbReset's entry guard and <repo>/.env (A-64)", () => {
 
   // Code review B-2 (round 2): .env is configuration for the CLI only. If it were loaded into
   // process.env, a TESTCONTAINERS=1 line in it would switch off F-20's local-host guard.
-  it("TP-2.60x: TESTCONTAINERS=1 in .env doesn't let db:seed reach a non-local host", () => {
+  it("TP-2.61x: TESTCONTAINERS=1 in .env doesn't let db:seed reach a non-local host", () => {
     writeDotEnv(
       "TESTCONTAINERS=1\nDEV_SUPERUSER_URL=postgres://p:p@db.example.com:5432/postgres\n",
     );
@@ -100,7 +100,7 @@ describe("TP-2.60x: dbReset's entry guard and <repo>/.env (A-64)", () => {
     expect(stderr).toContain("db:seed only runs against a local development or test database");
   });
 
-  it("TP-2.60x: the entry guard never creates .env", () => {
+  it("TP-2.61x: the entry guard never creates .env", () => {
     writeDotEnv(undefined);
 
     runSeedOnly({ DEV_SUPERUSER_URL: LOCAL_SUPERUSER });

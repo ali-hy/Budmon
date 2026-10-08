@@ -1,5 +1,5 @@
 // TP-2.26: ci.yml's check job runs the integration tests after the unit tests (A-31), plus the extra
-// case TP-2.58x: the main-only dev-smoke job runs TP-2.18's script (§10.1 CI jobs, A-55).
+// case TP-2.59x: the main-only dev-smoke job runs TP-2.18's script (§10.1 CI jobs, A-55).
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -28,8 +28,8 @@ describe("TP-2.26: ci.yml check job", () => {
   });
 });
 
-describe("TP-2.58x: ci.yml dev-smoke job", () => {
-  it("TP-2.58x: a dev-smoke job runs tools/ci/test/dev-smoke.sh, only on main", () => {
+describe("TP-2.59x: ci.yml dev-smoke job", () => {
+  it("TP-2.59x: a dev-smoke job runs tools/ci/test/dev-smoke.sh, only on main", () => {
     const workflow = parse(readFileSync(path.join(ROOT, ".github/workflows/ci.yml"), "utf8")) as {
       jobs?: Record<string, { if?: unknown; steps?: { run?: unknown }[] }>;
     };

@@ -1,6 +1,6 @@
 // The built entries (F-24) under plain Node. TP-2.6: api with DB_HOST unset (F-90, F-11).
 // TP-2.37: migrate's failure log (F-92, A-81). Both share one build: two files building into the
-// same dist/ in parallel would race. Extra case TP-2.73x; IDs ending in "x" are test-architect
+// same dist/ in parallel would race. Extra case TP-2.74x; IDs ending in "x" are test-architect
 // additions, not LLD test-plan IDs.
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -201,7 +201,7 @@ describe("TP-2.37: node dist/main/migrate.js failure logs (A-81)", () => {
 
   // The control for (a): with the right password the run gets past authentication. What happens
   // next (the schema step on a bare bootstrapped database) isn't what this case is about.
-  it("TP-2.73x: the right password on the same database isn't a 28P01 failure", () => {
+  it("TP-2.74x: the right password on the same database isn't a 28P01 failure", () => {
     const { stdout, stderr } = runMigrateBundle(migrateEnv(pg.host, pg.port, MIGRATOR_PASSWORD));
 
     const codes = startupFailures(`${stdout}${stderr}`).map((entry) => entry["errorCode"]);
