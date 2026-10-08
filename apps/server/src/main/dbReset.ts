@@ -3,7 +3,7 @@ import { readFileSync, realpathSync, existsSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseEnv } from "node:util";
-import { failureLine } from "../platform/observability/describeFailure.js";
+import { runCommand } from "../platform/observability/describeFailure.js";
 import { loadConfig } from "../platform/config/loadConfig.js";
 import { serverRoot } from "../platform/config/serverRoot.js";
 import type { AppEnv, DbLoginRole } from "../platform/config/schema.js";
@@ -75,42 +75,50 @@ export async function runDbResetCli(
   }
   const appEnv = (deps.env["APP_ENV"] ?? "development") as AppEnv;
 
-  try {
-    if (seedOnly) {
-      await deps.seedDevelopmentDatabase({ appEnv, superuserUrl }, { seed: deps.seedAll });
-      return 0;
-    }
-    const rolesFile = path.resolve(
-      repoRoot(),
-      deps.env["ROLE_SECRETS_FILE"] ?? ".data/dev-secrets/roles.json",
-    );
-    const secrets = JSON.parse(deps.readFile(rolesFile)) as Record<
-      DbLoginRole,
-      { password: string }
-    >;
-    const roleSecrets = Object.fromEntries(
-      ROLES.map((role) => [role, { password: secrets[role].password }]),
-    ) as Record<DbLoginRole, { password: string }>;
-    await deps.resetDevelopmentDatabase(
-      {
-        appEnv,
-        superuserUrl,
-        databaseName: deps.env["DB_NAME"] ?? "budmon",
-        migratorPassword: roleSecrets.budmon_migrator.password,
-        roleSecrets,
-        seed: !noSeed,
-      },
-      { runSchemaStep, seed: deps.seedAll },
-    );
-    return 0;
-  } catch (error) {
-    if (error instanceof ResetRefusedError) {
-      deps.stderr(error.message);
-      return 2;
-    }
-    deps.stderr(failureLine(seedOnly ? "db:seed" : "db:reset", error));
-    return 1;
-  }
+  const command = seedOnly ? "db:seed" : "db:reset";
+  return runCommand(
+    command,
+    async () => {
+      try {
+        if (seedOnly) {
+          await deps.seedDevelopmentDatabase({ appEnv, superuserUrl }, { seed: deps.seedAll });
+          return 0;
+        }
+        const rolesFile = path.resolve(
+          repoRoot(),
+          deps.env["ROLE_SECRETS_FILE"] ?? ".data/dev-secrets/roles.json",
+        );
+        const secrets = JSON.parse(deps.readFile(rolesFile)) as Record<
+          DbLoginRole,
+          { password: string }
+        >;
+        const roleSecrets = Object.fromEntries(
+          ROLES.map((role) => [role, { password: secrets[role].password }]),
+        ) as Record<DbLoginRole, { password: string }>;
+        await deps.resetDevelopmentDatabase(
+          {
+            appEnv,
+            superuserUrl,
+            databaseName: deps.env["DB_NAME"] ?? "budmon",
+            migratorPassword: roleSecrets.budmon_migrator.password,
+            roleSecrets,
+            seed: !noSeed,
+          },
+          { runSchemaStep, seed: deps.seedAll },
+        );
+        return 0;
+      } catch (error) {
+        // A refusal is an expected outcome: its own message (which names only the reason) and
+        // exit 2 (A-91). Anything else is unexpected: one runCommand line and exit 1.
+        if (error instanceof ResetRefusedError) {
+          deps.stderr(error.message);
+          return 2;
+        }
+        throw error;
+      }
+    },
+    deps.stderr,
+  );
 }
 
 if (

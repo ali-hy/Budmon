@@ -41,3 +41,22 @@ export function failureLine(command: string, err: unknown): string {
   const { errorClass, errorCode, reason } = describeFailure(err);
   return `${command} failed: ${errorClass}${errorCode === undefined ? "" : ` ${errorCode}`}${reason === undefined ? "" : ` (${reason})`}`;
 }
+
+/**
+ * Runs a development command (A-89): returns `fn`'s exit code (0 when it returns nothing). If `fn`
+ * throws, writes exactly one `failureLine` and returns 1. Never writes a stack.
+ */
+export async function runCommand(
+  command: string,
+  // eslint-disable-next-line @typescript-eslint/no-invalid-void-type -- LLD A-89 signature: fn may return nothing
+  fn: () => Promise<number | void>,
+  stderr: (line: string) => void,
+): Promise<number> {
+  try {
+    const code = await fn();
+    return typeof code === "number" ? code : 0;
+  } catch (error) {
+    stderr(failureLine(command, error));
+    return 1;
+  }
+}

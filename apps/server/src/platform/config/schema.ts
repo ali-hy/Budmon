@@ -606,6 +606,9 @@ function readEmail(r: Reader, publicOriginUrl: URL | undefined): Config["email"]
       (Number.parseInt(explicitPort, 10) < 1 || Number.parseInt(explicitPort, 10) > 65535)
     ) {
       r.fail("SMTP_URL", "port must be 1..65535");
+    } else if (/^smtps?:\/\/(?:[^@/?#]*@)?(?::\d*)?(?:[/?#]|$)/i.test(raw)) {
+      // WHATWG URL parsing rejects an empty host before it can be checked below.
+      r.fail("SMTP_URL", "must have a host");
     } else if (url === null || (url.protocol !== "smtp:" && url.protocol !== "smtps:")) {
       r.fail("SMTP_URL", "must be an smtp:// or smtps:// URL");
     } else if (url.password !== "") {

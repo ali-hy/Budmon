@@ -15,7 +15,10 @@ export function checkMigrationFiles(
   if (/^(release|hotfix|infra)\//.test(input.branch) || input.isHotfixMergeBack) {
     return { ok: true };
   }
-  const migrations = input.changedFiles.filter((file) => file.startsWith("apps/server/drizzle/"));
+  // The folder's placeholder isn't a migration file (A-92); every other path under it counts.
+  const migrations = input.changedFiles.filter(
+    (file) => file.startsWith("apps/server/drizzle/") && file !== "apps/server/drizzle/.gitkeep",
+  );
   if (migrations.length > 0) {
     return {
       ok: false,

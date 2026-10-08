@@ -14,7 +14,7 @@ import { parseEnv } from "node:util";
 import { pathToFileURL } from "node:url";
 import pg from "pg";
 import type { DbLoginRole } from "../platform/config/schema.js";
-import { failureLine } from "../platform/observability/describeFailure.js";
+import { runCommand } from "../platform/observability/describeFailure.js";
 import { resetDevelopmentDatabase } from "../platform/db/reset.js";
 import { runSchemaStep } from "../platform/db/schemaStep.js";
 import { repoRoot, seedAll } from "./dbReset.js";
@@ -182,7 +182,8 @@ function startProcess(
   return child;
 }
 
-async function main(): Promise<number> {
+/** F-22: the development stack. Returns the exit code; errors propagate to runCommand. */
+export async function startDev(): Promise<number> {
   const root = repoRoot();
   const env = ensureDevEnv(root, process.env, {
     exists: existsSync,
@@ -265,10 +266,11 @@ if (
   process.argv[1] !== undefined &&
   import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href
 ) {
-  try {
-    process.exitCode = await main();
-  } catch (error) {
-    process.stderr.write(`${failureLine("pnpm dev", error)}\n`);
-    process.exitCode = 1;
-  }
+  process.exitCode = await runCommand(
+    "pnpm dev",
+    () => startDev(),
+    (line) =>
+      process.stderr.write(`${line}
+`),
+  );
 }

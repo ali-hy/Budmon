@@ -5,7 +5,7 @@ import { existsSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseEnv } from "node:util";
-import { failureLine } from "../platform/observability/describeFailure.js";
+import { runCommand } from "../platform/observability/describeFailure.js";
 import { repoRoot } from "./dbReset.js";
 import { runMigrate } from "./migrate.js";
 
@@ -24,18 +24,19 @@ if (
   process.argv[1] !== undefined &&
   import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href
 ) {
-  try {
-    const root = repoRoot();
-    process.chdir(root);
-    const dotenv = path.join(root, ".env");
-    // The shell wins over .env, and process.env isn't changed.
-    const env = {
-      ...(existsSync(dotenv) ? parseEnv(readFileSync(dotenv, "utf8")) : {}),
-      ...process.env,
-    };
-    process.exitCode = await runMigrate(devMigrateEnv(env));
-  } catch (error) {
-    process.stderr.write(`${failureLine("db:migrate", error)}\n`);
-    process.exitCode = 1;
-  }
+  process.exitCode = await runCommand(
+    "db:migrate",
+    async () => {
+      const root = repoRoot();
+      process.chdir(root);
+      const dotenv = path.join(root, ".env");
+      // The shell wins over .env, and process.env isn't changed.
+      const env = {
+        ...(existsSync(dotenv) ? parseEnv(readFileSync(dotenv, "utf8")) : {}),
+        ...process.env,
+      };
+      return runMigrate(devMigrateEnv(env));
+    },
+    (line) => process.stderr.write(`${line}\n`),
+  );
 }
