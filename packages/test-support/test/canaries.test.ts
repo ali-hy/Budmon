@@ -1,5 +1,5 @@
 // F-198 CANARIES and scanForCanaries (test tooling, delivered in S-3). TP-16.1, plus extra cases
-// TP-3.13x. IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
+// TP-3.18x. IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { describe, expect, it } from "vitest";
 import { CANARIES, scanForCanaries } from "../src/index.js";
 
@@ -24,8 +24,65 @@ describe("TP-16.1: scanForCanaries", () => {
   });
 });
 
-describe("TP-3.13x: CANARIES and scanForCanaries, further cases", () => {
-  it("TP-3.13x: the canaries are F-198's values", () => {
+// A-117 (code review B-3): a canary base64-encoded inside a payload at byte offsets 0, 1 and 2,
+// in the standard and the URL-safe alphabets, is found: one hit for each of the 6 encodings.
+describe("TP-16.1: base64 at every alignment, in both alphabets (A-117)", () => {
+  function urlSafe(text: string): string {
+    return text.replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
+  }
+
+  const ENCODINGS = [0, 1, 2].flatMap((offset) => [
+    { offset, alphabet: "standard", encode: base64 },
+    { offset, alphabet: "URL-safe", encode: (v: string) => urlSafe(base64(v)) },
+  ]);
+
+  it.each(Object.keys(CANARIES) as (keyof typeof CANARIES)[])(
+    "TP-16.1: the %s canary is found in each of the 6 encodings",
+    (canary) => {
+      for (const { offset, alphabet, encode } of ENCODINGS) {
+        const text = encode(`${"f".repeat(offset)}${CANARIES[canary]}"}`);
+
+        expect(
+          scanForCanaries([{ name: "b64", text }], CANARIES).map((h) => h.canary),
+          `${alphabet}, offset ${String(offset)}`,
+        ).toEqual([canary]);
+      }
+    },
+  );
+
+  // F-198's own canaries happen to encode without + or /, so the URL-safe alphabet is exercised
+  // with a canary set whose value does.
+  it("TP-16.1: a canary whose encoding holds + and / is found in both alphabets at every alignment", () => {
+    const canaries = { ...CANARIES, payee: "?>?>?>~~~~~~ab" };
+
+    for (const { offset, alphabet, encode } of ENCODINGS) {
+      const text = encode(`${"f".repeat(offset)}${canaries.payee}"}`);
+      if (alphabet === "standard") expect(text).toMatch(/[+/]/);
+      else expect(text).toMatch(/[-_]/);
+
+      expect(
+        scanForCanaries([{ name: "b64", text }], canaries).map((h) => h.canary),
+        `${alphabet}, offset ${String(offset)}`,
+      ).toEqual(["payee"]);
+    }
+  });
+
+  it.each([0, 1, 2, 3, 4, 5])(
+    "TP-16.1: the payee canary %i bytes into a base64-encoded JSON payload is found",
+    (fillerLength) => {
+      const json = JSON.stringify({ [`k${"x".repeat(fillerLength)}`]: CANARIES.payee });
+
+      for (const text of [base64(json), urlSafe(base64(json))]) {
+        expect(scanForCanaries([{ name: "b64", text }], CANARIES).map((h) => h.canary)).toEqual([
+          "payee",
+        ]);
+      }
+    },
+  );
+});
+
+describe("TP-3.18x: CANARIES and scanForCanaries, further cases", () => {
+  it("TP-3.18x: the canaries are F-198's values", () => {
     expect(CANARIES).toEqual({
       amountMinor: "987654321",
       payee: "CANARYPAYEE7f3a",
@@ -35,17 +92,17 @@ describe("TP-3.13x: CANARIES and scanForCanaries, further cases", () => {
     });
   });
 
-  it("TP-3.13x: clean text has no hits", () => {
+  it("TP-3.18x: clean text has no hits", () => {
     expect(scanForCanaries([{ name: "a", text: "nothing to see 12345" }], CANARIES)).toEqual([]);
   });
 
-  it("TP-3.13x: the search is case-sensitive", () => {
+  it("TP-3.18x: the search is case-sensitive", () => {
     const text = CANARIES.payee.toLowerCase();
 
     expect(scanForCanaries([{ name: "a", text }], CANARIES)).toEqual([]);
   });
 
-  it("TP-3.13x: every canary is found, each hit naming its source", () => {
+  it("TP-3.18x: every canary is found, each hit naming its source", () => {
     const sources = [
       { name: "one", text: `x${CANARIES.amountMinor}` },
       { name: "two", text: `${CANARIES.token} ${CANARIES.message}` },
@@ -60,7 +117,7 @@ describe("TP-3.13x: CANARIES and scanForCanaries, further cases", () => {
     ]);
   });
 
-  it("TP-3.13x: a canary whose URL-encoded form equals the raw value is reported once per occurrence", () => {
+  it("TP-3.18x: a canary whose URL-encoded form equals the raw value is reported once per occurrence", () => {
     const text = `${CANARIES.payee}|${CANARIES.payee}`;
 
     expect(scanForCanaries([{ name: "a", text }], CANARIES)).toEqual([
@@ -68,41 +125,4 @@ describe("TP-3.13x: CANARIES and scanForCanaries, further cases", () => {
       { source: "a", canary: "payee", offset: CANARIES.payee.length + 1 },
     ]);
   });
-
-  // Code review B-3: a canary is found in a base64 payload at every byte offset, not only when its
-  // offset is a multiple of 3.
-  it.each([0, 1, 2, 3, 4, 5])(
-    "TP-3.13x: a canary %i bytes into a base64-encoded JSON payload is found",
-    (fillerLength) => {
-      const json = JSON.stringify({ [`k${"x".repeat(fillerLength)}`]: CANARIES.payee });
-      const text = base64(json);
-
-      expect(scanForCanaries([{ name: "b64", text }], CANARIES).map((h) => h.canary)).toEqual([
-        "payee",
-      ]);
-    },
-  );
-
-  it.each([['{"xy":"'], ['{"xyz":"'], ['{"x":"']])(
-    "TP-3.13x: the review's payload %s<payee>\"} is found",
-    (prefix) => {
-      const text = base64(`${prefix}${CANARIES.payee}"}`);
-
-      expect(scanForCanaries([{ name: "b64", text }], CANARIES)).toHaveLength(1);
-    },
-  );
-
-  it.each([["amountMinor"], ["payee"], ["email"], ["token"], ["message"]] as const)(
-    "TP-3.13x: the %s canary is found at each of the three alignments",
-    (canary) => {
-      for (const filler of ["", "a", "ab"]) {
-        const text = base64(`${filler}${CANARIES[canary]}tail`);
-
-        expect(
-          scanForCanaries([{ name: "b64", text }], CANARIES).map((h) => h.canary),
-          `filler ${JSON.stringify(filler)}`,
-        ).toContain(canary);
-      }
-    },
-  );
 });

@@ -1,4 +1,4 @@
-// F-34 initSentry and ErrorReporter. TP-3.6, plus extra cases TP-3.20x.
+// F-34 initSentry and ErrorReporter. TP-3.6, plus extra cases TP-3.25x.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 //
 // The "Sentry test transport" is a local HTTP server: the DSN points at it, so the real Sentry
@@ -60,8 +60,34 @@ describe("TP-3.6: ErrorReporter through Sentry", () => {
   });
 });
 
-describe("TP-3.20x: ErrorReporter, further cases (F-34)", () => {
-  it("TP-3.20x: the event carries the context as tags route, job, error_key and user.id, never the canary", async () => {
+describe("TP-3.6: ErrorContext values are validated before use (A-112)", () => {
+  it("TP-3.6: route keeps its path only; userId, jobName and errorKey that fail their rules are dropped", async () => {
+    const sentry = await server();
+    const reporter = initSentry({ ...CFG, dsn: sentry.dsn });
+
+    reporter.report(new Error(CANARIES.message), {
+      route: `/x?token=${CANARIES.token}`,
+      userId: CANARIES.email,
+      jobName: `${CANARIES.payee} x`,
+      errorKey: "bad key",
+    });
+    await reporter.flush(5_000);
+
+    const events = eventsOf(sentry.bodies);
+    expect(events).toHaveLength(1);
+    const tags = (events[0]?.["tags"] ?? {}) as Record<string, unknown>;
+    expect(tags["route"]).toBe("/x");
+    expect(tags).not.toHaveProperty("job");
+    expect(tags).not.toHaveProperty("error_key");
+    expect((events[0]?.["user"] as Record<string, unknown> | undefined)?.["id"]).toBeUndefined();
+    expect(
+      scanForCanaries([{ name: "envelope", text: sentry.bodies.join("\n") }], CANARIES),
+    ).toEqual([]);
+  });
+});
+
+describe("TP-3.25x: ErrorReporter, further cases (F-34)", () => {
+  it("TP-3.25x: the event carries the context as tags route, job, error_key and user.id, never the canary", async () => {
     const sentry = await server();
     const reporter = initSentry({ ...CFG, dsn: sentry.dsn });
     const err = Object.assign(new Error(CANARIES.message, { cause: new Error(CANARIES.token) }), {
@@ -92,7 +118,7 @@ describe("TP-3.20x: ErrorReporter, further cases (F-34)", () => {
     ).toEqual([]);
   });
 
-  it("TP-3.20x: the event's environment and release come from the configuration", async () => {
+  it("TP-3.25x: the event's environment and release come from the configuration", async () => {
     const sentry = await server();
     const reporter = initSentry({ ...CFG, dsn: sentry.dsn });
 
@@ -105,7 +131,7 @@ describe("TP-3.20x: ErrorReporter, further cases (F-34)", () => {
     });
   });
 
-  it("TP-3.20x: a thrown string is reported as NonError", async () => {
+  it("TP-3.25x: a thrown string is reported as NonError", async () => {
     const sentry = await server();
     const reporter = initSentry({ ...CFG, dsn: sentry.dsn });
 

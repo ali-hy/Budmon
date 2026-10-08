@@ -1,5 +1,5 @@
-// F-41 createMetrics and F-42 registerPlatformMetrics. TP-3.8, plus extra cases TP-3.22x (names,
-// METRIC_LABELS, histograms and gauges) and TP-3.23x (F-42 registers its set without throwing).
+// F-41 createMetrics and F-42 registerPlatformMetrics. TP-3.8, plus extra cases TP-3.27x (names,
+// METRIC_LABELS, histograms and gauges) and TP-3.28x (F-42 registers its set without throwing).
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import {
   AggregationTemporality,
@@ -59,8 +59,8 @@ describe("TP-3.8: createMetrics", () => {
   });
 });
 
-describe("TP-3.22x: createMetrics, further cases (F-41)", () => {
-  it("TP-3.22x: METRIC_LABELS is F-41's set", () => {
+describe("TP-3.27x: createMetrics, further cases (F-41)", () => {
+  it("TP-3.27x: METRIC_LABELS is F-41's set", () => {
     expect([...METRIC_LABELS].sort()).toEqual(
       [
         "service",
@@ -90,7 +90,7 @@ describe("TP-3.22x: createMetrics, further cases (F-41)", () => {
     ["a leading digit", "1jobs"],
     ["a dot", "jobs.total"],
     ["65 characters", `a${"b".repeat(64)}`],
-  ])("TP-3.22x: a name with %s throws", (_label, name) => {
+  ])("TP-3.27x: a name with %s throws", (_label, name) => {
     const { metrics } = setup();
 
     expect(() => metrics.counter(name, { description: "d", labels: [] })).toThrow(
@@ -101,13 +101,13 @@ describe("TP-3.22x: createMetrics, further cases (F-41)", () => {
   it.each([
     ["three characters", "abc"],
     ["64 characters", `a${"b".repeat(63)}`],
-  ])("TP-3.22x: a name with %s is accepted", (_label, name) => {
+  ])("TP-3.27x: a name with %s is accepted", (_label, name) => {
     const { metrics } = setup();
 
     expect(() => metrics.counter(name, { description: "d", labels: [] })).not.toThrow();
   });
 
-  it("TP-3.22x: histogram and observableGauge registration checks labels too", () => {
+  it("TP-3.27x: histogram and observableGauge registration checks labels too", () => {
     const { metrics } = setup();
 
     expect(() =>
@@ -122,7 +122,7 @@ describe("TP-3.22x: createMetrics, further cases (F-41)", () => {
     }).toThrow(new Error("metric definition invalid: depth_now"));
   });
 
-  it("TP-3.22x: a histogram records with its declared labels and drops the rest", async () => {
+  it("TP-3.27x: a histogram records with its declared labels and drops the rest", async () => {
     const { metrics, onDrop, collect } = setup();
     const histogram = metrics.histogram("work_seconds", {
       description: "d",
@@ -138,7 +138,7 @@ describe("TP-3.22x: createMetrics, further cases (F-41)", () => {
     expect(onDrop).toHaveBeenCalledTimes(1);
   });
 
-  it("TP-3.22x: valid labels are recorded as given, with no drops", async () => {
+  it("TP-3.27x: valid labels are recorded as given, with no drops", async () => {
     const { metrics, onDrop, collect } = setup();
     const counter = metrics.counter("requests_seen_total", {
       description: "d",
@@ -154,7 +154,7 @@ describe("TP-3.22x: createMetrics, further cases (F-41)", () => {
     expect(onDrop).not.toHaveBeenCalled();
   });
 
-  it("TP-3.22x: an observable gauge reports what its callback observes", async () => {
+  it("TP-3.27x: an observable gauge reports what its callback observes", async () => {
     const { metrics, collect } = setup();
 
     metrics.observableGauge("queue_depth_now", { description: "d", labels: ["queue"] }, () => [
@@ -166,8 +166,8 @@ describe("TP-3.22x: createMetrics, further cases (F-41)", () => {
   });
 });
 
-describe("TP-3.23x: registerPlatformMetrics (F-42)", () => {
-  it("TP-3.23x: registers the platform set with createMetrics without throwing", () => {
+describe("TP-3.28x: registerPlatformMetrics (F-42)", () => {
+  it("TP-3.28x: registers the platform set with createMetrics without throwing", () => {
     const { metrics } = setup();
 
     expect(() => registerPlatformMetrics(metrics)).not.toThrow();

@@ -28,23 +28,24 @@ export const CANARIES: Canaries = Object.freeze({
 });
 
 /**
- * The raw value, its URL-encoded form and its base64 forms, without repeats.
+ * The raw value, its URL-encoded form and its base64 forms, without repeats (A-117).
  *
  * Inside a longer base64 payload the canary can start at any byte offset, and its encoding depends
- * on that offset modulo 3. For each of the three alignments this encodes the canary after 0, 1 or
- * 2 filler bytes and keeps only the characters that depend on the canary's bytes alone: it drops
- * the leading characters that mix in the filler and the trailing ones that would mix in whatever
- * follows the canary.
+ * on that offset modulo 3. For each alignment k in {0, 1, 2} this encodes k filler bytes followed
+ * by the canary and keeps the stable core: the characters determined only by the canary's bytes
+ * (dropping the leading ones that mix in the filler, the trailing ones that would mix in whatever
+ * follows, and padding). Each core is searched in the standard and the URL-safe alphabet.
  */
 function forms(value: string): string[] {
   const bytes = Buffer.from(value, "utf8");
-  const base64Forms = [0, 1, 2].map((pad) => {
+  const cores = [0, 1, 2].map((pad) => {
     const encoded = Buffer.concat([Buffer.alloc(pad), bytes]).toString("base64");
     const start = [0, 2, 3][pad] ?? 0;
     const end = Math.floor((bytes.length + pad) / 3) * 4;
     return encoded.slice(start, end);
   });
-  return [...new Set([value, encodeURIComponent(value), ...base64Forms])].filter(
+  const urlSafe = cores.map((core) => core.replaceAll("+", "-").replaceAll("/", "_"));
+  return [...new Set([value, encodeURIComponent(value), ...cores, ...urlSafe])].filter(
     (form) => form.length >= 4,
   );
 }

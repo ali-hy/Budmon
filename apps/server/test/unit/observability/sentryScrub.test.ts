@@ -1,9 +1,11 @@
-// F-35 scrubSentryEvent and scrubBreadcrumb. TP-3.5, plus extra cases TP-3.19x.
+// F-35 scrubSentryEvent and scrubBreadcrumb. TP-3.5, plus extra cases TP-3.24x.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 //
 // A-101: every exception value is replaced by its type unless it has the error-key format
 // (^[A-Z][A-Z0-9_]{1,63}$), so the bare, token-shaped canary is replaced too. A-103: a kept
 // breadcrumb has exactly category, timestamp, type, level and data.{url, method, status_code}.
+// A-110: frames are re-checked (function and reduced filename patterns). A-112: tags.route loses
+// its query, and context values failing F-30's rules (user.id holding an email) are dropped.
 import { CANARIES, scanForCanaries } from "@budmon/test-support";
 import { describe, expect, it } from "vitest";
 import { scrubBreadcrumb, scrubSentryEvent } from "../../../src/platform/observability/sentry.js";
@@ -23,7 +25,12 @@ function rawEvent(value: string = CANARIES.message): Record<string, unknown> {
     request: { url: `https://x.io/a?token=${CANARIES.token}`, data: CANARIES.payee },
     extra: { payee: CANARIES.payee },
     user: { id: "u1", email: CANARIES.email, ip_address: "10.1.2.3" },
-    tags: { route: "/v1/entries/{id}", job: "fx.fetch", foo: CANARIES.payee },
+    // A-112: the route tag loses its query.
+    tags: {
+      route: `/v1/entries/{id}?token=${CANARIES.token}`,
+      job: "fx.fetch",
+      foo: CANARIES.payee,
+    },
     exception: {
       values: [
         {
@@ -33,7 +40,7 @@ function rawEvent(value: string = CANARIES.message): Record<string, unknown> {
           stacktrace: {
             frames: [
               {
-                filename: "/app/dist/main/api.js",
+                filename: "node_modules/fastify/lib/route.js",
                 function: "handler",
                 lineno: 10,
                 colno: 5,
@@ -41,6 +48,22 @@ function rawEvent(value: string = CANARIES.message): Record<string, unknown> {
                 vars: { password: CANARIES.token },
                 context_line: `const x = "${CANARIES.payee}"`,
                 pre_context: [CANARIES.email],
+              },
+              // A-110: a function name carrying a canary is dropped with its frame.
+              {
+                filename: "node_modules/fastify/lib/route.js",
+                function: `x ${CANARIES.payee} y`,
+                lineno: 11,
+                colno: 1,
+                in_app: true,
+              },
+              // A-110: an absolute path outside the repository becomes <unknown>.
+              {
+                filename: "/home/u/secret/x.js",
+                function: "inner",
+                lineno: 3,
+                colno: 4,
+                in_app: true,
               },
             ],
           },
@@ -101,10 +124,17 @@ describe("TP-3.5: scrubSentryEvent", () => {
             stacktrace: {
               frames: [
                 {
-                  filename: "/app/dist/main/api.js",
+                  filename: "node_modules/fastify/lib/route.js",
                   function: "handler",
                   lineno: 10,
                   colno: 5,
+                  in_app: true,
+                },
+                {
+                  filename: "<unknown>",
+                  function: "inner",
+                  lineno: 3,
+                  colno: 4,
                   in_app: true,
                 },
               ],
@@ -130,6 +160,15 @@ describe("TP-3.5: scrubSentryEvent", () => {
     });
   });
 
+  it("TP-3.5: a user.id holding an email is dropped (A-112)", () => {
+    const event = { ...rawEvent(), user: { id: CANARIES.email } };
+
+    const scrubbed = scrubSentryEvent(event) ?? {};
+
+    expect((scrubbed["user"] as Record<string, unknown> | undefined)?.["id"]).toBeUndefined();
+    noCanary(scrubbed);
+  });
+
   it("TP-3.5: no canary survives", () => {
     noCanary(scrubSentryEvent(rawEvent()));
   });
@@ -144,8 +183,8 @@ describe("TP-3.5: scrubSentryEvent", () => {
   });
 });
 
-describe("TP-3.19x: scrubSentryEvent and scrubBreadcrumb, further cases (F-35)", () => {
-  it("TP-3.19x: a real message holding the canary is replaced by the type", () => {
+describe("TP-3.24x: scrubSentryEvent and scrubBreadcrumb, further cases (F-35)", () => {
+  it("TP-3.24x: a real message holding the canary is replaced by the type", () => {
     const scrubbed = scrubSentryEvent(rawEvent(MESSAGE_VALUE)) as {
       exception: { values: { type: unknown; value: unknown }[] };
     };
@@ -158,7 +197,7 @@ describe("TP-3.19x: scrubSentryEvent and scrubBreadcrumb, further cases (F-35)",
   });
 
   it.each([["fx.fetch"], ["not_found"], ["CONNECTION-RESET"], ["A"], [`A${"B".repeat(64)}`]])(
-    "TP-3.19x: %j, not in the error-key format, is replaced by the type (A-101)",
+    "TP-3.24x: %j, not in the error-key format, is replaced by the type (A-101)",
     (value) => {
       const scrubbed = scrubSentryEvent(rawEvent(value)) as {
         exception: { values: { value: unknown }[] };
@@ -169,7 +208,7 @@ describe("TP-3.19x: scrubSentryEvent and scrubBreadcrumb, further cases (F-35)",
   );
 
   it.each([["AB"], [`A${"B".repeat(63)}`], ["RATE_LIMITED"], ["E2"]])(
-    "TP-3.19x: %j, in the error-key format, is kept (A-101)",
+    "TP-3.24x: %j, in the error-key format, is kept (A-101)",
     (value) => {
       const scrubbed = scrubSentryEvent(rawEvent(value)) as {
         exception: { values: { value: unknown }[] };
@@ -179,7 +218,7 @@ describe("TP-3.19x: scrubSentryEvent and scrubBreadcrumb, further cases (F-35)",
     },
   );
 
-  it("TP-3.19x: tags keep only route, job, client_kind and error_key", () => {
+  it("TP-3.24x: tags keep only route, job, client_kind and error_key", () => {
     const event = {
       ...rawEvent(),
       tags: { route: "/a", job: "j", client_kind: "web", error_key: "NOT_FOUND", other: "x" },
@@ -194,13 +233,13 @@ describe("TP-3.19x: scrubSentryEvent and scrubBreadcrumb, further cases (F-35)",
   });
 
   it.each([["console"], ["query"], ["ui.click"], ["sentry.event"]])(
-    "TP-3.19x: a %s breadcrumb is removed",
+    "TP-3.24x: a %s breadcrumb is removed",
     (category) => {
       expect(scrubBreadcrumb({ category, message: CANARIES.message, timestamp: 1 })).toBeNull();
     },
   );
 
-  it("TP-3.19x: a navigation breadcrumb keeps its category, timestamp, type, level and the reduced URL (A-103)", () => {
+  it("TP-3.24x: a navigation breadcrumb keeps its category, timestamp, type, level and the reduced URL (A-103)", () => {
     expect(
       scrubBreadcrumb({
         category: "navigation",
@@ -222,13 +261,13 @@ describe("TP-3.19x: scrubSentryEvent and scrubBreadcrumb, further cases (F-35)",
     });
   });
 
-  it("TP-3.19x: an http breadcrumb without method or status keeps only what's present (A-103)", () => {
+  it("TP-3.24x: an http breadcrumb without method or status keeps only what's present (A-103)", () => {
     expect(
       scrubBreadcrumb({ category: "http", timestamp: 4, data: { url: "https://x.io/a?b=1" } }),
     ).toEqual({ category: "http", timestamp: 4, data: { url: "https://x.io/a" } });
   });
 
-  it("TP-3.19x: an http breadcrumb with an unparseable URL keeps no URL text", () => {
+  it("TP-3.24x: an http breadcrumb with an unparseable URL keeps no URL text", () => {
     const crumb = scrubBreadcrumb({
       category: "http",
       timestamp: 1,

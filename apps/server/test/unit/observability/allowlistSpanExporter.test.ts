@@ -1,6 +1,6 @@
-// F-40 AllowlistSpanExporter. TP-3.7, plus extra cases TP-3.21x (classification by prefix, the
-// allowlist itself, status messages, delegation). IDs ending in "x" are test-architect additions,
-// not LLD test-plan IDs.
+// F-40 AllowlistSpanExporter. TP-3.7 and TP-3.16 (links, A-114), plus extra cases TP-3.26x
+// (classification by prefix, the allowlist itself, status messages, delegation) and TP-3.33x (link
+// attributes). IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { SpanStatusCode, type Attributes } from "@opentelemetry/api";
 import {
   BasicTracerProvider,
@@ -42,6 +42,7 @@ const ALLOWLIST: ReadonlySet<string> = new Set([
 
 interface SpanSpec {
   attributes: Attributes;
+  links?: { traceId: string; spanId: string; attributes: Attributes }[];
   events?: { name: string; attributes?: Attributes }[];
   exception?: Error;
   statusMessage?: string;
@@ -53,7 +54,13 @@ function makeSpans(specs: readonly SpanSpec[]): ReadableSpan[] {
   const provider = new BasicTracerProvider({ spanProcessors: [new SimpleSpanProcessor(source)] });
   const tracer = provider.getTracer("test");
   for (const spec of specs) {
-    const span = tracer.startSpan("GET /a/{id}", { attributes: spec.attributes });
+    const span = tracer.startSpan("GET /a/{id}", {
+      attributes: spec.attributes,
+      links: (spec.links ?? []).map((l) => ({
+        context: { traceId: l.traceId, spanId: l.spanId, traceFlags: 1 },
+        attributes: l.attributes,
+      })),
+    });
     if (spec.exception !== undefined) span.recordException(spec.exception);
     for (const event of spec.events ?? []) span.addEvent(event.name, event.attributes);
     if (spec.statusMessage !== undefined) {
@@ -123,8 +130,8 @@ describe("TP-3.7: AllowlistSpanExporter", () => {
   });
 });
 
-describe("TP-3.21x: AllowlistSpanExporter, further cases (F-40)", () => {
-  it("TP-3.21x: every allowlisted attribute is kept", () => {
+describe("TP-3.26x: AllowlistSpanExporter, further cases (F-40)", () => {
+  it("TP-3.26x: every allowlisted attribute is kept", () => {
     const attributes = Object.fromEntries([...ALLOWLIST].map((key) => [key, "v"]));
     const { inner, sums } = exportThrough(makeSpans([{ attributes }]));
 
@@ -141,7 +148,7 @@ describe("TP-3.21x: AllowlistSpanExporter, further cases (F-40)", () => {
     ["a prefix entry (db.postgresql.)", "db.postgresql.plan"],
     ["a prefix entry (http.response.header.)", "http.response.header.set_cookie"],
     ["a prefix entry (exception.)", "exception.message"],
-  ])("TP-3.21x: %s (%s) is an expected drop", (_label, key) => {
+  ])("TP-3.26x: %s (%s) is an expected drop", (_label, key) => {
     const { inner, sums } = exportThrough(makeSpans([{ attributes: { [key]: "x" } }]));
 
     expect(inner.spans[0]?.attributes).toEqual({});
@@ -152,13 +159,13 @@ describe("TP-3.21x: AllowlistSpanExporter, further cases (F-40)", () => {
     ["a key only sharing a prefix without the dot", "netx"],
     ["a key extending an exact (non-dot) entry", "url.fullx"],
     ["an unknown budmon key", "budmon.payee"],
-  ])("TP-3.21x: %s (%s) is an unexpected drop", (_label, key) => {
+  ])("TP-3.26x: %s (%s) is an unexpected drop", (_label, key) => {
     const { sums } = exportThrough(makeSpans([{ attributes: { [key]: "x" } }]));
 
     expect(sums).toEqual({ expected: 0, unexpected: 1 });
   });
 
-  it("TP-3.21x: the status message is cleared, the status code kept", () => {
+  it("TP-3.26x: the status message is cleared, the status code kept", () => {
     const { inner } = exportThrough(
       makeSpans([{ attributes: {}, statusMessage: `failed for ${CANARIES.email}` }]),
     );
@@ -166,13 +173,13 @@ describe("TP-3.21x: AllowlistSpanExporter, further cases (F-40)", () => {
     expect(inner.spans[0]?.status).toEqual({ code: SpanStatusCode.ERROR, message: "" });
   });
 
-  it("TP-3.21x: the span name is left as is", () => {
+  it("TP-3.26x: the span name is left as is", () => {
     const { inner } = exportThrough(makeSpans([{ attributes: {} }]));
 
     expect(inner.spans[0]?.name).toBe("GET /a/{id}");
   });
 
-  it("TP-3.21x: drops are summed across the spans of one export", () => {
+  it("TP-3.26x: drops are summed across the spans of one export", () => {
     const spans = makeSpans([
       { attributes: { "url.full": "https://x.io/" } },
       { attributes: { "url.query": "a=1", "user.id": "u1" } },
@@ -183,7 +190,7 @@ describe("TP-3.21x: AllowlistSpanExporter, further cases (F-40)", () => {
     expect(sums).toEqual({ expected: 2, unexpected: 1 });
   });
 
-  it("TP-3.21x: the inner exporter's result reaches the callback, and shutdown is delegated", async () => {
+  it("TP-3.26x: the inner exporter's result reaches the callback, and shutdown is delegated", async () => {
     const { results, inner, exporter } = exportThrough(makeSpans([{ attributes: {} }]));
 
     await exporter.shutdown();
@@ -192,7 +199,7 @@ describe("TP-3.21x: AllowlistSpanExporter, further cases (F-40)", () => {
     expect(inner.shutdowns).toBe(1);
   });
 
-  it("TP-3.21x: EXPECTED_DROPPED_SPAN_ATTRIBUTES is F-40's list", () => {
+  it("TP-3.26x: EXPECTED_DROPPED_SPAN_ATTRIBUTES is F-40's list", () => {
     expect([...EXPECTED_DROPPED_SPAN_ATTRIBUTES].sort()).toEqual(
       [
         "url.full",
@@ -236,5 +243,44 @@ describe("TP-3.21x: AllowlistSpanExporter, further cases (F-40)", () => {
         "exception.",
       ].sort(),
     );
+  });
+});
+
+describe("TP-3.16: span links keep their context and lose their attributes (A-114)", () => {
+  const TRACE_ID = "0af7651916cd43dd8448eb211c80319c";
+  const SPAN_ID = "b7ad6b7169203331";
+
+  it('TP-3.16: the exported link keeps trace and span ids, has no attributes, onDrop("unexpected", 1)', () => {
+    const spans = makeSpans([
+      {
+        attributes: { "http.route": "/a/{id}" },
+        links: [
+          { traceId: TRACE_ID, spanId: SPAN_ID, attributes: { "user.email": CANARIES.email } },
+        ],
+      },
+    ]);
+
+    const { inner, onDrop, sums } = exportThrough(spans);
+
+    const links = inner.spans[0]?.links ?? [];
+    expect(links).toHaveLength(1);
+    expect(links[0]?.context).toMatchObject({ traceId: TRACE_ID, spanId: SPAN_ID });
+    expect(Object.keys(links[0]?.attributes ?? {})).toEqual([]);
+    expect(onDrop).toHaveBeenCalledWith("unexpected", 1);
+    expect(sums).toEqual({ expected: 0, unexpected: 1 });
+    expect(scanForCanaries([{ name: "links", text: JSON.stringify(links) }], CANARIES)).toEqual([]);
+  });
+
+  it("TP-3.33x: a link attribute in EXPECTED_DROPPED_SPAN_ATTRIBUTES is an expected drop", () => {
+    const spans = makeSpans([
+      {
+        attributes: {},
+        links: [
+          { traceId: TRACE_ID, spanId: SPAN_ID, attributes: { "url.full": "https://x.io/" } },
+        ],
+      },
+    ]);
+
+    expect(exportThrough(spans).sums).toEqual({ expected: 1, unexpected: 0 });
   });
 });

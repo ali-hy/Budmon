@@ -1,4 +1,4 @@
-// F-32 Secret. TP-3.3, plus extra cases TP-3.16x. IDs ending in "x" are test-architect additions,
+// F-32 Secret. TP-3.3, plus extra cases TP-3.21x. IDs ending in "x" are test-architect additions,
 // not LLD test-plan IDs. (Secret itself arrived early, in S-2, for the configuration.)
 import { Console } from "node:console";
 import { Writable } from "node:stream";
@@ -57,12 +57,12 @@ describe("TP-3.3: Secret", () => {
   });
 });
 
-describe("TP-3.16x: Secret, further cases (F-32)", () => {
-  it("TP-3.16x: reveal returns the value", () => {
+describe("TP-3.21x: Secret, further cases (F-32)", () => {
+  it("TP-3.21x: reveal returns the value", () => {
     expect(Secret.of(CANARIES.token).reveal()).toBe(CANARIES.token);
   });
 
-  it("TP-3.16x: the value isn't an enumerable or own string property", () => {
+  it("TP-3.21x: the value isn't an enumerable or own string property", () => {
     const s = Secret.of(CANARIES.token);
 
     expect(Object.keys(s)).toEqual([]);
@@ -70,14 +70,14 @@ describe("TP-3.16x: Secret, further cases (F-32)", () => {
     noCanary(JSON.stringify(Object.entries(s)));
   });
 
-  it("TP-3.16x: util.format and string concatenation show [redacted]", () => {
+  it("TP-3.21x: util.format and string concatenation show [redacted]", () => {
     const s = Secret.of(CANARIES.token);
 
     noCanary(format("%s|%o|%O|%j", s, s, s, s));
     expect(String(s)).toBe("[redacted]");
   });
 
-  it("TP-3.16x: a Secret holding an object never shows the object", () => {
+  it("TP-3.21x: a Secret holding an object never shows the object", () => {
     const s = Secret.of({ password: CANARIES.token, nested: { email: CANARIES.email } });
 
     noCanary(JSON.stringify({ s }));

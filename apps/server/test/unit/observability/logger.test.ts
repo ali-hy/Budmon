@@ -1,6 +1,6 @@
-// F-31 createLogger. TP-3.2, plus extra cases TP-3.15x (the line's fixed keys, levels, child
-// bindings and the error shape). IDs ending in "x" are test-architect additions, not LLD
-// test-plan IDs.
+// F-31 createLogger. TP-3.2 and TP-3.16 (fixed keys win, A-113), plus extra cases TP-3.20x (the
+// line's fixed keys, levels, child bindings and the error shape). IDs ending in "x" are
+// test-architect additions, not LLD test-plan IDs.
 import { CANARIES, scanForCanaries } from "@budmon/test-support";
 import { describe, expect, it, vi } from "vitest";
 import { createLogger } from "../../../src/platform/observability/logger.js";
@@ -65,8 +65,8 @@ describe("TP-3.2: createLogger", () => {
   });
 });
 
-describe("TP-3.15x: createLogger, further cases (F-31)", () => {
-  it("TP-3.15x: a line holds the fixed keys and the sanitised fields, and nothing else", () => {
+describe("TP-3.20x: createLogger, further cases (F-31)", () => {
+  it("TP-3.20x: a line holds the fixed keys and the sanitised fields, and nothing else", () => {
     const { capture, logger } = setup();
 
     logger.info("entry_created", { userId: "u1", count: 2 });
@@ -86,7 +86,7 @@ describe("TP-3.15x: createLogger, further cases (F-31)", () => {
     expect(line?.["time"]).toMatch(ISO_UTC);
   });
 
-  it("TP-3.15x: one JSON line per call", () => {
+  it("TP-3.20x: one JSON line per call", () => {
     const { capture, logger } = setup();
 
     logger.debug("a_event");
@@ -102,7 +102,7 @@ describe("TP-3.15x: createLogger, further cases (F-31)", () => {
     ]);
   });
 
-  it("TP-3.15x: calls below the configured level are not written", () => {
+  it("TP-3.20x: calls below the configured level are not written", () => {
     const { capture, logger } = setup("warn");
 
     logger.debug("a_event");
@@ -113,7 +113,7 @@ describe("TP-3.15x: createLogger, further cases (F-31)", () => {
     expect(capture.records().map((r) => r["event"])).toEqual(["c_event", "d_event"]);
   });
 
-  it("TP-3.15x: a child's bindings appear on its lines", () => {
+  it("TP-3.20x: a child's bindings appear on its lines", () => {
     const { capture, logger } = setup();
 
     logger.child({ requestId: "r1" }).info("child_event", { userId: "u1" });
@@ -125,7 +125,7 @@ describe("TP-3.15x: createLogger, further cases (F-31)", () => {
     });
   });
 
-  it("TP-3.15x: nothing dropped means no dropped key and no onDrop call", () => {
+  it("TP-3.20x: nothing dropped means no dropped key and no onDrop call", () => {
     const { capture, onDrop, logger } = setup();
 
     logger.info("clean_event", { userId: "u1" });
@@ -134,7 +134,7 @@ describe("TP-3.15x: createLogger, further cases (F-31)", () => {
     expect(onDrop).not.toHaveBeenCalled();
   });
 
-  it("TP-3.15x: an invalid known field value is [invalid] and counted", () => {
+  it("TP-3.20x: an invalid known field value is [invalid] and counted", () => {
     const { capture, onDrop, logger } = setup();
 
     logger.info("x_event", untyped({ count: -1 }));
@@ -143,7 +143,7 @@ describe("TP-3.15x: createLogger, further cases (F-31)", () => {
     expect(onDrop).toHaveBeenCalledWith(1);
   });
 
-  it("TP-3.15x: warn with an error writes F-33's sanitised error, with no message, stack or cause", () => {
+  it("TP-3.20x: warn with an error writes F-33's sanitised error, with no message, stack or cause", () => {
     const { capture, logger } = setup();
     const err = Object.assign(new Error(CANARIES.message, { cause: new Error(CANARIES.token) }), {
       code: "ECONNREFUSED",
@@ -159,7 +159,7 @@ describe("TP-3.15x: createLogger, further cases (F-31)", () => {
     expect(scanForCanaries([{ name: "log", text: capture.text() }], CANARIES)).toEqual([]);
   });
 
-  it("TP-3.15x: a field holding a canary under a known key with an invalid shape is not written", () => {
+  it("TP-3.20x: a field holding a canary under a known key with an invalid shape is not written", () => {
     const { capture, logger } = setup();
 
     logger.info("x_event", untyped({ userId: CANARIES.email, route: `/a?t=${CANARIES.token}` }));
@@ -168,11 +168,28 @@ describe("TP-3.15x: createLogger, further cases (F-31)", () => {
     expect(scanForCanaries([{ name: "log", text: capture.text() }], CANARIES)).toEqual([]);
   });
 
-  it("TP-3.15x: bad input never throws", () => {
+  it("TP-3.20x: bad input never throws", () => {
     const { logger } = setup();
 
     expect(() => {
       logger.error("", untyped({ x: Symbol("s"), userId: 1n }), "not an error");
     }).not.toThrow();
+  });
+});
+
+describe("TP-3.16: fixed keys win over fields (A-113)", () => {
+  it("TP-3.16: event, service and release fields are dropped, the real values written, dropped: 3", () => {
+    const { capture, onDrop, logger } = setup();
+
+    logger.info("e", { event: "x", service: "y", release: "z" });
+
+    expect(capture.records()).toHaveLength(1);
+    expect(capture.records()[0]).toMatchObject({
+      event: "e",
+      service: "api",
+      release: "v1.2.3",
+      dropped: 3,
+    });
+    expect(onDrop).toHaveBeenCalledWith(3);
   });
 });

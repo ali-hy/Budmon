@@ -1,12 +1,17 @@
-// F-33 sanitizeError and F-37 stripQuery. TP-3.4 and TP-3.9, plus extra cases TP-3.17x (status
-// sources, reasons, frame rules, properties never copied) and TP-3.18x (stripQuery).
+// F-33 sanitizeError and F-37 stripQuery. TP-3.4 and TP-3.9, plus extra cases TP-3.22x (status
+// sources, reasons, frame rules, properties never copied) and TP-3.23x (stripQuery).
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 // TP-3.4 uses F-50 BudmonError, which S-3 delivers (A-100).
 import { CANARIES, scanForCanaries } from "@budmon/test-support";
 import pg from "pg";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { BudmonError } from "../../../src/platform/errors/BudmonError.js";
 import { sanitizeError, stripQuery } from "../../../src/platform/observability/sanitize.js";
+
+/** The repository root, which A-110's reduction strips from frame filenames. */
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../..");
 
 function noCanary(value: unknown): void {
   expect(scanForCanaries([{ name: "result", text: JSON.stringify(value) }], CANARIES)).toEqual([]);
@@ -73,21 +78,21 @@ describe("TP-3.4: sanitizeError", () => {
     noCanary(result);
   });
 
-  it("TP-3.4: a stack line with canary text is dropped, the well-formed frames kept", () => {
+  it("TP-3.4: a stack line with canary text is dropped, the well-formed frames kept (A-110)", () => {
     const err = withStack(new Error(CANARIES.message), [
       `Error: ${CANARIES.message}`,
       `continued message ${CANARIES.email}`,
-      "    at handler (/app/dist/main/api.js:10:5)",
+      `    at handler (${REPO_ROOT}/apps/server/dist/main/api.js:10:5)`,
       `    at Object.<anonymous> (/app/x.js:1:2) ${CANARIES.payee} (extra)`,
       `    at ${CANARIES.token} (${CANARIES.email} (y):3:4)`,
-      "    at node:internal/process/task_queues:105:5",
+      `    at Route.run (${REPO_ROOT}/node_modules/fastify/lib/route.js:7:9)`,
     ]);
 
     const result = sanitizeError(err);
 
     expect(result.frames).toEqual([
-      "at handler (/app/dist/main/api.js:10:5)",
-      "at node:internal/process/task_queues:105:5",
+      "at handler (apps/server/dist/main/api.js:10:5)",
+      "at Route.run (node_modules/fastify/lib/route.js:7:9)",
     ]);
     noCanary(result);
   });
@@ -135,12 +140,12 @@ describe("TP-3.4: sanitizeError", () => {
   });
 });
 
-describe("TP-3.17x: sanitizeError, further cases (F-33)", () => {
+describe("TP-3.22x: sanitizeError, further cases (F-33)", () => {
   it.each([
     ["err.status", { status: 503 }, 503],
     ["err.response.status", { response: { status: 429 } }, 429],
     ["err.statusCode", { statusCode: 404 }, 404],
-  ])("TP-3.17x: status comes from %s", (_label, props, status) => {
+  ])("TP-3.22x: status comes from %s", (_label, props, status) => {
     expect(sanitizeError(Object.assign(new Error("m"), props)).status).toBe(status);
   });
 
@@ -149,17 +154,17 @@ describe("TP-3.17x: sanitizeError, further cases (F-33)", () => {
     ["600", 600],
     ["a fraction", 404.5],
     ["a string", "404"],
-  ])("TP-3.17x: a status of %s is left out", (_label, status) => {
+  ])("TP-3.22x: a status of %s is left out", (_label, status) => {
     expect(sanitizeError(Object.assign(new Error("m"), { status }))).not.toHaveProperty("status");
   });
 
-  it("TP-3.17x: the reason falls back to response.data.error.status", () => {
+  it("TP-3.22x: the reason falls back to response.data.error.status", () => {
     const err = { response: { status: 403, data: { error: { status: "PERMISSION_DENIED" } } } };
 
     expect(sanitizeError(err)).toMatchObject({ status: 403, reason: "PERMISSION_DENIED" });
   });
 
-  it("TP-3.17x: a reason that fails the token rule falls back, then is left out", () => {
+  it("TP-3.22x: a reason that fails the token rule falls back, then is left out", () => {
     const fallback = {
       response: { data: { error: { errors: [{ reason: "has space" }], status: "UNAVAILABLE" } } },
     };
@@ -171,43 +176,33 @@ describe("TP-3.17x: sanitizeError, further cases (F-33)", () => {
     expect(sanitizeError(neither)).not.toHaveProperty("reason");
   });
 
-  it("TP-3.17x: with frame-shaped message lines, the real frames are still kept", () => {
-    const err = new Error(`boom\n    at ${CANARIES.payee} (/app/x.js:1:2)`);
-
-    const frames = sanitizeError(err).frames;
-
-    expect(frames.length).toBeGreaterThan(0);
-    expect(frames.some((frame) => frame.includes("sanitize.test.ts"))).toBe(true);
-    noCanary(frames);
-  });
-
-  it("TP-3.17x: at most 30 frames", () => {
+  it("TP-3.22x: at most 30 frames", () => {
     const frames = Array.from(
       { length: 40 },
-      (_v, i) => `    at f${String(i)} (/app/a.js:${String(i + 1)}:1)`,
+      (_v, i) => `    at f${String(i)} (${REPO_ROOT}/apps/server/a.js:${String(i + 1)}:1)`,
     );
 
     const result = sanitizeError(withStack(new Error("m"), ["Error: m", ...frames]));
 
     expect(result.frames).toHaveLength(30);
-    expect(result.frames[0]).toBe("at f0 (/app/a.js:1:1)");
+    expect(result.frames[0]).toBe("at f0 (apps/server/a.js:1:1)");
   });
 
-  it("TP-3.17x: a frame without a location is kept when it matches the rule", () => {
+  it("TP-3.22x: a line without a file location fails V8's frame grammar and is dropped (A-110)", () => {
     const result = sanitizeError(
-      withStack(new Error("m"), ["Error: m", "    at async Promise.all"]),
+      withStack(new Error("m"), ["Error: m", "    at async Promise.all (index 0)"]),
     );
 
-    expect(result.frames).toEqual(["at async Promise.all"]);
+    expect(result.frames).toEqual([]);
   });
 
-  it("TP-3.17x: a code that is neither a SQLSTATE nor a system code is left out", () => {
+  it("TP-3.22x: a code that is neither a SQLSTATE nor a system code is left out", () => {
     for (const code of ["23505X", "econnrefused", "has space", CANARIES.token]) {
       expect(sanitizeError(Object.assign(new Error("m"), { code }))).not.toHaveProperty("code");
     }
   });
 
-  it("TP-3.17x: message, detail, where, parameters, config, cause and response.data never reach the result", () => {
+  it("TP-3.22x: message, detail, where, parameters, config, cause and response.data never reach the result", () => {
     const err = Object.assign(new Error(CANARIES.message, { cause: new Error(CANARIES.token) }), {
       detail: CANARIES.payee,
       where: CANARIES.email,
@@ -223,14 +218,14 @@ describe("TP-3.17x: sanitizeError, further cases (F-33)", () => {
     noCanary(result);
   });
 
-  it("TP-3.17x: a BudmonError's message isn't copied", () => {
+  it("TP-3.22x: a BudmonError's message isn't copied", () => {
     const result = sanitizeError(new BudmonError("CONFLICT", 409, CANARIES.message));
 
     expect(result).toMatchObject({ class: "BudmonError", key: "CONFLICT" });
     noCanary(result);
   });
 
-  it.each([[null], [undefined], [42], [{}]])("TP-3.17x: %o gives class NonError", (value) => {
+  it.each([[null], [undefined], [42], [{}]])("TP-3.22x: %o gives class NonError", (value) => {
     expect(sanitizeError(value).class).toBe("NonError");
   });
 });
@@ -245,18 +240,18 @@ describe("TP-3.9: stripQuery", () => {
   });
 });
 
-describe("TP-3.18x: stripQuery, further cases (F-37)", () => {
+describe("TP-3.23x: stripQuery, further cases (F-37)", () => {
   it.each([
     ["a port", "http://localhost:8080/v1/x?token=abc", "http://localhost:8080/v1/x"],
     ["user info", `https://u:${CANARIES.token}@x.io/a?b=1`, "https://x.io/a"],
     ["a fragment only", "https://x.io/a#frag", "https://x.io/a"],
     ["no query", "https://x.io/a/b", "https://x.io/a/b"],
-  ])("TP-3.18x: a URL with %s", (_label, input, expected) => {
+  ])("TP-3.23x: a URL with %s", (_label, input, expected) => {
     expect(stripQuery(input)).toBe(expected);
   });
 
   it.each([[""], ["/relative/path?x=1"], ["http://"]])(
-    "TP-3.18x: %j gives [invalid-url]",
+    "TP-3.23x: %j gives [invalid-url]",
     (input) => {
       expect(stripQuery(input)).toBe("[invalid-url]");
     },

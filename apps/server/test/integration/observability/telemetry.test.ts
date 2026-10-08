@@ -1,4 +1,4 @@
-// F-36 startTelemetry with real instrumentations. TP-3.11, plus extra cases TP-3.24x.
+// F-36 startTelemetry with real instrumentations. TP-3.11, plus extra cases TP-3.29x.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 //
 // One telemetry instance per file (the SDK registers global providers): `beforeAll` starts it,
@@ -173,8 +173,8 @@ describe("TP-3.11: startTelemetry", () => {
   });
 });
 
-describe("TP-3.24x: startTelemetry, further cases (F-36, F-40)", () => {
-  it("TP-3.24x: no exported span carries the canary or a url.full attribute", () => {
+describe("TP-3.29x: startTelemetry, further cases (F-36, F-40)", () => {
+  it("TP-3.29x: no exported span carries the canary or a url.full attribute", () => {
     const text = JSON.stringify(
       telemetry.traceExporter.spans.map((s) => ({
         name: s.name,
@@ -188,7 +188,7 @@ describe("TP-3.24x: startTelemetry, further cases (F-36, F-40)", () => {
     expect(scanForCanaries([{ name: "spans", text }], CANARIES)).toEqual([]);
   });
 
-  it("TP-3.24x: the resource names the service, version and environment", () => {
+  it("TP-3.29x: the resource names the service, version and environment", () => {
     const resource = telemetry.traceExporter.spans[0]?.resource.attributes;
 
     expect(resource).toMatchObject({
@@ -199,7 +199,7 @@ describe("TP-3.24x: startTelemetry, further cases (F-36, F-40)", () => {
   });
 
   // Whether plain http and fetch produce no unexpected drops is TP-4.21's question (S-4).
-  it("TP-3.24x: the span exporter's drops reach onDrop with signal traces", () => {
+  it("TP-3.29x: the span exporter's drops reach onDrop with signal traces", () => {
     const traces = drops.filter((d) => d.signal === "traces");
 
     expect(traces.some((d) => d.kind === "expected" && d.n > 0)).toBe(true);

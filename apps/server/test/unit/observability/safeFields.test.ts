@@ -1,4 +1,4 @@
-// F-30 safe log fields. TP-3.1, plus extra cases TP-3.14x (each kind's value rule at its edges,
+// F-30 safe log fields. TP-3.1, plus extra cases TP-3.19x (each kind's value rule at its edges,
 // and the closed set). IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { describe, expect, it } from "vitest";
 import { SAFE_LOG_FIELDS, sanitizeFields } from "../../../src/platform/observability/safeFields.js";
@@ -20,8 +20,8 @@ describe("TP-3.1: sanitizeFields", () => {
   });
 });
 
-describe("TP-3.14x: the closed set (F-30)", () => {
-  it("TP-3.14x: SAFE_LOG_FIELDS is exactly F-30's table", () => {
+describe("TP-3.19x: the closed set (F-30)", () => {
+  it("TP-3.19x: SAFE_LOG_FIELDS is exactly F-30's table", () => {
     const kinds: Record<string, readonly string[]> = {
       id: ["requestId", "traceId", "spanId", "userId", "entityId", "jobId"],
       token: [
@@ -59,12 +59,12 @@ describe("TP-3.14x: the closed set (F-30)", () => {
     expect({ ...SAFE_LOG_FIELDS }).toEqual(expected);
   });
 
-  it("TP-3.14x: no fields gives no fields and nothing dropped", () => {
+  it("TP-3.19x: no fields gives no fields and nothing dropped", () => {
     expect(sanitizeFields({})).toEqual({ fields: {}, dropped: 0 });
   });
 });
 
-describe("TP-3.14x: value rules per kind, at their edges", () => {
+describe("TP-3.19x: value rules per kind, at their edges", () => {
   const valid: [string, string, unknown][] = [
     ["id, 64 characters", "requestId", "a".repeat(64)],
     ["id with . : - _", "traceId", "a.b:c-d_e"],
@@ -82,7 +82,7 @@ describe("TP-3.14x: value rules per kind, at their edges", () => {
     ["date", "rateDate", "2026-01-31"],
   ];
 
-  it.each(valid)("TP-3.14x: %s is kept", (_label, key, value) => {
+  it.each(valid)("TP-3.19x: %s is kept", (_label, key, value) => {
     expect(sanitizeFields({ [key]: value })).toEqual({ fields: { [key]: value }, dropped: 0 });
   });
 
@@ -114,14 +114,14 @@ describe("TP-3.14x: value rules per kind, at their edges", () => {
     ["null", "userId", null],
   ];
 
-  it.each(invalid)("TP-3.14x: %s is [invalid] and counted", (_label, key, value) => {
+  it.each(invalid)("TP-3.19x: %s is [invalid] and counted", (_label, key, value) => {
     expect(sanitizeFields({ [key]: value })).toEqual({
       fields: { [key]: "[invalid]" },
       dropped: 1,
     });
   });
 
-  it("TP-3.14x: inherited and prototype-like keys are unknown", () => {
+  it("TP-3.19x: inherited and prototype-like keys are unknown", () => {
     expect(
       sanitizeFields(JSON.parse('{"__proto__":"x","constructor":"y"}') as Record<string, unknown>),
     ).toEqual({
