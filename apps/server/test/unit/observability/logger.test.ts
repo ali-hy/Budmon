@@ -25,7 +25,7 @@ function setup(level: "debug" | "info" | "warn" | "error" = "debug") {
 
 /** Fields the type system would refuse, as a caller bypassing it would pass them. */
 function untyped(fields: Record<string, unknown>): SafeFields {
-  return fields as SafeFields;
+  return fields;
 }
 
 describe("TP-3.2: createLogger", () => {

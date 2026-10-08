@@ -128,7 +128,10 @@ describe("TP-3.21x: AllowlistSpanExporter, further cases (F-40)", () => {
     const attributes = Object.fromEntries([...ALLOWLIST].map((key) => [key, "v"]));
     const { inner, sums } = exportThrough(makeSpans([{ attributes }]));
 
-    expect(inner.spans[0]?.attributes).toEqual({ ...attributes, "url.path": expect.any(String) });
+    const exported = inner.spans[0]?.attributes ?? {};
+    // url.path goes through F-37's path rule, so only its presence and type are checked here.
+    expect(typeof exported["url.path"]).toBe("string");
+    expect({ ...exported, "url.path": "v" }).toEqual(attributes);
     expect(sums).toEqual({ expected: 0, unexpected: 0 });
   });
 
