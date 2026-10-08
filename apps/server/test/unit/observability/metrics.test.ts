@@ -59,6 +59,16 @@ describe("TP-3.8: createMetrics", () => {
   });
 });
 
+describe("TP-3.8: a label listed twice (A-138)", () => {
+  it('TP-3.8: labels ["method", "method"] throw', () => {
+    const { metrics } = setup();
+
+    expect(() =>
+      metrics.counter("dup_labels_total", { description: "d", labels: ["method", "method"] }),
+    ).toThrow(new Error("metric definition invalid: dup_labels_total"));
+  });
+});
+
 describe("TP-3.27x: createMetrics, further cases (F-41)", () => {
   it("TP-3.27x: METRIC_LABELS is F-41's set", () => {
     expect([...METRIC_LABELS].sort()).toEqual(

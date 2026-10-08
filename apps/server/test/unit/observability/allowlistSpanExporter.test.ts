@@ -49,12 +49,12 @@ interface SpanSpec {
 }
 
 /** Real finished spans from the SDK, collected by an in-memory exporter. */
-function makeSpans(specs: readonly SpanSpec[]): ReadableSpan[] {
+function makeSpans(specs: readonly SpanSpec[], name = "GET /a/{id}"): ReadableSpan[] {
   const source = new InMemorySpanExporter();
   const provider = new BasicTracerProvider({ spanProcessors: [new SimpleSpanProcessor(source)] });
   const tracer = provider.getTracer("test");
   for (const spec of specs) {
-    const span = tracer.startSpan("GET /a/{id}", {
+    const span = tracer.startSpan(name, {
       attributes: spec.attributes,
       links: (spec.links ?? []).map((l) => ({
         context: { traceId: l.traceId, spanId: l.spanId, traceFlags: 1 },
@@ -282,5 +282,63 @@ describe("TP-3.16: span links keep their context and lose their attributes (A-11
     ]);
 
     expect(exportThrough(spans).sums).toEqual({ expected: 1, unexpected: 0 });
+  });
+});
+
+describe("TP-3.7: query literals are masked and span names checked (A-135)", () => {
+  function exportQuery(text: string) {
+    return exportThrough(makeSpans([{ attributes: { "db.query.text": text } }]));
+  }
+
+  it("TP-3.7: quoted and numeric literals become ?, placeholders stay", () => {
+    const { inner } = exportQuery(
+      `SELECT * FROM t WHERE a = '${CANARIES.payee}' AND b = ${CANARIES.amountMinor} AND c = $1`,
+    );
+
+    expect(inner.spans[0]?.attributes["db.query.text"]).toBe(
+      "SELECT * FROM t WHERE a = ? AND b = ? AND c = $1",
+    );
+  });
+
+  it("TP-3.7: a dollar-quoted literal becomes ?", () => {
+    const { inner } = exportQuery(`$q$${CANARIES.message}$q$`);
+
+    expect(inner.spans[0]?.attributes["db.query.text"]).toBe("?");
+  });
+
+  it('TP-3.7: an unterminated quote drops the text with onDrop("unexpected", 1)', () => {
+    const { inner, onDrop, sums } = exportQuery("SELECT 'abc");
+
+    expect(inner.spans[0]?.attributes).not.toHaveProperty("db.query.text");
+    expect(onDrop).toHaveBeenCalledWith("unexpected", 1);
+    expect(sums.unexpected).toBe(1);
+  });
+
+  it("TP-3.7: span name GET /meta/client-config is kept", () => {
+    const { inner, sums } = exportThrough(
+      makeSpans([{ attributes: {} }], "GET /meta/client-config"),
+    );
+
+    expect(inner.spans[0]?.name).toBe("GET /meta/client-config");
+    expect(sums.unexpected).toBe(0);
+  });
+
+  it("TP-3.7: span name 'pay Carrefour #3' becomes span with one unexpected drop", () => {
+    const { inner, sums } = exportThrough(makeSpans([{ attributes: {} }], "pay Carrefour #3"));
+
+    expect(inner.spans[0]?.name).toBe("span");
+    expect(sums.unexpected).toBe(1);
+  });
+
+  it.each([
+    ["E'' strings with doubled quotes", "SELECT E'it''s', 'a''b' FROM t", "SELECT ?, ? FROM t"],
+    [
+      "numbers inside identifiers stay",
+      "SELECT col1, t2.x FROM t3 WHERE y = 1.5",
+      "SELECT col1, t2.x FROM t3 WHERE y = ?",
+    ],
+    ["$10 is a placeholder", "SELECT $10, 42", "SELECT $10, ?"],
+  ])("TP-3.26x: %s", (_label, text, expected) => {
+    expect(exportQuery(text).inner.spans[0]?.attributes["db.query.text"]).toBe(expected);
   });
 });

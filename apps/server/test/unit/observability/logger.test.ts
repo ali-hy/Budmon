@@ -193,3 +193,64 @@ describe("TP-3.16: fixed keys win over fields (A-113)", () => {
     expect(onDrop).toHaveBeenCalledWith(3);
   });
 });
+
+describe("TP-3.2: throwing getters and droppedKeys (A-133, A-139)", () => {
+  it("TP-3.2: a field whose getter throws is dropped and counted; the line is still written", () => {
+    const { capture, onDrop, logger } = setup();
+    const fields = { count: 2 } as Record<string, unknown>;
+    Object.defineProperty(fields, "userId", {
+      enumerable: true,
+      get: () => {
+        throw new Error(CANARIES.message);
+      },
+    });
+
+    logger.info("getter_event", fields as SafeFields);
+
+    const [line] = capture.records();
+    expect(line).toMatchObject({ event: "getter_event", count: 2, dropped: 1 });
+    expect(line).not.toHaveProperty("userId");
+    expect(onDrop).toHaveBeenCalledWith(1);
+    expect(scanForCanaries([{ name: "log", text: capture.text() }], CANARIES)).toEqual([]);
+  });
+
+  it.each([
+    ["test", ["payeeName"]],
+    ["development", ["payeeName"]],
+    ["production", undefined],
+    ["rehearsal", undefined],
+  ] as const)("TP-3.2: with appEnv %s, droppedKeys is %o", (appEnv, expected) => {
+    const capture = logCapture();
+    const logger = createLogger({
+      service: "api",
+      release: "v1.2.3",
+      level: "debug",
+      appEnv,
+      destination: capture,
+    });
+
+    logger.info("x_event", untyped({ payeeName: CANARIES.payee }));
+
+    const [line] = capture.records();
+    if (expected === undefined) expect(line).not.toHaveProperty("droppedKeys");
+    else expect(line?.["droppedKeys"]).toEqual(expected);
+    expect(capture.text()).not.toContain(CANARIES.payee);
+  });
+
+  it("TP-3.20x: droppedKeys never names a key that isn't name-shaped, and never echoes an invalid event", () => {
+    const capture = logCapture();
+    const logger = createLogger({
+      service: "api",
+      release: "v1.2.3",
+      level: "debug",
+      appEnv: "test",
+      destination: capture,
+    });
+
+    logger.info(`Bad ${CANARIES.message}`, untyped({ [`k ${CANARIES.payee}`]: 1, userId: "a b" }));
+
+    const [line] = capture.records();
+    expect(line).toMatchObject({ event: "invalid_event", dropped: 3, droppedKeys: ["userId"] });
+    expect(scanForCanaries([{ name: "log", text: capture.text() }], CANARIES)).toEqual([]);
+  });
+});

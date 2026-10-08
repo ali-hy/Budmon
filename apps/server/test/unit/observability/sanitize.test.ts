@@ -3,12 +3,19 @@
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 // TP-3.4 uses F-50 BudmonError, which S-3 delivers (A-100).
 import { CANARIES, scanForCanaries } from "@budmon/test-support";
+import { sanitizeFields } from "../../../src/platform/observability/safeFields.js";
 import pg from "pg";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { BudmonError } from "../../../src/platform/errors/BudmonError.js";
-import { sanitizeError, stripQuery } from "../../../src/platform/observability/sanitize.js";
+import { describeFailure } from "../../../src/platform/observability/describeFailure.js";
+import { createMemoryErrorReporter } from "../../../src/platform/observability/errorReporter.js";
+import {
+  buildErrorEvent,
+  sanitizeError,
+  stripQuery,
+} from "../../../src/platform/observability/sanitize.js";
 
 /** The repository root, which A-110's reduction strips from frame filenames. */
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../..");
@@ -256,4 +263,77 @@ describe("TP-3.23x: stripQuery, further cases (F-37)", () => {
       expect(stripQuery(input)).toBe("[invalid-url]");
     },
   );
+});
+
+describe("TP-3.4: throwing getters (A-132)", () => {
+  function hostileError(): Error {
+    const err = new Error("m");
+    for (const key of ["code", "stack", "constructor", "name"]) {
+      Object.defineProperty(err, key, {
+        get: () => {
+          throw new Error(CANARIES.token);
+        },
+      });
+    }
+    return err;
+  }
+
+  it("TP-3.4: sanitizeError returns class NonError, no code and frames []", () => {
+    const result = sanitizeError(hostileError());
+
+    expect(result.class).toBe("NonError");
+    expect(result).not.toHaveProperty("code");
+    expect(result.frames).toEqual([]);
+  });
+
+  it("TP-3.4: describeFailure, buildErrorEvent and report return without throwing", async () => {
+    const reporter = createMemoryErrorReporter();
+
+    expect(() => describeFailure(hostileError())).not.toThrow();
+    expect(() => buildErrorEvent(hostileError())).not.toThrow();
+    expect(() => {
+      reporter.report(hostileError(), {});
+    }).not.toThrow();
+    await expect(reporter.flush(10)).resolves.toBeUndefined();
+    noCanary([describeFailure(hostileError()), buildErrorEvent(hostileError()), reporter.events]);
+  });
+
+  it("TP-3.22x: a throwing status or response getter counts as absent", () => {
+    const err = new Error("m");
+    for (const key of ["status", "statusCode", "response"]) {
+      Object.defineProperty(err, key, {
+        get: () => {
+          throw new Error("x");
+        },
+      });
+    }
+
+    const result = sanitizeError(err);
+
+    expect(result.class).toBe("Error");
+    expect(result).not.toHaveProperty("status");
+    expect(result).not.toHaveProperty("reason");
+  });
+});
+
+describe("TP-3.9: the route rule rejects ids (A-136, F-30)", () => {
+  it.each([
+    ["/accounts/{id}", true],
+    ["/accounts/0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b", false],
+    ["/orders/123456", false],
+    ["/v1/x", true],
+  ])("TP-3.9: route %s is valid: %s", (route, valid) => {
+    const { fields } = sanitizeFields({ route });
+
+    expect(fields["route"]).toBe(valid ? route : "[invalid]");
+  });
+
+  it.each([
+    ["/orders/:id", true],
+    ["/orders/1234", true],
+    ["/orders/a12345b", false],
+    ["/accounts/0190A1B2-C3D4-7E5F-8A9B-0C1D2E3F4A5B/x", false],
+  ])("TP-3.23x: route %s is valid: %s", (route, valid) => {
+    expect(sanitizeFields({ route }).fields["route"]).toBe(valid ? route : "[invalid]");
+  });
 });

@@ -1,5 +1,5 @@
 // F-16 tableGrants and applyTableGrants. TP-2.11 (with A-130's drizzle schema grants), plus extra
-// cases TP-2.48x for §3.3's grant table.
+// cases TP-2.49x for §3.3's grant table.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { applyTableGrants, tableGrants } from "../../../src/platform/db/grants.js";
 import { SchemaStepError } from "../../../src/platform/db/schemaStep.js";
@@ -33,8 +33,8 @@ async function schemaStepError(operation: Promise<unknown>): Promise<SchemaStepE
   throw new Error("expected a SchemaStepError");
 }
 
-describe("TP-2.48x: §3.3's platform grants", () => {
-  it("TP-2.48x: tableGrants lists exactly the four platform tables with §3.3's privileges", () => {
+describe("TP-2.49x: §3.3's platform grants", () => {
+  it("TP-2.49x: tableGrants lists exactly the four platform tables with §3.3's privileges", () => {
     const normalised = Object.fromEntries(
       Object.entries(tableGrants).map(([table, g]) => [
         table,
@@ -58,7 +58,7 @@ describe("TP-2.48x: §3.3's platform grants", () => {
     });
   });
 
-  it("TP-2.48x: the template's privileges match tableGrants for both roles", async () => {
+  it("TP-2.49x: the template's privileges match tableGrants for both roles", async () => {
     const { rows } = await migrator.handle.executeSql(
       `SELECT grantee, table_name, privilege_type FROM information_schema.role_table_grants
        WHERE table_schema = 'public' AND grantee IN ('budmon_app', 'budmon_capture', 'budmon_monitor')`,

@@ -1,5 +1,5 @@
-// F-22 step 1, waitForPostgres (A-86, A-97). TP-2.39 (a), (b) and (b2), plus extra cases TP-2.79x
-// (authorisation errors) and TP-2.73x for S-2 QA's race: the image's init server answers on the socket (so `pg_isready` through
+// F-22 step 1, waitForPostgres (A-86, A-97). TP-2.39 (a), (b) and (b2), plus extra cases TP-2.80x
+// (authorisation errors) and TP-2.74x for S-2 QA's race: the image's init server answers on the socket (so `pg_isready` through
 // `docker compose exec` succeeds) while TCP still refuses or resets connections. The wait must
 // end only on a successful TCP query through `connect`.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
@@ -126,8 +126,8 @@ describe("TP-2.39: waitForPostgres", () => {
   });
 });
 
-describe("TP-2.79x: waitForPostgres, authorisation errors (A-97)", () => {
-  it("TP-2.79x: 28000 (invalid authorisation) also stops at once", async () => {
+describe("TP-2.80x: waitForPostgres, authorisation errors (A-97)", () => {
+  it("TP-2.80x: 28000 (invalid authorisation) also stops at once", async () => {
     const authError = Object.assign(new Error("role is not permitted to log in"), {
       code: "28000",
     });
@@ -139,7 +139,7 @@ describe("TP-2.79x: waitForPostgres, authorisation errors (A-97)", () => {
     expect(f.calls).toEqual(["connect"]);
   });
 
-  it("TP-2.79x: 28P01 after a refused connection stops at that call", async () => {
+  it("TP-2.80x: 28P01 after a refused connection stops at that call", async () => {
     const authError = Object.assign(new Error("password authentication failed"), { code: "28P01" });
     const f = fakes((n) => (n === 1 ? systemError("ECONNREFUSED") : authError));
 
@@ -149,7 +149,7 @@ describe("TP-2.79x: waitForPostgres, authorisation errors (A-97)", () => {
     expect(f.calls).toEqual(["connect", "sleep:500", "connect"]);
   });
 
-  it("TP-2.79x: through runCommand a 28P01 prints pnpm dev failed: Error 28P01", async () => {
+  it("TP-2.80x: through runCommand a 28P01 prints pnpm dev failed: Error 28P01", async () => {
     const f = fakes(() =>
       Object.assign(new Error("password authentication failed"), { code: "28P01" }),
     );
@@ -167,8 +167,8 @@ describe("TP-2.79x: waitForPostgres, authorisation errors (A-97)", () => {
   });
 });
 
-describe("TP-2.73x: waitForPostgres and the init-server race (A-86)", () => {
-  it("TP-2.73x: connect gets the URL it was given, the one the tools use", async () => {
+describe("TP-2.74x: waitForPostgres and the init-server race (A-86)", () => {
+  it("TP-2.74x: connect gets the URL it was given, the one the tools use", async () => {
     const f = fakes(() => undefined);
 
     await waitForPostgres(URL, f.deps);
@@ -176,7 +176,7 @@ describe("TP-2.73x: waitForPostgres and the init-server race (A-86)", () => {
     expect(f.connects.map((c) => c.url)).toEqual([URL]);
   });
 
-  it("TP-2.73x: ECONNRESET and ECONNREFUSED while the init server runs are retried until a TCP query succeeds", async () => {
+  it("TP-2.74x: ECONNRESET and ECONNREFUSED while the init server runs are retried until a TCP query succeeds", async () => {
     const failures = ["ECONNREFUSED", "ECONNRESET", "ECONNRESET", "ECONNREFUSED"];
     const f = fakes((n) => {
       const code = failures[n - 1];
@@ -189,7 +189,7 @@ describe("TP-2.73x: waitForPostgres and the init-server race (A-86)", () => {
     expect(f.sleeps).toEqual([500, 500, 500, 500]);
   });
 
-  it("TP-2.73x: it doesn't resolve before connect has succeeded", async () => {
+  it("TP-2.74x: it doesn't resolve before connect has succeeded", async () => {
     let succeeded = false;
     const f = fakes((n) => (n < 3 ? systemError("ECONNRESET") : undefined));
     const connect = f.deps.connect.bind(f.deps);
@@ -203,7 +203,7 @@ describe("TP-2.73x: waitForPostgres and the init-server race (A-86)", () => {
     expect(succeeded).toBe(true);
   });
 
-  it("TP-2.73x: a first-try success neither sleeps nor connects again", async () => {
+  it("TP-2.74x: a first-try success neither sleeps nor connects again", async () => {
     const f = fakes(() => undefined);
 
     await waitForPostgres(URL, f.deps);
@@ -211,7 +211,7 @@ describe("TP-2.73x: waitForPostgres and the init-server race (A-86)", () => {
     expect(f.calls).toEqual(["connect"]);
   });
 
-  it("TP-2.73x: opts.intervalMs and opts.timeoutMs replace 500 ms and 60 s", async () => {
+  it("TP-2.74x: opts.intervalMs and opts.timeoutMs replace 500 ms and 60 s", async () => {
     const f = fakes(() => systemError("ECONNREFUSED"));
 
     const error = await rejection(

@@ -150,17 +150,15 @@ describe("TP-3.5: scrubSentryEvent", () => {
       tags: { route: "/v1/entries/{id}", job: "fx.fetch" },
       user: { id: "0190a0b0-1c2d-7e3f-8a4b-5c6d7e8f9a0b" },
       contexts: { trace: { trace_id: "t".repeat(32), span_id: "s".repeat(16) } },
-      breadcrumbs: {
-        values: [
-          {
-            category: "http",
-            type: "http",
-            level: "info",
-            timestamp: 2,
-            data: { url: "https://api.example.com/v1/x", method: "GET", status_code: 200 },
-          },
-        ],
-      },
+      breadcrumbs: [
+        {
+          category: "http",
+          type: "http",
+          level: "info",
+          timestamp: 2,
+          data: { url: "https://api.example.com/v1/x", method: "GET", status_code: 200 },
+        },
+      ],
     });
   });
 
@@ -297,4 +295,69 @@ describe("TP-3.24x: scrubSentryEvent and scrubBreadcrumb, further cases (F-35)",
 
     noCanary(crumb);
   });
+});
+
+describe("TP-3.5: Sentry 11 breadcrumbs as an array (A-134)", () => {
+  it("TP-3.5: the http breadcrumb is kept in an array; the console one is gone", () => {
+    const raw = rawEvent();
+    const values = (raw["breadcrumbs"] as { values: unknown[] }).values;
+    const event = { ...raw, breadcrumbs: values };
+
+    const scrubbed = scrubSentryEvent(event) ?? {};
+
+    expect(scrubbed["breadcrumbs"]).toEqual([
+      {
+        category: "http",
+        type: "http",
+        level: "info",
+        timestamp: 2,
+        data: { url: "https://api.example.com/v1/x", method: "GET", status_code: 200 },
+      },
+    ]);
+    noCanary(scrubbed);
+  });
+
+  it("TP-3.24x: breadcrumbs given as { values } still come out as an array (A-134)", () => {
+    const scrubbed = scrubSentryEvent(rawEvent()) ?? {};
+
+    expect(Array.isArray(scrubbed["breadcrumbs"])).toBe(true);
+  });
+});
+
+describe("TP-3.5: error_code and http_status tags (A-137)", () => {
+  it("TP-3.5: error_code 23505 and http_status 503 are kept", () => {
+    const event = { ...rawEvent(), tags: { route: "/a", error_code: "23505", http_status: 503 } };
+
+    const tags = (scrubSentryEvent(event) ?? {})["tags"] as Record<string, unknown>;
+
+    expect(tags["error_code"]).toBe("23505");
+    expect(String(tags["http_status"])).toBe("503");
+  });
+
+  it("TP-3.5: error_code 'bad code' is dropped", () => {
+    const event = { ...rawEvent(), tags: { route: "/a", error_code: "bad code" } };
+
+    const tags = (scrubSentryEvent(event) ?? {})["tags"] as Record<string, unknown>;
+
+    expect(tags).not.toHaveProperty("error_code");
+  });
+
+  it.each([["ECONNREFUSED"], ["57P01"]])("TP-3.24x: error_code %s is kept", (code) => {
+    const tags = (scrubSentryEvent({ ...rawEvent(), tags: { error_code: code } }) ?? {})[
+      "tags"
+    ] as Record<string, unknown>;
+
+    expect(tags["error_code"]).toBe(code);
+  });
+
+  it.each([[99], [600], ["abc"], [CANARIES.amountMinor]])(
+    "TP-3.24x: http_status %o is dropped",
+    (status) => {
+      const tags = (scrubSentryEvent({ ...rawEvent(), tags: { http_status: status } }) ?? {})[
+        "tags"
+      ] as Record<string, unknown> | undefined;
+
+      expect(tags ?? {}).not.toHaveProperty("http_status");
+    },
+  );
 });

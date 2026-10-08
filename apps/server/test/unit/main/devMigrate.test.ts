@@ -1,5 +1,5 @@
 // devMigrate.ts devMigrateEnv (A-83, A-90) and buildDevMigrateEnv (A-94). TP-2.38 and TP-2.41, plus
-// extra cases TP-2.72x and TP-2.78x.
+// extra cases TP-2.73x and TP-2.79x.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 // Importing main/devMigrate.ts must not run a migration (an entry guard, as in F-94).
 import { describe, expect, it } from "vitest";
@@ -44,8 +44,8 @@ describe("TP-2.38: devMigrateEnv", () => {
   });
 });
 
-describe("TP-2.72x: devMigrateEnv, further cases (A-83)", () => {
-  it("TP-2.72x: every other variable passes through unchanged", () => {
+describe("TP-2.73x: devMigrateEnv, further cases (A-83)", () => {
+  it("TP-2.73x: every other variable passes through unchanged", () => {
     const input = { DB_HOST: "localhost", DB_NAME: "budmon", APP_ENV: "development" };
 
     expect(devMigrateEnv(input)).toEqual({
@@ -106,7 +106,7 @@ describe("TP-2.41: buildDevMigrateEnv", () => {
     expect(env["DB_PASSWORD_FILE"]).toBe(PASSWORD_FILE);
   });
 
-  it("TP-2.78x: every other .env and shell variable reaches the result, the shell winning", () => {
+  it("TP-2.79x: every other .env and shell variable reaches the result, the shell winning", () => {
     const env = buildDevMigrateEnv(
       { DB_NAME: "shell_db", APP_ENV: "test" },
       { DB_NAME: "dot_db", DB_PORT: "5433", DB_USER: "budmon_app" },

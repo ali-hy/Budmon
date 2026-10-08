@@ -1,4 +1,4 @@
-// F-15 applyRolesAndPrivileges. TP-2.10 (fresh container), plus extra cases TP-2.51x.
+// F-15 applyRolesAndPrivileges. TP-2.10 (fresh container), plus extra cases TP-2.52x.
 // The span check of TP-2.10 (a) is TP-3.12 in S-3 (A-51).
 import { CANARIES } from "@budmon/test-support";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -187,8 +187,8 @@ describe("TP-2.10: roles and passwords", () => {
   });
 });
 
-describe("TP-2.51x: the rest of F-15", () => {
-  it("TP-2.51x: budmon_queue is granted to budmon_migrator WITH SET TRUE, INHERIT FALSE", async () => {
+describe("TP-2.52x: the rest of F-15", () => {
+  it("TP-2.52x: budmon_queue is granted to budmon_migrator WITH SET TRUE, INHERIT FALSE", async () => {
     const rows = await superuserQuery(
       `SELECT m.set_option, m.inherit_option FROM pg_auth_members m
        JOIN pg_roles r ON r.oid = m.roleid JOIN pg_roles u ON u.oid = m.member
@@ -200,7 +200,7 @@ describe("TP-2.51x: the rest of F-15", () => {
     expect(rows.filter((r) => r["inherit_option"] === true)).toEqual([]);
   });
 
-  it("TP-2.51x: budmon_monitor is a member of pg_monitor WITH INHERIT TRUE", async () => {
+  it("TP-2.52x: budmon_monitor is a member of pg_monitor WITH INHERIT TRUE", async () => {
     const rows = await superuserQuery(
       `SELECT m.inherit_option FROM pg_auth_members m
        JOIN pg_roles r ON r.oid = m.roleid JOIN pg_roles u ON u.oid = m.member
@@ -210,7 +210,7 @@ describe("TP-2.51x: the rest of F-15", () => {
     expect(rows).toEqual([{ inherit_option: true }]);
   });
 
-  it("TP-2.51x: every login role has CONNECT; app, capture and monitor have USAGE on public", async () => {
+  it("TP-2.52x: every login role has CONNECT; app, capture and monitor have USAGE on public", async () => {
     const rows = await superuserQuery(
       `SELECT r AS role, has_database_privilege(r, $1, 'CONNECT') AS connect, has_schema_privilege(r, 'public', 'USAGE') AS usage
        FROM unnest($2::text[]) AS r ORDER BY r`,
@@ -225,7 +225,7 @@ describe("TP-2.51x: the rest of F-15", () => {
     ]);
   });
 
-  it("TP-2.51x: a second identical run succeeds (idempotent)", async () => {
+  it("TP-2.52x: a second identical run succeeds (idempotent)", async () => {
     await expect(
       applyRolesAndPrivileges(
         migrator.handle,

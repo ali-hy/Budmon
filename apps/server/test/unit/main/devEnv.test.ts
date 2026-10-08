@@ -1,4 +1,4 @@
-// F-22 step 0, ensureDevEnv (A-63). TP-2.31, plus extra cases TP-2.60x.
+// F-22 step 0, ensureDevEnv (A-63). TP-2.31, plus extra cases TP-2.61x.
 // Importing main/dev.ts must not start the development stack (an entry guard, as in F-6/F-94).
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -74,7 +74,7 @@ describe("TP-2.31: ensureDevEnv", () => {
     expect(env["DEV_SUPERUSER_URL"]).toBe(SUPERUSER_URL);
   });
 
-  it("TP-2.60x: shell variables that aren't in .env are kept in the result", () => {
+  it("TP-2.61x: shell variables that aren't in .env are kept in the result", () => {
     const fs = fakeFs({ [EXAMPLE]: EXAMPLE_TEXT });
 
     const env = ensureDevEnv(ROOT, { PATH: "/usr/bin" }, fs.deps);
@@ -82,7 +82,7 @@ describe("TP-2.31: ensureDevEnv", () => {
     expect(env["PATH"]).toBe("/usr/bin");
   });
 
-  it("TP-2.60x: .env is parsed with parseEnv rules (comments, quotes, blank lines)", () => {
+  it("TP-2.61x: .env is parsed with parseEnv rules (comments, quotes, blank lines)", () => {
     const fs = fakeFs({
       [EXAMPLE]: EXAMPLE_TEXT,
       [ENV]: '# development\n\nA="quoted value"\nB=plain # trailing comment\n',

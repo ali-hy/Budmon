@@ -1,4 +1,4 @@
-// F-14 bootstrapCluster. TP-2.9 (fresh container), plus extra cases TP-2.50x for the rest of
+// F-14 bootstrapCluster. TP-2.9 (fresh container), plus extra cases TP-2.51x for the rest of
 // F-14's statements.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { bootstrapCluster } from "../../../src/platform/db/clusterBootstrap.js";
@@ -63,8 +63,8 @@ describe("TP-2.9: bootstrapCluster run twice on a fresh container", () => {
   });
 });
 
-describe("TP-2.50x: the rest of F-14", () => {
-  it("TP-2.50x: budmon_migrator is LOGIN CREATEROLE NOINHERIT and not a superuser", async () => {
+describe("TP-2.51x: the rest of F-14", () => {
+  it("TP-2.51x: budmon_migrator is LOGIN CREATEROLE NOINHERIT and not a superuser", async () => {
     const rows = await superuserQuery(
       "SELECT rolcanlogin, rolcreaterole, rolinherit, rolsuper, rolcreatedb FROM pg_roles WHERE rolname = 'budmon_migrator'",
     );
@@ -80,13 +80,13 @@ describe("TP-2.50x: the rest of F-14", () => {
     ]);
   });
 
-  it("TP-2.50x: budmon_migrator logs in with the given password", async () => {
+  it("TP-2.51x: budmon_migrator logs in with the given password", async () => {
     const url = connectionString(pg, "budmon_migrator", MIGRATOR_PASSWORD, DATABASE);
 
     expect(await query(url, "SELECT current_user AS u")).toEqual([{ u: "budmon_migrator" }]);
   });
 
-  it("TP-2.50x: budmon_migrator owns schema public", async () => {
+  it("TP-2.51x: budmon_migrator owns schema public", async () => {
     expect(
       await superuserQuery(
         "SELECT pg_get_userbyid(nspowner) AS owner FROM pg_namespace WHERE nspname = 'public'",
@@ -94,7 +94,7 @@ describe("TP-2.50x: the rest of F-14", () => {
     ).toEqual([{ owner: "budmon_migrator" }]);
   });
 
-  it("TP-2.50x: PUBLIC has no privilege on the database", async () => {
+  it("TP-2.51x: PUBLIC has no privilege on the database", async () => {
     const rows = await superuserQuery(
       `SELECT count(*)::int AS n FROM pg_database d, aclexplode(coalesce(d.datacl, acldefault('d', d.datdba))) a
        WHERE d.datname = '${DATABASE}' AND a.grantee = 0`,
@@ -103,7 +103,7 @@ describe("TP-2.50x: the rest of F-14", () => {
     expect(rows).toEqual([{ n: 0 }]);
   });
 
-  it("TP-2.50x: amcheck is installed and budmon_migrator can execute bt_index_check", async () => {
+  it("TP-2.51x: amcheck is installed and budmon_migrator can execute bt_index_check", async () => {
     expect(
       await superuserQuery(
         "SELECT has_function_privilege('budmon_migrator', 'bt_index_check(regclass, boolean)', 'EXECUTE') AS can",
@@ -111,7 +111,7 @@ describe("TP-2.50x: the rest of F-14", () => {
     ).toEqual([{ can: true }]);
   });
 
-  it("TP-2.50x: pg_read_all_data is granted WITH INHERIT TRUE; pg_monitor WITH ADMIN, without INHERIT or SET", async () => {
+  it("TP-2.51x: pg_read_all_data is granted WITH INHERIT TRUE; pg_monitor WITH ADMIN, without INHERIT or SET", async () => {
     const rows = await superuserQuery(
       `SELECT r.rolname AS role, m.admin_option, m.inherit_option, m.set_option
        FROM pg_auth_members m JOIN pg_roles r ON r.oid = m.roleid JOIN pg_roles u ON u.oid = m.member

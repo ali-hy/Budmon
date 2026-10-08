@@ -1,5 +1,5 @@
 // F-10 / F-11 loadConfig. TP-2.1 to TP-2.5, TP-2.21 to TP-2.23, TP-2.30 (config part), TP-2.33,
-// TP-2.35, plus extra cases TP-2.42x, TP-2.63x and TP-2.70x.
+// TP-2.35, TP-2.42, plus extra cases TP-2.43x, TP-2.64x and TP-2.71x.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { describe, expect, it } from "vitest";
 import { ConfigError, loadConfig } from "../../../src/platform/config/loadConfig.js";
@@ -126,14 +126,14 @@ describe("TP-2.1: a valid development configuration per process kind", () => {
     expect(load(devMigrate()).migrate?.previousPassword).toBeUndefined();
   });
 
-  it("TP-2.42x: a *_FILE value has one trailing newline trimmed, no more", () => {
+  it("TP-2.43x: a *_FILE value has one trailing newline trimmed, no more", () => {
     const f = devApi();
     withFile(f, "DB_PASSWORD_FILE", "pw\n\n");
 
     expect(load(f).db.password.reveal()).toBe("pw\n");
   });
 
-  it("TP-2.42x: a Config doesn't reveal secrets when serialised", () => {
+  it("TP-2.43x: a Config doesn't reveal secrets when serialised", () => {
     const text = JSON.stringify(load(devApi()));
 
     expect(text).not.toContain("db-password");
@@ -156,7 +156,7 @@ describe("TP-2.2: missing and invalid variables", () => {
     expect(JSON.stringify(error.problems)).not.toContain("S3NT1NEL");
   });
 
-  it("TP-2.42x: one problem per failing variable", () => {
+  it("TP-2.43x: one problem per failing variable", () => {
     const f = devApi();
     delete f.env["DB_HOST"];
     delete f.env["DB_NAME"];
@@ -168,7 +168,7 @@ describe("TP-2.2: missing and invalid variables", () => {
   });
 
   it.each([["__FILL_ME__\n"], ["__FILL_ME__"]])(
-    'TP-2.42x: a file holding the placeholder %j is "placeholder not filled"',
+    'TP-2.43x: a file holding the placeholder %j is "placeholder not filled"',
     (content) => {
       const f = devApi();
       withFile(f, "CURSOR_KEY_FILE", content);
@@ -180,7 +180,7 @@ describe("TP-2.2: missing and invalid variables", () => {
     },
   );
 
-  it('TP-2.42x: a plain variable set to __FILL_ME__ is "placeholder not filled"', () => {
+  it('TP-2.43x: a plain variable set to __FILL_ME__ is "placeholder not filled"', () => {
     const f = devApi();
     f.env["DB_HOST"] = "__FILL_ME__";
 
@@ -191,7 +191,7 @@ describe("TP-2.2: missing and invalid variables", () => {
 describe("TP-2.3: production-only rules, each separately", () => {
   const RULES = ["not allowed in production", "required"];
 
-  it("TP-2.42x: the production fixtures are valid as they are", () => {
+  it("TP-2.43x: the production fixtures are valid as they are", () => {
     for (const f of [prodApi(), prodWorkerGeneral(), prodWorkerCapture(), prodMigrate()]) {
       expect(problemsOf(f)).toEqual([]);
     }
@@ -304,7 +304,7 @@ describe("TP-2.21: GOOGLE_OAUTH_REDIRECT_ORIGIN (production)", () => {
     expect(load(f).api?.googleOAuthRedirectOrigin.origin).toBe("https://a.ts.net");
   });
 
-  it("TP-2.42x: a capture worker's origin is in capture.oauth.redirectOrigin", () => {
+  it("TP-2.43x: a capture worker's origin is in capture.oauth.redirectOrigin", () => {
     expect(load(prodWorkerCapture()).capture?.oauth?.redirectOrigin.origin).toBe(
       "http://localhost:8080",
     );
@@ -371,7 +371,7 @@ describe("TP-2.22: SMTP_URL, SMTP_PASSWORD_FILE, EMAIL_FROM and the worker's PUB
       "smtps://smtp.example.com:2465",
       { security: "implicit_tls", host: "smtp.example.com", port: 2465 },
     ],
-  ])("TP-2.42x: SMTP_URL %s gives smtpTransport %o", (url, transport) => {
+  ])("TP-2.43x: SMTP_URL %s gives smtpTransport %o", (url, transport) => {
     const f = prodWorkerGeneral();
     f.env["SMTP_URL"] = url;
 
@@ -399,8 +399,8 @@ describe("TP-2.22: SMTP_URL, SMTP_PASSWORD_FILE, EMAIL_FROM and the worker's PUB
     expect(JSON.stringify(error.problems)).not.toContain("Pw7f3aSECRET");
   });
 
-  // TP-2.63x (code review B-5): decoding the user name must not escape as a URIError.
-  it("TP-2.63x: a malformed percent-escape in SMTP_URL's user is a ConfigError naming SMTP_URL, without the value", () => {
+  // TP-2.64x (code review B-5): decoding the user name must not escape as a URIError.
+  it("TP-2.64x: a malformed percent-escape in SMTP_URL's user is a ConfigError naming SMTP_URL, without the value", () => {
     const f = prodWorkerGeneral();
     f.env["SMTP_URL"] = "smtp://%E0%A4%A@smtp.example.com";
 
@@ -444,7 +444,7 @@ describe("TP-2.22: SMTP_URL, SMTP_PASSWORD_FILE, EMAIL_FROM and the worker's PUB
   it.each([
     ["smtp://h:1", 1],
     ["smtps://h:65535", 65535],
-  ])("TP-2.70x: SMTP_URL %s, a port at the edge of 1..65535, is accepted (A-82)", (url, port) => {
+  ])("TP-2.71x: SMTP_URL %s, a port at the edge of 1..65535, is accepted (A-82)", (url, port) => {
     const f = prodWorkerGeneral();
     f.env["SMTP_URL"] = url;
 
@@ -452,7 +452,7 @@ describe("TP-2.22: SMTP_URL, SMTP_PASSWORD_FILE, EMAIL_FROM and the worker's PUB
     expect(load(f).email?.smtpTransport.port).toBe(port);
   });
 
-  it("TP-2.70x: a path in SMTP_URL is a problem that doesn't echo it (A-82)", () => {
+  it("TP-2.71x: a path in SMTP_URL is a problem that doesn't echo it (A-82)", () => {
     const f = prodWorkerGeneral();
     f.env["SMTP_URL"] = "smtp://smtp.example.com/Zq9pathSECRET";
 
@@ -479,7 +479,7 @@ describe("TP-2.22: SMTP_URL, SMTP_PASSWORD_FILE, EMAIL_FROM and the worker's PUB
     expect(problemsOf(f)).toEqual([{ variable, rule: "required" }]);
   });
 
-  it("TP-2.42x: plain SMTP to localhost is accepted in development, without TLS", () => {
+  it("TP-2.43x: plain SMTP to localhost is accepted in development, without TLS", () => {
     const f = devWorker();
     f.env["SMTP_URL"] = "smtp://localhost:1025";
 
@@ -639,5 +639,96 @@ describe("TP-2.35: APP_ENV=test allows the local origin and no OAuth client id (
     delete f.env["GOOGLE_OAUTH_CLIENT_ID"];
 
     expect(problemsOf(f).map((p) => p.variable)).toContain("GOOGLE_OAUTH_CLIENT_ID");
+  });
+});
+
+// A-131, A-138: SENTRY_DSN's format, the OTLP endpoint and OTLP_HEADERS_FILE (api, production).
+describe("TP-2.42: SENTRY_DSN, OTEL_EXPORTER_OTLP_ENDPOINT and OTLP_HEADERS_FILE", () => {
+  it("TP-2.42: SENTRY_DSN https://0123abcd@o1.ingest.sentry.io/42 is accepted", () => {
+    const f = prodApi();
+    f.env["SENTRY_DSN"] = "https://0123abcd@o1.ingest.sentry.io/42";
+
+    expect(problemsOf(f)).toEqual([]);
+  });
+
+  it.each([
+    ["a key with a password", "https://pub:SECRETKEYabc@o1.ingest.sentry.io/1", "SECRETKEYabc"],
+    ["http with a path", "http://foo/bar", "foo/bar"],
+  ])("TP-2.42: SENTRY_DSN with %s is the problem 'invalid DSN', never echoed", (_label, dsn, secret) => {
+    const f = prodApi();
+    f.env["SENTRY_DSN"] = dsn;
+
+    const error = caughtConfigError(f);
+
+    expect(error.problems).toEqual([{ variable: "SENTRY_DSN", rule: "invalid DSN" }]);
+    expect(error.message).not.toContain(secret);
+    expect(error.message).not.toContain(dsn);
+    expect(JSON.stringify(error.problems)).not.toContain(secret);
+  });
+
+  it("TP-2.42: an OTLP endpoint with a query is a problem", () => {
+    const f = prodApi();
+    f.env["OTEL_EXPORTER_OTLP_ENDPOINT"] = "https://otlp.example/otlp?x=1";
+
+    expect(problemsOf(f).map((p) => p.variable)).toEqual(["OTEL_EXPORTER_OTLP_ENDPOINT"]);
+  });
+
+  it("TP-2.42: an http://localhost OTLP endpoint is a problem in production", () => {
+    const f = prodApi();
+    f.env["OTEL_EXPORTER_OTLP_ENDPOINT"] = "http://localhost:4318";
+
+    expect(problemsOf(f).map((p) => p.variable)).toEqual(["OTEL_EXPORTER_OTLP_ENDPOINT"]);
+  });
+
+  it("TP-2.42: an OTLP headers file is read as a Secret", () => {
+    const f = prodApi();
+    f.env["OTEL_EXPORTER_OTLP_ENDPOINT"] = "https://otlp.example/otlp";
+    withFile(f, "OTLP_HEADERS_FILE", JSON.stringify({ Authorization: "Basic x" }));
+
+    const config = load(f);
+
+    expect(config.otlpHeaders).toBeInstanceOf(Secret);
+    expect(config.otlpHeaders?.reveal()).toEqual({ Authorization: "Basic x" });
+    expect(JSON.stringify(config)).not.toContain("Basic x");
+  });
+
+  it.each([
+    ["a header name with a space", JSON.stringify({ "bad name": "x" })],
+    ["an array", "[]"],
+  ])("TP-2.42: an OTLP headers file with %s is 'invalid'", (_label, content) => {
+    const f = prodApi();
+    f.env["OTEL_EXPORTER_OTLP_ENDPOINT"] = "https://otlp.example/otlp";
+    withFile(f, "OTLP_HEADERS_FILE", content);
+
+    expect(problemsOf(f)).toEqual([{ variable: "OTLP_HEADERS_FILE", rule: "invalid" }]);
+  });
+});
+
+describe("TP-2.83x: SENTRY_DSN and the OTLP endpoint, further cases (A-131, A-138)", () => {
+  it.each([
+    ["a query", "https://0123abcd@o1.ingest.sentry.io/42?x=1"],
+    ["a fragment", "https://0123abcd@o1.ingest.sentry.io/42#f"],
+    ["a non-numeric project", "https://0123abcd@o1.ingest.sentry.io/abc"],
+    ["no key", "https://o1.ingest.sentry.io/42"],
+    ["a nested path", "https://0123abcd@o1.ingest.sentry.io/api/42"],
+  ])("TP-2.83x: SENTRY_DSN with %s is invalid", (_label, dsn) => {
+    const f = prodApi();
+    f.env["SENTRY_DSN"] = dsn;
+
+    expect(problemsOf(f)).toEqual([{ variable: "SENTRY_DSN", rule: "invalid DSN" }]);
+  });
+
+  it("TP-2.83x: a port in SENTRY_DSN is accepted", () => {
+    const f = prodApi();
+    f.env["SENTRY_DSN"] = "https://0123abcd@sentry.example:8443/7";
+
+    expect(problemsOf(f)).toEqual([]);
+  });
+
+  it("TP-2.83x: http://localhost:<port> is accepted as the OTLP endpoint in development", () => {
+    const f = devApi();
+    f.env["OTEL_EXPORTER_OTLP_ENDPOINT"] = "http://localhost:4318";
+
+    expect(problemsOf(f)).toEqual([]);
   });
 });

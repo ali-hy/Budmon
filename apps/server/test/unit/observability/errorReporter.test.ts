@@ -131,6 +131,32 @@ describe("TP-3.6: token-shaped canaries in ErrorContext are dropped, valid value
   });
 });
 
+describe("TP-3.6: error_code and http_status tags (A-137)", () => {
+  it("TP-3.6: a pg error with code 23505 is tagged error_code 23505", async () => {
+    const sentry = await server();
+    const reporter = initSentry({ ...CFG, dsn: sentry.dsn });
+
+    reporter.report(Object.assign(new Error(CANARIES.message), { code: "23505" }), {});
+    await reporter.flush(5_000);
+
+    const [event] = eventsOf(sentry.bodies);
+    expect((event?.["tags"] ?? {}) as Record<string, unknown>).toMatchObject({
+      error_code: "23505",
+    });
+  });
+
+  it("TP-3.6: an error with status 403 is tagged http_status 403", async () => {
+    const sentry = await server();
+    const reporter = initSentry({ ...CFG, dsn: sentry.dsn });
+
+    reporter.report(Object.assign(new Error(CANARIES.message), { status: 403 }), {});
+    await reporter.flush(5_000);
+
+    const [event] = eventsOf(sentry.bodies);
+    expect(String(((event?.["tags"] ?? {}) as Record<string, unknown>)["http_status"])).toBe("403");
+  });
+});
+
 describe("TP-3.25x: ErrorReporter, further cases (F-34)", () => {
   it("TP-3.25x: the event carries the context as tags route, job, error_key and user.id, never the canary", async () => {
     const sentry = await server();

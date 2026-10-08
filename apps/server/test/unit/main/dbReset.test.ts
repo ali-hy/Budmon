@@ -1,5 +1,5 @@
 // F-94 runDbResetCli (A-58). TP-2.24 (e) to (g), TP-2.29 and TP-2.16's A-93 cases, plus extra cases
-// TP-2.58x, TP-2.67x, TP-2.75x, TP-2.77x and TP-2.80x.
+// TP-2.59x, TP-2.68x, TP-2.76x, TP-2.78x and TP-2.81x.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -159,7 +159,7 @@ describe("TP-2.29: runDbResetCli arguments and environment", () => {
     },
   );
 
-  it("TP-2.67x: the --seed-only input never carries allowNonLocalHost: true, with TESTCONTAINERS=1 in env (A-79)", async () => {
+  it("TP-2.68x: the --seed-only input never carries allowNonLocalHost: true, with TESTCONTAINERS=1 in env (A-79)", async () => {
     const h = harness({ DEV_SUPERUSER_URL: SUPERUSER_URL, TESTCONTAINERS: "1" });
 
     await runDbResetCli(["--seed-only"], h.deps);
@@ -206,10 +206,10 @@ describe("TP-2.29: runDbResetCli arguments and environment", () => {
     expect(h.stderr).toEqual(["db:reset failed: Error"]);
   });
 
-  // TP-2.75x (A-81, A-91): an unexpected failure is one stderr line
+  // TP-2.76x (A-81, A-91): an unexpected failure is one stderr line
   // `<command> failed: <errorClass>[ <errorCode>]`, with no message and no stack trace.
 
-  it('TP-2.75x: a system error from the seed prints "db:seed failed: Error ECONNREFUSED" and exits 1', async () => {
+  it('TP-2.76x: a system error from the seed prints "db:seed failed: Error ECONNREFUSED" and exits 1', async () => {
     const h = harness();
     h.seed.mockRejectedValue(
       Object.assign(new Error("connect ECONNREFUSED 10.1.2.3:5432"), { code: "ECONNREFUSED" }),
@@ -219,7 +219,7 @@ describe("TP-2.29: runDbResetCli arguments and environment", () => {
     expect(h.stderr).toEqual(["db:seed failed: Error ECONNREFUSED"]);
   });
 
-  it("TP-2.58x: ROLE_SECRETS_FILE, when set, is the file read", async () => {
+  it("TP-2.59x: ROLE_SECRETS_FILE, when set, is the file read", async () => {
     const h = harness({ DEV_SUPERUSER_URL: SUPERUSER_URL, ROLE_SECRETS_FILE: "/tmp/roles.json" });
 
     await runDbResetCli([], h.deps);
@@ -241,14 +241,14 @@ describe("TP-2.29: runDbResetCli arguments and environment", () => {
   it.each([
     ["a lone --", ["--"], true],
     ["-- twice around --no-seed", ["--", "--no-seed", "--"], false],
-  ])("TP-2.80x: %s is ignored (A-95)", async (_label, argv, seed) => {
+  ])("TP-2.81x: %s is ignored (A-95)", async (_label, argv, seed) => {
     const h = harness();
 
     expect(await runDbResetCli(argv, h.deps)).toBe(0);
     expect(h.reset.mock.calls[0]?.[0]).toMatchObject({ seed });
   });
 
-  it('TP-2.80x: "--" with --seed-only seeds only (A-95)', async () => {
+  it('TP-2.81x: "--" with --seed-only seeds only (A-95)', async () => {
     const h = harness();
 
     expect(await runDbResetCli(["--", "--seed-only"], h.deps)).toBe(0);
@@ -256,7 +256,7 @@ describe("TP-2.29: runDbResetCli arguments and environment", () => {
     expect(h.reset).not.toHaveBeenCalled();
   });
 
-  it('TP-2.80x: an argument that merely starts with "--" is still unknown (A-95)', async () => {
+  it('TP-2.81x: an argument that merely starts with "--" is still unknown (A-95)', async () => {
     const h = harness();
 
     expect(await runDbResetCli(["---"], h.deps)).toBe(64);
@@ -300,7 +300,7 @@ describe("TP-2.16 (A-93): an unknown APP_ENV through runDbResetCli", () => {
     expect(seed).not.toHaveBeenCalled();
   });
 
-  it("TP-2.77x: --seed-only with APP_ENV=staging exits 2 with the db:seed form of the line", async () => {
+  it("TP-2.78x: --seed-only with APP_ENV=staging exits 2 with the db:seed form of the line", async () => {
     const h = harness({ DEV_SUPERUSER_URL: SUPERUSER_URL, APP_ENV: "staging" });
     const seed = vi.fn(() => Promise.resolve());
     const deps: Deps = {
