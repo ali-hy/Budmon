@@ -48,7 +48,8 @@ async function main(): Promise<number | null> {
   state.reporter = container.reporter;
   const app = await createApiServer(container);
   await app.listen({ port: config.api.port, host: config.api.host });
-  logger.info("api_started", { release: config.release, service: "api" });
+  // service and release are fixed keys on every line (A-113).
+  logger.info("api_started");
 
   const stop = (): void => {
     void (async () => {
