@@ -57,7 +57,7 @@ describe("TP-4.8: default deny", () => {
       const res = await injectJson(
         app,
         p.method as "GET" | "POST",
-        `/api/v1${String(p.route)}`,
+        `/api/v1${p.route}`,
         p.method === "POST" ? { name: "x" } : undefined,
         p.method === "POST" ? { "idempotency-key": "0190a0b0-1c2d-7e3f-8a4b-5c6d7e8f9a0e" } : {},
       );

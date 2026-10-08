@@ -1,10 +1,9 @@
 // F-57 health routes and checkReadiness. TP-4.13, plus extra cases TP-4.35x.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 //
-// (c) runs over HTTP with the journal injected through createApiServer's opts.journal (A-125), a
-// production configuration, and the container's database connected as budmon_migrator, which owns
-// the drizzle.__drizzle_migrations table the test creates (the template database is pushed, so it
-// has none).
+// (c) runs over HTTP with the journal injected through createApiServer's opts.journal (A-125) and
+// a production configuration. The container connects as budmon_app, like the real API (A-130);
+// schema drizzle and its table are created as Drizzle's migrator does, with F-16's grant.
 import { createServer } from "node:net";
 import type { FastifyInstance } from "fastify";
 import { afterAll, describe, expect, it } from "vitest";
@@ -12,6 +11,7 @@ import { checkReadiness } from "../../../src/platform/http/health.js";
 import { createApiServer } from "../../../src/platform/http/server.js";
 import { buildApiContainer, injectJson, type BuiltContainer } from "../../support/api.js";
 import { prodApi } from "../../support/configEnv.js";
+import { applyTableGrants } from "../../../src/platform/db/grants.js";
 import { connectDatabase } from "../../support/platform.js";
 import { TEST_ROLE_PASSWORDS } from "../../support/postgres.js";
 
@@ -83,18 +83,33 @@ describe("TP-4.13 (b): the pool points at a closed port", () => {
   }, 30_000);
 });
 
-describe("TP-4.13 (c): production with the journal one entry ahead of the database", () => {
-  it("TP-4.13 (c): /health/ready is 503 schema_behind; /health/live stays 200", async () => {
-    const built = await buildApiContainer({}, {}, prodApi, "budmon_migrator");
-    cleanups.push(() => built.close());
-    const migrator = built.container.database;
+/**
+ * A production api container connected as budmon_app, on a database with schema drizzle and its
+ * migrations table (created with Drizzle's DDL, as its migrator does in migrate mode), F-16's grants
+ * applied (A-130), and one recorded migration h0.
+ */
+async function migratedProductionContainer(): Promise<BuiltContainer> {
+  const built = await buildApiContainer({}, {}, prodApi);
+  cleanups.push(() => built.close());
+  const migrator = built.testDb.connectAs("budmon_migrator");
+  try {
     await migrator.handle.executeSql("CREATE SCHEMA IF NOT EXISTS drizzle");
     await migrator.handle.executeSql(
-      "CREATE TABLE IF NOT EXISTS drizzle.__drizzle_migrations (id serial PRIMARY KEY, hash text NOT NULL, created_at bigint)",
+      "CREATE TABLE IF NOT EXISTS drizzle.__drizzle_migrations (id SERIAL PRIMARY KEY, hash text NOT NULL, created_at bigint)",
     );
+    await applyTableGrants(migrator.handle);
     await migrator.handle.executeSql(
       "INSERT INTO drizzle.__drizzle_migrations (hash, created_at) VALUES ('h0', 1760000000000)",
     );
+  } finally {
+    await migrator.close();
+  }
+  return built;
+}
+
+describe("TP-4.13 (c): production with the journal one entry ahead of the database", () => {
+  it("TP-4.13 (c): /health/ready is 503 schema_behind; /health/live stays 200", async () => {
+    const built = await migratedProductionContainer();
     const app = await createApiServer(built.container, {
       journal: [
         { hash: "h0", when: 1760000000000 },
@@ -115,19 +130,10 @@ describe("TP-4.13 (c): production with the journal one entry ahead of the databa
   });
 
   it("TP-4.35x: the same database with the journal equal to it is ready", async () => {
-    const built = await buildApiContainer({}, {}, prodApi, "budmon_migrator");
-    cleanups.push(() => built.close());
-    const migrator = built.container.database;
-    await migrator.handle.executeSql("CREATE SCHEMA IF NOT EXISTS drizzle");
-    await migrator.handle.executeSql(
-      "CREATE TABLE IF NOT EXISTS drizzle.__drizzle_migrations (id serial PRIMARY KEY, hash text NOT NULL, created_at bigint)",
-    );
-    await migrator.handle.executeSql(
-      "INSERT INTO drizzle.__drizzle_migrations (hash, created_at) VALUES ('h0', 1760000000000)",
-    );
+    const built = await migratedProductionContainer();
 
     const result = await checkReadiness({
-      db: migrator,
+      db: built.container.database,
       appEnv: "production",
       journal: [{ hash: "h0", when: 1760000000000 }],
     });

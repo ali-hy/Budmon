@@ -109,9 +109,11 @@ export async function buildApiContainer(
   role: LoginRole = "budmon_app",
 ): Promise<BuiltContainer> {
   const testDb = await createTestDatabase(role);
+  // The container gets a pool of its own: container.close() closes it, and testDb.drop() closes
+  // testDb.database.
   const container = createApiContainer(testApiConfig(env, fixture), {
     ...observed().overrides,
-    database: testDb.database,
+    database: testDb.connectAs(role),
     ...overrides,
   });
   return {

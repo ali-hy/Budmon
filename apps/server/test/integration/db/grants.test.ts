@@ -1,5 +1,5 @@
-// F-16 tableGrants and applyTableGrants. TP-2.11, plus extra cases TP-2.48x for §3.3's grant
-// table.
+// F-16 tableGrants and applyTableGrants. TP-2.11 (with A-130's drizzle schema grants), plus extra
+// cases TP-2.48x for §3.3's grant table.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { applyTableGrants, tableGrants } from "../../../src/platform/db/grants.js";
 import { SchemaStepError } from "../../../src/platform/db/schemaStep.js";
@@ -128,5 +128,73 @@ describe("TP-2.11: table grants", () => {
       code: "credential_table_granted_to_capture",
       subject: "currencies",
     });
+  });
+});
+
+// A-130: when schema drizzle exists (Drizzle's migrator creates it in migrate mode, F-18), F-16 lets
+// budmon_app read the migrations table, and nobody else; push-mode databases have no drizzle
+// schema and F-16 must not fail on them. The schema and table are created here with the DDL
+// Drizzle's migrator uses, then F-16 runs: whether F-18 calls Drizzle's migrate for a journal with
+// no entries is raised with the planner, and doesn't change what F-16 must do.
+describe("TP-2.11: the drizzle schema (A-130)", () => {
+  let migrated: TestDatabase;
+  let migratedCapture: Database;
+  let migratedMigrator: Database;
+
+  beforeAll(async () => {
+    migrated = await createTestDatabase("budmon_app");
+    migratedCapture = migrated.connectAs("budmon_capture");
+    migratedMigrator = migrated.connectAs("budmon_migrator");
+    await migratedMigrator.handle.executeSql("CREATE SCHEMA IF NOT EXISTS drizzle");
+    await migratedMigrator.handle.executeSql(
+      "CREATE TABLE IF NOT EXISTS drizzle.__drizzle_migrations (id SERIAL PRIMARY KEY, hash text NOT NULL, created_at bigint)",
+    );
+    await applyTableGrants(migratedMigrator.handle);
+  });
+
+  afterAll(async () => {
+    await migratedCapture.close();
+    await migratedMigrator.close();
+    await migrated.drop();
+  });
+
+  it("TP-2.11: budmon_app can SELECT hash FROM drizzle.__drizzle_migrations", async () => {
+    expect(
+      await failureState(() =>
+        migrated.database.handle.executeSql("SELECT hash FROM drizzle.__drizzle_migrations"),
+      ),
+    ).toBeUndefined();
+  });
+
+  it("TP-2.11: budmon_app can't INSERT into drizzle.__drizzle_migrations (42501)", async () => {
+    expect(
+      await failureState(() =>
+        migrated.database.handle.executeSql(
+          "INSERT INTO drizzle.__drizzle_migrations (hash, created_at) VALUES ('x', 1)",
+        ),
+      ),
+    ).toBe("42501");
+  });
+
+  it("TP-2.11: budmon_capture can't SELECT from drizzle.__drizzle_migrations (42501)", async () => {
+    expect(
+      await failureState(() =>
+        migratedCapture.handle.executeSql("SELECT hash FROM drizzle.__drizzle_migrations"),
+      ),
+    ).toBe("42501");
+  });
+
+  it("TP-2.11: F-16 on a push-mode database (no schema drizzle) completes without error", async () => {
+    const pushed = await createTestDatabase("budmon_migrator");
+    try {
+      const { rows } = await pushed.database.handle.executeSql(
+        "SELECT to_regnamespace('drizzle') IS NULL AS absent",
+      );
+      expect(rows[0]?.["absent"]).toBe(true);
+
+      await expect(applyTableGrants(pushed.database.handle)).resolves.toBeUndefined();
+    } finally {
+      await pushed.drop();
+    }
   });
 });

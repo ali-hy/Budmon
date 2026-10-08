@@ -64,6 +64,10 @@ export async function createTestDatabase(role: LoginRole = "budmon_app"): Promis
     await client.query(
       `GRANT CONNECT ON DATABASE ${db} TO ${LOGIN_ROLES.map((r) => client.escapeIdentifier(r)).join(", ")}`,
     );
+    // In a deployed database budmon_migrator is the owner (F-14) and can create schemas, as
+    // Drizzle's migrator does for schema drizzle; a copy belongs to the test database creator, so
+    // the migrator gets that one privilege here.
+    await client.query(`GRANT CREATE ON DATABASE ${db} TO budmon_migrator`);
   });
 
   const endpoint = { host: info.host, port: info.port };
