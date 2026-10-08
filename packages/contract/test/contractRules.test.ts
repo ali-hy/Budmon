@@ -12,9 +12,7 @@ import { describe, expect, it } from "vitest";
 import { MoneyAmount, UuidSchema, base, createRoute, listInput, listOutput } from "../src/index.js";
 import { checkContractRules } from "../src/rules/contractRules.js";
 import { emitOpenapi } from "../scripts/emitOpenapi.js";
-import { generate } from "./fixtures/generate.js";
-
-type Json = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any -- fixture documents are read and mutated freely
+import { arr, generate, obj, type JsonObject } from "./fixtures/generate.js";
 
 const thingsContract = {
   things: {
@@ -26,15 +24,15 @@ const thingsContract = {
   },
 };
 
-async function clean(): Promise<Json> {
+async function clean(): Promise<JsonObject> {
   const doc = await generate(thingsContract);
-  doc["paths"]["/things"]["get"]["operationId"] = "things.list";
-  doc["paths"]["/things"]["post"]["operationId"] = "things.create";
+  obj(doc, "paths", "/things", "get")["operationId"] = "things.list";
+  obj(doc, "paths", "/things", "post")["operationId"] = "things.create";
   return doc;
 }
 
-function check(doc: Json) {
-  return checkContractRules(doc as unknown as OpenAPIV3_1.Document);
+function check(doc: unknown) {
+  return checkContractRules(doc as OpenAPIV3_1.Document);
 }
 
 function pointer(location: string): string {
@@ -44,10 +42,21 @@ function pointer(location: string): string {
 const GET = "/paths/~1things/get";
 const POST = "/paths/~1things/post";
 
-function listItemSchema(doc: Json): Json {
-  const schema =
-    doc["paths"]["/things"]["get"]["responses"]["200"]["content"]["application/json"]["schema"];
-  return schema["properties"]["items"]["items"];
+function listItemSchema(doc: JsonObject): JsonObject {
+  return obj(
+    doc,
+    "paths",
+    "/things",
+    "get",
+    "responses",
+    "200",
+    "content",
+    "application/json",
+    "schema",
+    "properties",
+    "items",
+    "items",
+  );
 }
 
 describe("TP-4.5: checkContractRules", () => {
@@ -57,9 +66,17 @@ describe("TP-4.5: checkContractRules", () => {
 
   it("TP-4.5: R1, an untyped request body schema", async () => {
     const doc = await clean();
-    doc["paths"]["/things"]["post"]["requestBody"]["content"]["application/json"]["schema"][
-      "properties"
-    ]["name"] = {};
+    obj(
+      doc,
+      "paths",
+      "/things",
+      "post",
+      "requestBody",
+      "content",
+      "application/json",
+      "schema",
+      "properties",
+    )["name"] = {};
 
     const violations = check(doc);
 
@@ -71,7 +88,7 @@ describe("TP-4.5: checkContractRules", () => {
 
   it("TP-4.5: R2, an int64 without maximum", async () => {
     const doc = await clean();
-    delete listItemSchema(doc)["properties"]["amount"]["maximum"];
+    delete obj(listItemSchema(doc), "properties", "amount")["maximum"];
 
     const violations = check(doc);
 
@@ -83,7 +100,7 @@ describe("TP-4.5: checkContractRules", () => {
 
   it("TP-4.5: R3, a number without x-budmon-allow-number", async () => {
     const doc = await clean();
-    listItemSchema(doc)["properties"]["ratio"] = { type: "number" };
+    obj(listItemSchema(doc), "properties")["ratio"] = { type: "number" };
 
     const violations = check(doc);
 
@@ -93,7 +110,7 @@ describe("TP-4.5: checkContractRules", () => {
 
   it("TP-4.5: R4, a free-text string query parameter on a GET", async () => {
     const doc = await clean();
-    doc["paths"]["/things"]["get"]["parameters"].push({
+    arr(doc, "paths", "/things", "get", "parameters").push({
       name: "q",
       in: "query",
       required: false,
@@ -108,9 +125,9 @@ describe("TP-4.5: checkContractRules", () => {
 
   it("TP-4.5: R5, a create without its Idempotency-Key header", async () => {
     const doc = await clean();
-    const post = doc["paths"]["/things"]["post"];
-    post["parameters"] = (post["parameters"] as Json[]).filter(
-      (p) => p["name"] !== "Idempotency-Key",
+    const post = obj(doc, "paths", "/things", "post");
+    post["parameters"] = arr(post, "parameters").filter(
+      (p) => obj(p)["name"] !== "Idempotency-Key",
     );
 
     const violations = check(doc);
@@ -121,7 +138,7 @@ describe("TP-4.5: checkContractRules", () => {
 
   it("TP-4.5: R6, a duplicate operation id", async () => {
     const doc = await clean();
-    doc["paths"]["/things"]["get"]["operationId"] = "things.create";
+    obj(doc, "paths", "/things", "get")["operationId"] = "things.create";
 
     const violations = check(doc);
 
@@ -132,14 +149,14 @@ describe("TP-4.5: checkContractRules", () => {
 
 describe("TP-4.24x: checkContractRules, further cases (F-348)", () => {
   it("TP-4.24x: the real contract's emitted document is clean", async () => {
-    const doc = JSON.parse(await emitOpenapi()) as Json;
+    const doc: unknown = JSON.parse(await emitOpenapi());
 
     expect(check(doc)).toEqual([]);
   });
 
   it("TP-4.24x: R4, a GET with a request body", async () => {
     const doc = await clean();
-    doc["paths"]["/things"]["get"]["requestBody"] = {
+    obj(doc, "paths", "/things", "get")["requestBody"] = {
       content: { "application/json": { schema: { type: "object" } } },
     };
 
@@ -148,14 +165,19 @@ describe("TP-4.24x: checkContractRules, further cases (F-348)", () => {
 
   it("TP-4.24x: R3, a number marked x-budmon-allow-number is allowed", async () => {
     const doc = await clean();
-    listItemSchema(doc)["properties"]["ratio"] = { type: "number", "x-budmon-allow-number": true };
+    obj(listItemSchema(doc), "properties")["ratio"] = {
+      type: "number",
+      "x-budmon-allow-number": true,
+    };
 
     expect(check(doc)).toEqual([]);
   });
 
   it("TP-4.24x: R5, a create whose 201 response isn't CreatedResult", async () => {
     const doc = await clean();
-    doc["paths"]["/things"]["post"]["responses"]["201"]["content"]["application/json"]["schema"] = {
+    obj(doc, "paths", "/things", "post", "responses", "201", "content", "application/json")[
+      "schema"
+    ] = {
       type: "object",
       properties: { ok: { type: "boolean" } },
     };

@@ -26,3 +26,26 @@ export function resolve(doc: Record<string, unknown>, schema: unknown): Record<s
   }
   return current;
 }
+
+export type JsonObject = Record<string, unknown>;
+
+/** Walks `path` from `value` and returns the object found there; throws if any step isn't one. */
+export function obj(value: unknown, ...path: string[]): JsonObject {
+  let current = value;
+  for (const key of path) {
+    if (typeof current !== "object" || current === null) throw new Error(`no object at ${key}`);
+    current = (current as JsonObject)[key];
+  }
+  if (typeof current !== "object" || current === null || Array.isArray(current)) {
+    throw new Error(`not an object at ${path.join("/")}`);
+  }
+  return current as JsonObject;
+}
+
+/** Walks `path` from `value` and returns the array found there; throws if it isn't one. */
+export function arr(value: unknown, ...path: string[]): unknown[] {
+  const parent = obj(value, ...path.slice(0, -1));
+  const found = parent[path.at(-1) ?? ""];
+  if (!Array.isArray(found)) throw new Error(`not an array at ${path.join("/")}`);
+  return found;
+}

@@ -20,7 +20,7 @@ import {
   listInput,
   listOutput,
 } from "../src/index.js";
-import { generate } from "./fixtures/generate.js";
+import { arr, generate, obj } from "./fixtures/generate.js";
 
 const ok = (schema: { safeParse(v: unknown): { success: boolean } }, v: unknown) =>
   schema.safeParse(v).success;
@@ -140,27 +140,24 @@ describe("TP-4.26x: F-343 and F-344 creates and lists", () => {
 
   it("TP-4.26x: a create route is POST, 201, with a required uuid Idempotency-Key header and x-budmon-kind create", async () => {
     const { createRoute } = await import("../src/index.js");
-    const doc = (await generate({ make: createRoute("/things") })) as Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any -- fixture documents are read and mutated freely
-    const post = doc["paths"]["/things"]["post"];
+    const doc = await generate({ make: createRoute("/things") });
+    const post = obj(doc, "paths", "/things", "post");
 
     expect(post["x-budmon-kind"]).toBe("create");
-    expect(Object.keys(post["responses"])).toContain("201");
-    expect(post["parameters"]).toContainEqual(
-      expect.objectContaining({
-        name: "Idempotency-Key",
-        in: "header",
-        required: true,
-        schema: expect.objectContaining({ type: "string", format: "uuid" }),
-      }),
-    );
+    expect(Object.keys(obj(post, "responses"))).toContain("201");
+    const header = arr(post, "parameters")
+      .map((p) => obj(p))
+      .find((p) => p["name"] === "Idempotency-Key");
+    expect(header).toMatchObject({ in: "header", required: true });
+    expect(obj(header, "schema")).toMatchObject({ type: "string", format: "uuid" });
   });
 });
 
 describe("TP-4.26x: F-345 and F-346 the meta contract", () => {
   it("TP-4.26x: the contract root has meta.clientConfig, GET /meta/client-config", async () => {
-    const doc = (await generate(contract)) as Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any -- fixture documents are read and mutated freely
+    const doc = await generate(contract);
 
     expect(Object.keys(contract)).toContain("meta");
-    expect(Object.keys(doc["paths"]["/meta/client-config"])).toEqual(["get"]);
+    expect(Object.keys(obj(doc, "paths", "/meta/client-config"))).toEqual(["get"]);
   });
 });
