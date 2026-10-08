@@ -23,6 +23,7 @@ const FILES: Readonly<Record<string, string>> = {
   "/c.txt": "apps/server/drizzle/0001.sql\nREADME.md\n",
   "/empty.txt": "",
   "/one.txt": "README.md\n",
+  "/keep.txt": "apps/server/drizzle/.gitkeep\n",
 };
 
 interface CliRun {
@@ -89,6 +90,14 @@ describe("TP-0.17: F-6 CLI", () => {
 
   it("TP-0.17 (o): exactly one changed file prints the singular form", () => {
     const run = runCli(["--branch", "feat/x", "--changed-files", "/one.txt"]);
+
+    expect(run.code).toBe(0);
+    expect(run.stdout).toEqual(["checkMigrationFiles: ok (1 changed file)"]);
+    expect(run.stderr).toEqual([]);
+  });
+
+  it("TP-0.17 (p): only apps/server/drizzle/.gitkeep on feat/platform exits 0 (A-92)", () => {
+    const run = runCli(["--branch", "feat/platform", "--changed-files", "/keep.txt"]);
 
     expect(run.code).toBe(0);
     expect(run.stdout).toEqual(["checkMigrationFiles: ok (1 changed file)"]);

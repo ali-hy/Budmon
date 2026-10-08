@@ -175,7 +175,7 @@ describe("TP-2.29: runDbResetCli arguments and environment", () => {
     });
   });
 
-  it("TP-2.29 (e): a ResetRefusedError exits 2", async () => {
+  it("TP-2.29 (e): a ResetRefusedError exits 2 and prints exactly its message, with no failed: line (A-91)", async () => {
     // A real ResetRefusedError, from F-20's own guard.
     const refused: unknown = await seedDevelopmentDatabase(
       { appEnv: "production", superuserUrl: SUPERUSER_URL },
@@ -189,23 +189,19 @@ describe("TP-2.29: runDbResetCli arguments and environment", () => {
     const h = harness(undefined, () => Promise.reject(refused));
 
     expect(await runDbResetCli([], h.deps)).toBe(2);
+    expect(h.stderr).toEqual([refused.message]);
+    expect(h.stderr.join("\n")).not.toContain("failed:");
   });
 
-  it('TP-2.29 (f): another error, Error("y"), exits 1', async () => {
+  it('TP-2.29 (f): another error, Error("y"), exits 1 and prints exactly "db:reset failed: Error" (A-91)', async () => {
     const h = harness(undefined, () => Promise.reject(new Error("y")));
 
     expect(await runDbResetCli([], h.deps)).toBe(1);
-  });
-
-  // TP-2.74x (A-81): a failure is one stderr line `<command> failed: <errorClass>[ <errorCode>]`,
-  // with no message and no stack trace.
-  it('TP-2.74x: Error("y") from the reset prints exactly "db:reset failed: Error"', async () => {
-    const h = harness(undefined, () => Promise.reject(new Error("y-Qm3SECRET")));
-
-    await runDbResetCli([], h.deps);
-
     expect(h.stderr).toEqual(["db:reset failed: Error"]);
   });
+
+  // TP-2.74x (A-81, A-91): an unexpected failure is one stderr line
+  // `<command> failed: <errorClass>[ <errorCode>]`, with no message and no stack trace.
 
   it('TP-2.74x: a system error from the seed prints "db:seed failed: Error ECONNREFUSED" and exits 1', async () => {
     const h = harness();

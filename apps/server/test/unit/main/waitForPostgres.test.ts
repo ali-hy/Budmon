@@ -3,8 +3,7 @@
 // `docker compose exec` succeeds) while TCP still refuses or resets connections. The wait must
 // end only on a successful TCP query through `connect`.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
-// TP-2.39 (c) (`main` with a dependency throwing ECONNRESET) isn't here: the LLD gives `main` no
-// signature or injectable dependencies, so it can't be called with a fake (reported).
+// TP-2.39 (c) tests F-26's runCommand (A-89), in unit/observability/runCommand.test.ts.
 import { describe, expect, it } from "vitest";
 import { waitForPostgres } from "../../../src/main/dev.js";
 

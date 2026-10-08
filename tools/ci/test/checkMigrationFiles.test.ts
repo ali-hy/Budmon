@@ -1,10 +1,11 @@
-// F-6 checkMigrationFiles. TP-0.5, plus the extra cases TP-0.11x.
+// F-6 checkMigrationFiles. TP-0.5, plus the extra cases TP-0.11x and TP-0.27x.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 // F-6 lives at `tools/ci/checkMigrationFiles.ts` (A-7).
 import { describe, expect, it } from "vitest";
 import { checkMigrationFiles } from "../checkMigrationFiles.js";
 
 const MIGRATION = "apps/server/drizzle/0001.sql";
+const PLACEHOLDER = "apps/server/drizzle/.gitkeep";
 const MESSAGE_SUFFIX =
   ". Move these changes to a release/* or hotfix/* branch, or remove them from this pull request.";
 const MESSAGE_PREFIX =
@@ -60,6 +61,60 @@ describe("F-6 checkMigrationFiles", () => {
         checkMigrationFiles({
           branch: "infra/v1.0.0-infra.1",
           changedFiles: [MIGRATION],
+          isHotfixMergeBack: false,
+        }),
+      ).toEqual({ ok: true });
+    });
+  });
+
+  // A-92: F-6 ignores exactly apps/server/drizzle/.gitkeep, and nothing else under the folder.
+  describe("TP-0.5: the drizzle/.gitkeep placeholder (A-92)", () => {
+    it("TP-0.5: feat/x changing only apps/server/drizzle/.gitkeep passes", () => {
+      expect(
+        checkMigrationFiles({
+          branch: "feat/x",
+          changedFiles: [PLACEHOLDER],
+          isHotfixMergeBack: false,
+        }),
+      ).toEqual({ ok: true });
+    });
+
+    it("TP-0.5: .gitkeep with 0001.sql fails and lists only 0001.sql", () => {
+      expect(
+        checkMigrationFiles({
+          branch: "feat/x",
+          changedFiles: [PLACEHOLDER, MIGRATION],
+          isHotfixMergeBack: false,
+        }),
+      ).toEqual({ ok: false, message: `${MESSAGE_PREFIX}${MIGRATION}${MESSAGE_SUFFIX}` });
+    });
+
+    it("TP-0.5: apps/server/drizzle/meta/.gitkeep fails and is listed", () => {
+      const file = "apps/server/drizzle/meta/.gitkeep";
+
+      expect(
+        checkMigrationFiles({ branch: "feat/x", changedFiles: [file], isHotfixMergeBack: false }),
+      ).toEqual({ ok: false, message: `${MESSAGE_PREFIX}${file}${MESSAGE_SUFFIX}` });
+    });
+  });
+
+  // TP-0.27x (A-92): only the exact path is ignored; other dotfiles and near-misses still count.
+  describe("TP-0.27x: near misses of the placeholder path", () => {
+    it.each([
+      ["another dotfile", "apps/server/drizzle/.gitignore"],
+      ["a longer name", "apps/server/drizzle/.gitkeep.bak"],
+      ["a .gitkeep in another subfolder", "apps/server/drizzle/x/.gitkeep"],
+    ])("TP-0.27x: %s (%s) on feat/x fails and is listed", (_label, file) => {
+      expect(
+        checkMigrationFiles({ branch: "feat/x", changedFiles: [file], isHotfixMergeBack: false }),
+      ).toEqual({ ok: false, message: `${MESSAGE_PREFIX}${file}${MESSAGE_SUFFIX}` });
+    });
+
+    it("TP-0.27x: a .gitkeep outside apps/server/drizzle/ is not a migration file", () => {
+      expect(
+        checkMigrationFiles({
+          branch: "feat/x",
+          changedFiles: ["apps/server/.gitkeep", "apps/server/drizzle-x/.gitkeep"],
           isHotfixMergeBack: false,
         }),
       ).toEqual({ ok: true });

@@ -8,6 +8,19 @@ const MIGRATOR = "budmon_migrator";
 const PASSWORD_FILE = ".data/dev-secrets/migrator_password";
 
 describe("TP-2.38: devMigrateEnv", () => {
+  it.each([[{}], [{ DB_USER: "x" }], [{ DB_PASSWORD_FILE: "/p" }]])(
+    "TP-2.38: for %o it returns a new object and leaves the frozen argument unchanged (A-90)",
+    (input: Record<string, string>) => {
+      const before = { ...input };
+      const frozen = Object.freeze({ ...input });
+
+      const env = devMigrateEnv(frozen);
+
+      expect(env).not.toBe(frozen);
+      expect(frozen).toEqual(before);
+    },
+  );
+
   it("TP-2.38: an empty environment gets the migrator's user and password file", () => {
     const env = devMigrateEnv({});
 
