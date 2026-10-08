@@ -1,17 +1,16 @@
 // F-35 scrubSentryEvent and scrubBreadcrumb. TP-3.5, plus extra cases TP-3.19x.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 //
-// TP-3.5 sets exception.values[0].value to CANARIES.message and expects "value = type". The bare
-// canary ("CANARYMESSAGE7f3a") passes F-30's token rule, so F-35's rule as written would keep it.
-// Until the planner settles that (raised), the value here is a real message with the canary in it,
-// which the rule replaces either way.
+// A-101: every exception value is replaced by its type unless it has the error-key format
+// (^[A-Z][A-Z0-9_]{1,63}$), so the bare, token-shaped canary is replaced too. A-103: a kept
+// breadcrumb has exactly category, timestamp, type, level and data.{url, method, status_code}.
 import { CANARIES, scanForCanaries } from "@budmon/test-support";
 import { describe, expect, it } from "vitest";
 import { scrubBreadcrumb, scrubSentryEvent } from "../../../src/platform/observability/sentry.js";
 
 const MESSAGE_VALUE = `duplicate key for ${CANARIES.message} (${CANARIES.email})`;
 
-function rawEvent(): Record<string, unknown> {
+function rawEvent(value: string = CANARIES.message): Record<string, unknown> {
   return {
     event_id: "0123456789abcdef0123456789abcdef",
     timestamp: 1_760_000_000,
@@ -29,7 +28,7 @@ function rawEvent(): Record<string, unknown> {
       values: [
         {
           type: "DatabaseError",
-          value: MESSAGE_VALUE,
+          value,
           mechanism: { type: "generic", data: { x: CANARIES.token } },
           stacktrace: {
             frames: [
@@ -46,6 +45,8 @@ function rawEvent(): Record<string, unknown> {
             ],
           },
         },
+        // A-101: an error key is kept.
+        { type: "BudmonError", value: "NOT_FOUND" },
       ],
     },
     contexts: {
@@ -83,36 +84,9 @@ function noCanary(value: unknown): void {
   expect(scanForCanaries([{ name: "event", text: JSON.stringify(value) }], CANARIES)).toEqual([]);
 }
 
-/**
- * Checks a scrubbed breadcrumb: exactly `expected`, plus `category` if kept (F-35 filters on it
- * but doesn't say whether the key itself stays).
- */
-function expectBreadcrumb(
-  actual: unknown,
-  category: string,
-  expected: Record<string, unknown>,
-): void {
-  const crumb = { ...(actual as Record<string, unknown>) };
-  if ("category" in crumb) {
-    expect(crumb["category"]).toBe(category);
-    delete crumb["category"];
-  }
-  expect(crumb).toEqual(expected);
-}
-
 describe("TP-3.5: scrubSentryEvent", () => {
-  it("TP-3.5: keeps only the allowlisted keys", () => {
-    const { breadcrumbs, ...scrubbed } = scrubSentryEvent(rawEvent()) ?? {};
-
-    const crumbs = (breadcrumbs as { values: unknown[] }).values;
-    expect(crumbs).toHaveLength(1);
-    expectBreadcrumb(crumbs[0], "http", {
-      type: "http",
-      level: "info",
-      timestamp: 2,
-      data: { url: "https://api.example.com/v1/x", method: "GET", status_code: 200 },
-    });
-    expect(scrubbed).toEqual({
+  it("TP-3.5: keeps only the allowlisted keys; the canary value becomes the type, NOT_FOUND stays, the http breadcrumb keeps its category", () => {
+    expect(scrubSentryEvent(rawEvent())).toEqual({
       event_id: "0123456789abcdef0123456789abcdef",
       timestamp: 1_760_000_000,
       platform: "node",
@@ -136,11 +110,23 @@ describe("TP-3.5: scrubSentryEvent", () => {
               ],
             },
           },
+          { type: "BudmonError", value: "NOT_FOUND" },
         ],
       },
       tags: { route: "/v1/entries/{id}", job: "fx.fetch" },
       user: { id: "u1" },
       contexts: { trace: { trace_id: "t".repeat(32), span_id: "s".repeat(16) } },
+      breadcrumbs: {
+        values: [
+          {
+            category: "http",
+            type: "http",
+            level: "info",
+            timestamp: 2,
+            data: { url: "https://api.example.com/v1/x", method: "GET", status_code: 200 },
+          },
+        ],
+      },
     });
   });
 
@@ -159,15 +145,39 @@ describe("TP-3.5: scrubSentryEvent", () => {
 });
 
 describe("TP-3.19x: scrubSentryEvent and scrubBreadcrumb, further cases (F-35)", () => {
-  it("TP-3.19x: a value matching the token rule is kept", () => {
-    const event = rawEvent();
-    const values = (event["exception"] as { values: Record<string, unknown>[] }).values;
-    values[0] = { ...values[0], value: "NOT_FOUND" };
+  it("TP-3.19x: a real message holding the canary is replaced by the type", () => {
+    const scrubbed = scrubSentryEvent(rawEvent(MESSAGE_VALUE)) as {
+      exception: { values: { type: unknown; value: unknown }[] };
+    };
 
-    const scrubbed = scrubSentryEvent(event) as { exception: { values: { value: unknown }[] } };
-
-    expect(scrubbed.exception.values[0]?.value).toBe("NOT_FOUND");
+    expect(scrubbed.exception.values[0]).toMatchObject({
+      type: "DatabaseError",
+      value: "DatabaseError",
+    });
+    noCanary(scrubbed);
   });
+
+  it.each([["fx.fetch"], ["not_found"], ["CONNECTION-RESET"], ["A"], [`A${"B".repeat(64)}`]])(
+    "TP-3.19x: %j, not in the error-key format, is replaced by the type (A-101)",
+    (value) => {
+      const scrubbed = scrubSentryEvent(rawEvent(value)) as {
+        exception: { values: { value: unknown }[] };
+      };
+
+      expect(scrubbed.exception.values[0]?.value).toBe("DatabaseError");
+    },
+  );
+
+  it.each([["AB"], [`A${"B".repeat(63)}`], ["RATE_LIMITED"], ["E2"]])(
+    "TP-3.19x: %j, in the error-key format, is kept (A-101)",
+    (value) => {
+      const scrubbed = scrubSentryEvent(rawEvent(value)) as {
+        exception: { values: { value: unknown }[] };
+      };
+
+      expect(scrubbed.exception.values[0]?.value).toBe(value);
+    },
+  );
 
   it("TP-3.19x: tags keep only route, job, client_kind and error_key", () => {
     const event = {
@@ -190,7 +200,7 @@ describe("TP-3.19x: scrubSentryEvent and scrubBreadcrumb, further cases (F-35)",
     },
   );
 
-  it("TP-3.19x: a navigation breadcrumb keeps timestamp, type, level and the reduced URL", () => {
+  it("TP-3.19x: a navigation breadcrumb keeps its category, timestamp, type, level and the reduced URL (A-103)", () => {
     expect(
       scrubBreadcrumb({
         category: "navigation",
@@ -203,27 +213,19 @@ describe("TP-3.19x: scrubSentryEvent and scrubBreadcrumb, further cases (F-35)",
           from: CANARIES.email,
         },
       }),
-    ).not.toBeNull();
-    expectBreadcrumb(
-      scrubBreadcrumb({
-        category: "navigation",
-        type: "navigation",
-        level: "info",
-        timestamp: 3,
-        message: CANARIES.message,
-        data: {
-          url: `http://localhost:5173/entries?payee=${CANARIES.payee}`,
-          from: CANARIES.email,
-        },
-      }),
-      "navigation",
-      {
-        type: "navigation",
-        level: "info",
-        timestamp: 3,
-        data: { url: "http://localhost:5173/entries" },
-      },
-    );
+    ).toEqual({
+      category: "navigation",
+      type: "navigation",
+      level: "info",
+      timestamp: 3,
+      data: { url: "http://localhost:5173/entries" },
+    });
+  });
+
+  it("TP-3.19x: an http breadcrumb without method or status keeps only what's present (A-103)", () => {
+    expect(
+      scrubBreadcrumb({ category: "http", timestamp: 4, data: { url: "https://x.io/a?b=1" } }),
+    ).toEqual({ category: "http", timestamp: 4, data: { url: "https://x.io/a" } });
   });
 
   it("TP-3.19x: an http breadcrumb with an unparseable URL keeps no URL text", () => {

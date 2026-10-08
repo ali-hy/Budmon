@@ -1,7 +1,7 @@
 // F-33 sanitizeError and F-37 stripQuery. TP-3.4 and TP-3.9, plus extra cases TP-3.17x (status
 // sources, reasons, frame rules, properties never copied) and TP-3.18x (stripQuery).
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
-// TP-3.4 needs F-50's BudmonError, which the slice plan places in S-4 (raised with the planner).
+// TP-3.4 uses F-50 BudmonError, which S-3 delivers (A-100).
 import { CANARIES, scanForCanaries } from "@budmon/test-support";
 import pg from "pg";
 import { describe, expect, it } from "vitest";
