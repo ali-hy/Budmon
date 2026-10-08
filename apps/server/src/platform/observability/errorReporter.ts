@@ -1,6 +1,7 @@
 // F-34: the error reporter interface, the report event, and the in-memory reporter for tests and
 // the canary suite.
-import { ERROR_KEY, ROUTE, TOKEN } from "./safeFields.js";
+import { isUuid } from "@budmon/shared";
+import { ERROR_KEY, JOB_NAME, REQUEST_ID, ROUTE } from "./safeFields.js";
 import { buildErrorEvent, stripPathQuery } from "./sanitize.js";
 import { scrubSentryEvent } from "./sentry.js";
 
@@ -25,9 +26,9 @@ function valid(value: string | undefined, rule: RegExp): string | undefined {
 export function checkedContext(ctx: ErrorContext): ErrorContext {
   const route = ctx.route === undefined ? undefined : valid(stripPathQuery(ctx.route), ROUTE);
   const checked: ErrorContext = {};
-  const requestId = valid(ctx.requestId, TOKEN);
-  const userId = valid(ctx.userId, TOKEN);
-  const jobName = valid(ctx.jobName, TOKEN);
+  const requestId = valid(ctx.requestId, REQUEST_ID);
+  const userId = ctx.userId !== undefined && isUuid(ctx.userId) ? ctx.userId : undefined;
+  const jobName = valid(ctx.jobName, JOB_NAME);
   const errorKey = valid(ctx.errorKey, ERROR_KEY);
   if (requestId !== undefined) checked.requestId = requestId;
   if (userId !== undefined) checked.userId = userId;

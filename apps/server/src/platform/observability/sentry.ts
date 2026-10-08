@@ -2,7 +2,8 @@
 import * as Sentry from "@sentry/node";
 import type { AppEnv } from "../config/schema.js";
 import { buildReportEvent, type ErrorReporter } from "./errorReporter.js";
-import { ERROR_KEY, ROUTE, TOKEN } from "./safeFields.js";
+import { isUuid } from "@budmon/shared";
+import { ERROR_KEY, JOB_NAME, ROUTE, TOKEN } from "./safeFields.js";
 import {
   buildErrorEvent,
   FRAME_FILENAME,
@@ -57,10 +58,10 @@ function checkedTags(tags: Json | undefined): Json {
   if (typeof route === "string" && ROUTE.test(stripPathQuery(route))) {
     out["route"] = stripPathQuery(route);
   }
-  for (const key of ["job", "client_kind"]) {
-    const value = tags[key];
-    if (typeof value === "string" && TOKEN.test(value)) out[key] = value;
-  }
+  const job = tags["job"];
+  if (typeof job === "string" && JOB_NAME.test(job)) out["job"] = job;
+  const clientKind = tags["client_kind"];
+  if (typeof clientKind === "string" && TOKEN.test(clientKind)) out["client_kind"] = clientKind;
   const errorKey = tags["error_key"];
   if (typeof errorKey === "string" && ERROR_KEY.test(errorKey)) out["error_key"] = errorKey;
   return out;
@@ -114,7 +115,7 @@ export function scrubSentryEvent(event: Record<string, unknown>): Record<string,
   if (Object.keys(tags).length > 0) out["tags"] = tags;
 
   const userId = record(event["user"])?.["id"];
-  if (typeof userId === "string" && TOKEN.test(userId)) out["user"] = { id: userId };
+  if (typeof userId === "string" && isUuid(userId)) out["user"] = { id: userId };
 
   const trace = record(record(event["contexts"])?.["trace"]);
   if (trace !== undefined) out["contexts"] = { trace: pick(trace, ["trace_id", "span_id"]) };

@@ -91,6 +91,9 @@ export type SafeFields = Partial<Record<SafeFieldName, string | number | boolean
 
 export const TOKEN = /^[A-Za-z0-9_.:-]{1,64}$/;
 export const ROUTE = /^\/[A-Za-z0-9_./:{}-]{0,200}$/;
+/** A-121: request ids are trace ids (32 lower-case hex); job names are `<module>.<job>`. */
+export const REQUEST_ID = /^[0-9a-f]{32}$/;
+export const JOB_NAME = /^[a-z][a-z0-9-]*\.[a-z][a-z0-9-]*$/;
 export const ERROR_KEY = /^[A-Z][A-Z0-9_]{1,63}$/;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 

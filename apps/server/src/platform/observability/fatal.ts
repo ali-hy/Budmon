@@ -4,7 +4,7 @@
 import { RELEASE_PATTERN } from "../config/schema.js";
 import { describeFailure } from "./describeFailure.js";
 import type { ErrorReporter } from "./errorReporter.js";
-import { createLogger, type Logger } from "./logger.js";
+import { createLogger, type DestinationStream, type Logger } from "./logger.js";
 
 export interface FatalState {
   logger: Logger;
@@ -17,15 +17,25 @@ const noReporter: ErrorReporter = { report: () => undefined, flush: () => Promis
 export function startupState(
   service: string,
   env: Readonly<Record<string, string | undefined>>,
+  opts: { destination?: DestinationStream } = {},
 ): FatalState {
   const raw = env["BUDMON_RELEASE"];
   const release = raw !== undefined && RELEASE_PATTERN.test(raw) ? raw : "dev";
-  return { logger: createLogger({ service, release, level: "info" }), reporter: noReporter };
+  return {
+    logger: createLogger({
+      service,
+      release,
+      level: "info",
+      ...(opts.destination === undefined ? {} : { destination: opts.destination }),
+    }),
+    reporter: noReporter,
+  };
 }
 
 export function installFatalHandlers(
   state: FatalState,
   exit: (code: number) => void = (code) => process.exit(code),
+  target: Pick<NodeJS.EventEmitter, "on"> = process,
 ): void {
   const fatal = async (event: string, error: unknown): Promise<void> => {
     state.logger.error(event, describeFailure(error), error);
@@ -36,10 +46,10 @@ export function installFatalHandlers(
     }
     exit(1);
   };
-  process.on("unhandledRejection", (reason) => {
+  target.on("unhandledRejection", (reason) => {
     void fatal("unhandled_rejection", reason);
   });
-  process.on("uncaughtException", (error) => {
+  target.on("uncaughtException", (error) => {
     void fatal("uncaught_exception", error);
   });
 }

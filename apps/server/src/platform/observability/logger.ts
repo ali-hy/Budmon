@@ -6,6 +6,8 @@ import { sanitizeError } from "./sanitize.js";
 
 export type { SafeFields } from "./safeFields.js";
 
+export type DestinationStream = pino.DestinationStream;
+
 export interface Logger {
   debug(event: string, fields?: SafeFields): void;
   info(event: string, fields?: SafeFields): void;
