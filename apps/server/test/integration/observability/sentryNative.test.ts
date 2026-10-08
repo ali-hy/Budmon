@@ -101,7 +101,8 @@ async function server(): Promise<FakeSentry> {
   return s;
 }
 
-const CFG = { environment: "production", release: "v1.2.3", service: "api" } as const;
+// A-141: the fake Sentry's local http DSN is accepted in development and test only.
+const CFG = { environment: "test", release: "v1.2.3", service: "api" } as const;
 
 describe("TP-3.14: the real Sentry SDK", () => {
   it("TP-3.14 (a): Sentry.captureException of the frame-shaped errors sends rebuilt values only", async () => {

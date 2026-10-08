@@ -654,17 +654,20 @@ describe("TP-2.42: SENTRY_DSN, OTEL_EXPORTER_OTLP_ENDPOINT and OTLP_HEADERS_FILE
   it.each([
     ["a key with a password", "https://pub:SECRETKEYabc@o1.ingest.sentry.io/1", "SECRETKEYabc"],
     ["http with a path", "http://foo/bar", "foo/bar"],
-  ])("TP-2.42: SENTRY_DSN with %s is the problem 'invalid DSN', never echoed", (_label, dsn, secret) => {
-    const f = prodApi();
-    f.env["SENTRY_DSN"] = dsn;
+  ])(
+    "TP-2.42: SENTRY_DSN with %s is the problem 'invalid DSN', never echoed",
+    (_label, dsn, secret) => {
+      const f = prodApi();
+      f.env["SENTRY_DSN"] = dsn;
 
-    const error = caughtConfigError(f);
+      const error = caughtConfigError(f);
 
-    expect(error.problems).toEqual([{ variable: "SENTRY_DSN", rule: "invalid DSN" }]);
-    expect(error.message).not.toContain(secret);
-    expect(error.message).not.toContain(dsn);
-    expect(JSON.stringify(error.problems)).not.toContain(secret);
-  });
+      expect(error.problems).toEqual([{ variable: "SENTRY_DSN", rule: "invalid DSN" }]);
+      expect(error.message).not.toContain(secret);
+      expect(error.message).not.toContain(dsn);
+      expect(JSON.stringify(error.problems)).not.toContain(secret);
+    },
+  );
 
   it("TP-2.42: an OTLP endpoint with a query is a problem", () => {
     const f = prodApi();
@@ -704,7 +707,71 @@ describe("TP-2.42: SENTRY_DSN, OTEL_EXPORTER_OTLP_ENDPOINT and OTLP_HEADERS_FILE
   });
 });
 
+describe("TP-2.42: a local http DSN only in development and test (A-141, A-142)", () => {
+  const LOCAL = "http://publickey@127.0.0.1:4318/1";
+
+  it("TP-2.42: the local http DSN is accepted with APP_ENV test", () => {
+    const f = devApi();
+    f.env["APP_ENV"] = "test";
+    f.env["SENTRY_DSN"] = LOCAL;
+
+    expect(problemsOf(f)).toEqual([]);
+  });
+
+  it("TP-2.42: the local http DSN is invalid in production", () => {
+    const f = prodApi();
+    f.env["SENTRY_DSN"] = LOCAL;
+
+    expect(problemsOf(f)).toEqual([{ variable: "SENTRY_DSN", rule: "invalid DSN" }]);
+  });
+
+  it.each([
+    ["a password", "http://pub:pw@127.0.0.1:4318/1"],
+    ["another host", "http://publickey@example.com:80/1"],
+  ])("TP-2.42: an http DSN with %s is invalid in test", (_label, dsn) => {
+    const f = devApi();
+    f.env["APP_ENV"] = "test";
+    f.env["SENTRY_DSN"] = dsn;
+
+    const error = caughtConfigError(f);
+
+    expect(error.problems).toEqual([{ variable: "SENTRY_DSN", rule: "invalid DSN" }]);
+    expect(error.message).not.toContain("pw@");
+  });
+
+  it("TP-2.42: an OTLP endpoint with credentials must be an https URL", () => {
+    const f = prodApi();
+    f.env["OTEL_EXPORTER_OTLP_ENDPOINT"] = "https://u:p@otlp.example/";
+
+    expect(problemsOf(f)).toEqual([
+      { variable: "OTEL_EXPORTER_OTLP_ENDPOINT", rule: "must be an https URL" },
+    ]);
+  });
+});
+
 describe("TP-2.83x: SENTRY_DSN and the OTLP endpoint, further cases (A-131, A-138)", () => {
+  it("TP-2.83x: an http DSN with a path is invalid in test", () => {
+    const f = devApi();
+    f.env["APP_ENV"] = "test";
+    f.env["SENTRY_DSN"] = "http://publickey@127.0.0.1:4318/api/1";
+
+    expect(problemsOf(f)).toEqual([{ variable: "SENTRY_DSN", rule: "invalid DSN" }]);
+  });
+
+  it("TP-2.83x: the OTLP endpoint problems name their rule (A-142)", () => {
+    const query = prodApi();
+    query.env["OTEL_EXPORTER_OTLP_ENDPOINT"] = "https://otlp.example/otlp?x=1";
+    const http = prodApi();
+    http.env["OTEL_EXPORTER_OTLP_ENDPOINT"] = "http://localhost:4318";
+
+    expect(problemsOf(query)).toEqual([
+      { variable: "OTEL_EXPORTER_OTLP_ENDPOINT", rule: "must not have a query or fragment" },
+    ]);
+    expect(problemsOf(http)).toEqual([
+      { variable: "OTEL_EXPORTER_OTLP_ENDPOINT", rule: "must be an https URL" },
+    ]);
+  });
+
   it.each([
     ["a query", "https://0123abcd@o1.ingest.sentry.io/42?x=1"],
     ["a fragment", "https://0123abcd@o1.ingest.sentry.io/42#f"],

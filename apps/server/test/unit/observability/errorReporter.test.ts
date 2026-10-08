@@ -25,7 +25,8 @@ async function server(): Promise<FakeSentry> {
   return s;
 }
 
-const CFG = { environment: "production", release: "v1.2.3", service: "api" } as const;
+// A-141: the fake Sentry's local http DSN is accepted in development and test only.
+const CFG = { environment: "test", release: "v1.2.3", service: "api" } as const;
 
 describe("TP-3.6: ErrorReporter through Sentry", () => {
   it("TP-3.6: report sends one event with type Error and value Error, and no canary anywhere", async () => {
@@ -197,7 +198,7 @@ describe("TP-3.25x: ErrorReporter, further cases (F-34)", () => {
     await reporter.flush(5_000);
 
     expect(eventsOf(sentry.bodies)[0]).toMatchObject({
-      environment: "production",
+      environment: "test",
       release: "v1.2.3",
     });
   });

@@ -11,7 +11,7 @@ const dsn = process.env["SENTRY_DSN"];
 if (dsn !== undefined && dsn !== "") {
   state.reporter = initSentry({
     dsn,
-    environment: "production",
+    environment: "test",
     release: "v1.2.3",
     service: "api",
   });

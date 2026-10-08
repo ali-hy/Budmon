@@ -205,7 +205,7 @@ describe("TP-3.2: throwing getters and droppedKeys (A-133, A-139)", () => {
       },
     });
 
-    logger.info("getter_event", fields as SafeFields);
+    logger.info("getter_event", fields);
 
     const [line] = capture.records();
     expect(line).toMatchObject({ event: "getter_event", count: 2, dropped: 1 });

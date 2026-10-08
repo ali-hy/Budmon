@@ -9,7 +9,7 @@ const mode = process.argv[2];
 const dsn = process.env["SENTRY_DSN"];
 const reporter = initSentry({
   ...(dsn === undefined ? {} : { dsn }),
-  environment: "production",
+  environment: "test",
   release: "v1.2.3",
   service: "api",
 });

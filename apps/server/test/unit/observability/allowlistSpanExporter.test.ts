@@ -314,6 +314,25 @@ describe("TP-3.7: query literals are masked and span names checked (A-135)", () 
     expect(sums.unexpected).toBe(1);
   });
 
+  it("TP-3.7: a -- comment holding a canary is removed (A-142)", () => {
+    const { inner } = exportQuery(`SELECT 1 -- ${CANARIES.payee}`);
+
+    expect(inner.spans[0]?.attributes["db.query.text"]).toBe("SELECT ?");
+  });
+
+  it("TP-3.7: a /* */ comment holding a canary is removed; double-quoted identifiers stay (A-142)", () => {
+    const { inner } = exportQuery(`SELECT /* ${CANARIES.message} */ "Payee" FROM t`);
+
+    expect(inner.spans[0]?.attributes["db.query.text"]).toBe('SELECT "Payee" FROM t');
+  });
+
+  it("TP-3.7: an unterminated block comment drops the text, one unexpected (A-142)", () => {
+    const { inner, sums } = exportQuery("SELECT /* open");
+
+    expect(inner.spans[0]?.attributes).not.toHaveProperty("db.query.text");
+    expect(sums.unexpected).toBe(1);
+  });
+
   it("TP-3.7: span name GET /meta/client-config is kept", () => {
     const { inner, sums } = exportThrough(
       makeSpans([{ attributes: {} }], "GET /meta/client-config"),

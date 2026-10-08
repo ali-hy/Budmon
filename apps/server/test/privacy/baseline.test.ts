@@ -94,7 +94,7 @@ describe("TP-3.10: baseline canary flow", () => {
     try {
       const reporter = initSentry({
         dsn: sentry.dsn,
-        environment: "production",
+        environment: "test",
         release: "v1.2.3",
         service: "api",
       });
