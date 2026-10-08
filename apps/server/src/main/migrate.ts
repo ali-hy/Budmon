@@ -10,7 +10,7 @@ import { MigrationFailedError, UnknownMigrationError } from "../platform/db/migr
 import { runSchemaStep, SchemaStepError } from "../platform/db/schemaStep.js";
 import iso4217 from "../platform/fx/iso4217.json" with { type: "json" };
 import { describeFailure } from "../platform/observability/describeFailure.js";
-import { createStderrLogger, type Logger } from "../platform/observability/logger.js";
+import { createLogger, type Logger } from "../platform/observability/logger.js";
 import type { Secret } from "../platform/observability/redaction.js";
 import type { Database } from "../platform/db/types.js";
 
@@ -46,7 +46,13 @@ export async function runMigrate(
 ): Promise<number> {
   const config = loadConfigOrReport("migrate", env, readFileSync, stderr);
   if (config?.migrate === undefined) return EXIT_CONFIG;
-  const logger = createStderrLogger({ service: "migrate", level: config.logLevel });
+  const logger = createLogger({
+    service: "migrate",
+    release: config.release,
+    level: config.logLevel,
+    // stdout carries only the report.
+    destination: { write: (line: string) => process.stderr.write(line) },
+  });
   if (config.db.user !== "budmon_migrator") {
     logger.error("startup_failed", { reason: "DB_USER must be budmon_migrator" });
     return 1;

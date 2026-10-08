@@ -3,7 +3,7 @@ import pg from "pg";
 import { parse as parseConnectionString } from "pg-connection-string";
 import { createDatabase } from "./client.js";
 import { bootstrapCluster } from "./clusterBootstrap.js";
-import { createStderrLogger } from "../observability/logger.js";
+import { createLogger } from "../observability/logger.js";
 import { Secret } from "../observability/redaction.js";
 import { serverRoot } from "../config/serverRoot.js";
 import iso4217 from "../fx/iso4217.json" with { type: "json" };
@@ -143,7 +143,12 @@ export async function resetDevelopmentDatabase(
       roleSecrets: input.roleSecrets,
       appEnv: input.appEnv,
       referenceData: { currencies: iso4217 },
-      logger: createStderrLogger({ service: "db-reset" }),
+      logger: createLogger({
+        service: "db-reset",
+        release: "dev",
+        level: "info",
+        destination: { write: (line: string) => process.stderr.write(line) },
+      }),
     });
   } finally {
     await database.close();

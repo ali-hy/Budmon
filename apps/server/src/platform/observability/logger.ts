@@ -1,8 +1,10 @@
-// F-31's Logger interface (A-51). `createLogger` (pino) arrives in S-3; until then
-// `createStderrLogger` writes one JSON line per call, so process entry points can log.
+// F-31: the structured logger. One JSON line per call through pino, carrying only the fixed keys,
+// F-30's sanitised fields and F-33's sanitised error.
+import pino from "pino";
+import { sanitizeFields, TOKEN, type SafeFields } from "./safeFields.js";
+import { sanitizeError } from "./sanitize.js";
 
-/** F-30's SafeFields arrive in S-3; until then, any scalar fields. */
-export type SafeFields = Partial<Record<string, string | number | boolean>>;
+export type { SafeFields } from "./safeFields.js";
 
 export interface Logger {
   debug(event: string, fields?: SafeFields): void;
@@ -14,43 +16,68 @@ export interface Logger {
 
 type Level = "debug" | "info" | "warn" | "error";
 
-const ORDER: Record<Level, number> = { debug: 10, info: 20, warn: 30, error: 40 };
-
-export function createStderrLogger(opts: {
+export function createLogger(opts: {
   service: string;
-  level?: Level;
-  write?: (line: string) => void;
-  bindings?: SafeFields;
+  release: string;
+  level: Level;
+  destination?: pino.DestinationStream;
+  onDrop?: (n: number) => void;
 }): Logger {
-  const threshold = ORDER[opts.level ?? "info"];
-  const write = opts.write ?? ((line: string) => process.stderr.write(`${line}\n`));
-  const emit = (level: Level, event: string, fields: SafeFields | undefined): void => {
-    if (ORDER[level] < threshold) return;
-    write(
-      JSON.stringify({
-        level,
-        time: new Date().toISOString(),
-        service: opts.service,
-        event,
-        ...opts.bindings,
-        ...fields,
-      }),
-    );
+  const base = pino(
+    {
+      base: null,
+      level: opts.level,
+      timestamp: () => `,"time":"${new Date().toISOString()}"`,
+      formatters: { level: (label) => ({ level: label }) },
+      // Nothing is ever serialised beyond what this module builds.
+      serializers: { err: (value: unknown) => value },
+    },
+    opts.destination ?? pino.destination({ fd: 1, sync: true }),
+  );
+
+  const make = (bindings: Record<string, string | number | boolean>): Logger => {
+    const write = (level: Level, event: string, fields?: SafeFields, err?: unknown): void => {
+      try {
+        if (!base.isLevelEnabled(level)) return;
+        const validEvent = TOKEN.test(event);
+        const sanitized = sanitizeFields(fields ?? {});
+        const dropped = sanitized.dropped + (validEvent ? 0 : 1);
+        const line: Record<string, unknown> = {
+          service: opts.service,
+          release: opts.release,
+          event: validEvent ? event : "invalid_event",
+          ...bindings,
+          ...sanitized.fields,
+        };
+        if (err !== undefined) line["err"] = sanitizeError(err);
+        if (dropped > 0) {
+          line["dropped"] = dropped;
+          opts.onDrop?.(dropped);
+        }
+        base[level](line);
+      } catch {
+        // A logger never throws on bad input.
+      }
+    };
+    return {
+      debug: (event, fields) => {
+        write("debug", event, fields);
+      },
+      info: (event, fields) => {
+        write("info", event, fields);
+      },
+      warn: (event, fields, err) => {
+        write("warn", event, fields, err);
+      },
+      error: (event, fields, err) => {
+        write("error", event, fields, err);
+      },
+      child: (childBindings) => {
+        const sanitized = sanitizeFields(childBindings);
+        if (sanitized.dropped > 0) opts.onDrop?.(sanitized.dropped);
+        return make({ ...bindings, ...sanitized.fields });
+      },
+    };
   };
-  return {
-    debug: (event, fields) => {
-      emit("debug", event, fields);
-    },
-    info: (event, fields) => {
-      emit("info", event, fields);
-    },
-    warn: (event, fields) => {
-      emit("warn", event, fields);
-    },
-    error: (event, fields) => {
-      emit("error", event, fields);
-    },
-    child: (bindings) =>
-      createStderrLogger({ ...opts, write, bindings: { ...opts.bindings, ...bindings } }),
-  };
+  return make({});
 }

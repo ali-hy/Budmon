@@ -3,7 +3,7 @@ import { systemClock, uuidv7Generator, type Clock, type IdGenerator } from "@bud
 import type { Config } from "./config/schema.js";
 import { createDatabase } from "./db/client.js";
 import type { Database } from "./db/types.js";
-import { createStderrLogger, type Logger } from "./observability/logger.js";
+import { createLogger, type Logger } from "./observability/logger.js";
 
 export interface BaseContainer {
   config: Config;
@@ -22,7 +22,8 @@ function createBase(
   service: string,
   overrides: Partial<BaseContainer>,
 ): BaseContainer {
-  const logger = overrides.logger ?? createStderrLogger({ service, level: config.logLevel });
+  const logger =
+    overrides.logger ?? createLogger({ service, release: config.release, level: config.logLevel });
   const database =
     overrides.database ??
     createDatabase(config.db, {

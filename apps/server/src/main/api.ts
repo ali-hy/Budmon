@@ -2,7 +2,7 @@
 // with S-4.
 import { readFileSync } from "node:fs";
 import { describeFailure } from "../platform/observability/describeFailure.js";
-import { createStderrLogger } from "../platform/observability/logger.js";
+import { createLogger } from "../platform/observability/logger.js";
 import { EXIT_CONFIG, loadConfigOrReport } from "../platform/config/startup.js";
 
 function main(): void {
@@ -19,6 +19,10 @@ function main(): void {
 try {
   main();
 } catch (error) {
-  createStderrLogger({ service: "api" }).error("startup_failed", describeFailure(error));
+  createLogger({
+    service: "api",
+    release: process.env["BUDMON_RELEASE"] ?? "dev",
+    level: "error",
+  }).error("startup_failed", describeFailure(error));
   process.exitCode = 1;
 }

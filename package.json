@@ -24,6 +24,7 @@
   "devDependencies": {
     "@budmon/config": "workspace:*",
     "@budmon/shared": "workspace:*",
+    "@budmon/test-support": "workspace:*",
     "@budmon/tools-ci": "workspace:*",
     "@types/node": "24.19.1",
     "@vitest/coverage-v8": "5.0.3",
