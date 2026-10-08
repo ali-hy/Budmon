@@ -1,5 +1,6 @@
 // The built entries (F-24) under plain Node. TP-2.6: api with DB_HOST unset (F-90, F-11).
-// TP-2.37: migrate's failure log (F-92, A-81). Both share one build: two files building into the
+// TP-2.37: migrate's failure log on stderr with stdout empty, and on success exactly the report
+// line on stdout (F-92, A-81, A-109). Both share one build: two files building into the
 // same dist/ in parallel would race. Extra case TP-2.74x; IDs ending in "x" are test-architect
 // additions, not LLD test-plan IDs.
 import { spawnSync } from "node:child_process";
@@ -10,7 +11,13 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { bootstrapCluster } from "../../../src/platform/db/clusterBootstrap.js";
-import { startFreshPostgres, type FreshPostgres } from "../../support/postgres.js";
+import { runSchemaStep } from "../../../src/platform/db/schemaStep.js";
+import { connectDatabase, schemaStepInput } from "../../support/platform.js";
+import {
+  TEST_ROLE_PASSWORDS,
+  startFreshPostgres,
+  type FreshPostgres,
+} from "../../support/postgres.js";
 
 const SERVER_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const REPO_ROOT = path.resolve(SERVER_DIR, "../..");
@@ -82,6 +89,7 @@ describe("TP-2.6: node dist/main/api.js with DB_HOST unset", () => {
 const MIGRATOR_PASSWORD = "bundle-migrator-Rk4pass";
 const WRONG_PASSWORD = "wrong-Zt8pSECRET";
 const DATABASE = "budmon_bundle_migrate";
+const OK_DATABASE = "budmon_bundle_ok";
 
 describe("TP-2.37: node dist/main/migrate.js failure logs (A-81)", () => {
   let pg: FreshPostgres;
@@ -107,7 +115,12 @@ describe("TP-2.37: node dist/main/migrate.js failure logs (A-81)", () => {
   });
 
   /** A valid development migrate configuration (absolute *_FILE paths) for host and port. */
-  function migrateEnv(host: string, port: number, password: string): Record<string, string> {
+  function migrateEnv(
+    host: string,
+    port: number,
+    password: string,
+    database: string = DATABASE,
+  ): Record<string, string> {
     const passwordFile = path.join(dir, `password-${String(port)}`);
     const rolesFile = path.join(dir, "roles.json");
     writeFileSync(passwordFile, `${password}\n`);
@@ -126,7 +139,7 @@ describe("TP-2.37: node dist/main/migrate.js failure logs (A-81)", () => {
       APP_ENV: "development",
       DB_HOST: host,
       DB_PORT: String(port),
-      DB_NAME: DATABASE,
+      DB_NAME: database,
       DB_USER: "budmon_migrator",
       DB_PASSWORD_FILE: passwordFile,
       ROLE_SECRETS_FILE: rolesFile,
@@ -179,7 +192,9 @@ describe("TP-2.37: node dist/main/migrate.js failure logs (A-81)", () => {
     const output = `${stdout}${stderr}`;
 
     expect(status, output).toBe(1);
-    const failures = startupFailures(output);
+    // A-109: the log goes to stderr; stdout carries only migrate's report, so it's empty here.
+    expect(stdout).toBe("");
+    const failures = startupFailures(stderr);
     expect(failures).toHaveLength(1);
     expect(failures[0]?.["errorCode"]).toBe("28P01");
     expectNoEndpoint(output, pg.host, pg.port, WRONG_PASSWORD);
@@ -193,7 +208,8 @@ describe("TP-2.37: node dist/main/migrate.js failure logs (A-81)", () => {
     const output = `${stdout}${stderr}`;
 
     expect(status, output).toBe(1);
-    const failures = startupFailures(output);
+    expect(stdout).toBe("");
+    const failures = startupFailures(stderr);
     expect(failures).toHaveLength(1);
     expect(failures[0]?.["errorCode"]).toBe("ECONNREFUSED");
     expectNoEndpoint(output, "127.0.0.1", closedPort, MIGRATOR_PASSWORD);
@@ -206,5 +222,52 @@ describe("TP-2.37: node dist/main/migrate.js failure logs (A-81)", () => {
 
     const codes = startupFailures(`${stdout}${stderr}`).map((entry) => entry["errorCode"]);
     expect(codes).not.toContain("28P01");
+  });
+
+  // A-109 / F-92 step 4: on success, stdout holds exactly the report line. A database of its own,
+  // bootstrapped and pushed (as the global setup does), so migrate mode has everything it needs.
+  describe("TP-2.37: on success stdout is exactly the report line (A-109)", () => {
+    let okPg: FreshPostgres;
+
+    beforeAll(async () => {
+      okPg = await startFreshPostgres();
+      const client = await okPg.superuserClient();
+      try {
+        await bootstrapCluster(client, {
+          databaseName: OK_DATABASE,
+          migrator: { password: TEST_ROLE_PASSWORDS.budmon_migrator },
+        });
+      } finally {
+        await client.end();
+      }
+      const migrator = connectDatabase(
+        okPg,
+        "budmon_migrator",
+        TEST_ROLE_PASSWORDS.budmon_migrator,
+        OK_DATABASE,
+      );
+      try {
+        await runSchemaStep(schemaStepInput(migrator, "push"));
+      } finally {
+        await migrator.close();
+      }
+    });
+
+    afterAll(async () => {
+      await okPg.stop();
+    });
+
+    it("TP-2.37: exit 0, stdout one JSON report line with zero migrations applied", () => {
+      const { status, stdout, stderr } = runMigrateBundle(
+        migrateEnv(okPg.host, okPg.port, TEST_ROLE_PASSWORDS.budmon_migrator, OK_DATABASE),
+      );
+
+      expect(status, `${stdout}${stderr}`).toBe(0);
+      const lines = stdout.split("\n").filter((line) => line !== "");
+      expect(lines).toHaveLength(1);
+      const report: unknown = JSON.parse(lines[0] ?? "");
+      expect(report).toMatchObject({ migrationsApplied: 0 });
+      expect(startupFailures(stdout)).toEqual([]);
+    });
   });
 });
