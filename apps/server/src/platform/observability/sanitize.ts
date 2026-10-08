@@ -28,7 +28,8 @@ const MAX_FRAMES = 30;
 /** V8's frame grammar: `at <fn> (<file>:<line>:<col>)` or `at <file>:<line>:<col>`. */
 const V8_FRAME = /^at (?:(.+) \((.+):(\d+):(\d+)\)|(.+):(\d+):(\d+))$/;
 /** A-110's rules for the parts a frame is rebuilt from. */
-export const FRAME_FUNCTION = /^[A-Za-z_$][A-Za-z0-9_$.<>[\] ]{0,99}$/;
+// A space only after a leading `async ` or `new ` (A-119).
+export const FRAME_FUNCTION = /^(?:(?:async|new) )?[A-Za-z_$][A-Za-z0-9_$.<>[\]]{0,99}$/;
 export const FRAME_FILENAME = /^[A-Za-z0-9_@./<>:-]{1,200}$/;
 
 function get(value: unknown, key: string): unknown {
