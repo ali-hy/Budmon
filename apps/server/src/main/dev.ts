@@ -66,6 +66,16 @@ function compose(root: string, args: string[]): ReturnType<typeof spawnSync> {
   );
 }
 
+/** `waitForPostgres` timed out (A-97). `describeFailure` reports its `reason`. */
+export class PostgresNotReadyError extends Error {
+  readonly reason = "postgres_not_ready";
+
+  constructor() {
+    super("Postgres didn't become ready within 60 s");
+    this.name = "PostgresNotReadyError";
+  }
+}
+
 /**
  * Polls from the host over TCP, with the URL the tools use, until a query succeeds (A-86). The
  * image's init server listens only on the socket, so the first TCP success is the real server.
@@ -86,9 +96,15 @@ export async function waitForPostgres(
     try {
       await deps.connect(url, 2000);
       return;
-    } catch {
+    } catch (error) {
+      // A rejected login won't fix itself by waiting (A-97).
+      const code =
+        typeof error === "object" && error !== null
+          ? (error as { code?: unknown }).code
+          : undefined;
+      if (code === "28P01" || code === "28000") throw error;
       if (deps.now() >= deadline) {
-        throw new Error("Postgres didn't become ready within 60 s");
+        throw new PostgresNotReadyError();
       }
       await deps.sleep(intervalMs);
     }

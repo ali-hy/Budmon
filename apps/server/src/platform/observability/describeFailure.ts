@@ -27,7 +27,8 @@ export function describeFailure(err: unknown): {
     if (typeof code === "string" && (SQLSTATE.test(code) || SYSTEM_CODE.test(code))) {
       errorCode = code;
     }
-    if (err.name === "ResetRefusedError") reason = token(record["reason"]);
+    if (err.name === "ResetRefusedError" || err.name === "PostgresNotReadyError")
+      reason = token(record["reason"]);
   }
   return {
     errorClass,

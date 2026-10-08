@@ -617,8 +617,8 @@ function readEmail(r: Reader, publicOriginUrl: URL | undefined): Config["email"]
       r.fail("SMTP_URL", "must have a host");
     } else if (
       (url.pathname !== "" && url.pathname !== "/") ||
-      url.search !== "" ||
-      url.hash !== ""
+      raw.includes("?") ||
+      raw.includes("#")
     ) {
       r.fail("SMTP_URL", "must not have a path, query or fragment");
     } else if (!decodesCleanly(url.username)) {

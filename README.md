@@ -45,7 +45,7 @@ isn't supported.
 | Command                   | What it does                                                               |
 | ------------------------- | -------------------------------------------------------------------------- |
 | `pnpm db:reset`           | Drops and rebuilds the development database from the schema, then seeds it |
-| `pnpm db:reset --no-seed` | The same without seeding (put `--` before the flag if your shell needs it) |
+| `pnpm db:reset --no-seed` | The same without seeding                                                   |
 | `pnpm db:seed`            | Runs the seeders on the existing development database                      |
 | `pnpm db:migrate`         | Applies the committed migrations (there are none until the first release)  |
 

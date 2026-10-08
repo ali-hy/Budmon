@@ -57,6 +57,8 @@ export async function runDbResetCli(
     stderr: (line: string) => void;
   },
 ): Promise<number> {
+  // A bare `--` is a separator some pnpm versions forward literally (A-95).
+  argv = argv.filter((arg) => arg !== "--");
   for (const arg of argv) {
     if (arg !== "--seed-only" && arg !== "--no-seed") {
       deps.stderr(`Unknown argument: ${arg}`);
