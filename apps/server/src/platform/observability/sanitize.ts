@@ -60,14 +60,28 @@ export function sanitizeError(err: unknown): SanitizedError {
   }
 
   if (isError && typeof err.stack === "string") {
+    // V8's stack starts with String(err), the class line and the message, which can itself
+    // contain lines shaped like frames. Frames are taken only after those lines (B-1).
     result.frames = err.stack
       .split("\n")
+      .slice(headerLineCount(err))
       .filter((line) => line.startsWith("    at "))
       .map((line) => line.trim())
       .filter((line) => FRAME.test(line))
       .slice(0, MAX_FRAMES);
   }
   return result;
+}
+
+function headerLineCount(err: Error): number {
+  let message = "";
+  try {
+    message = typeof err.message === "string" ? err.message : "";
+  } catch {
+    message = "";
+  }
+  // The class line holds the first line of the message; each further message line is one more.
+  return message.split("\n").length;
 }
 
 /** `scheme://host[:port]/path`, without user info, query or fragment. */

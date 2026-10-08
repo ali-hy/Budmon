@@ -122,7 +122,17 @@ export function initSentry(cfg: {
       Sentry.onUncaughtExceptionIntegration(),
       Sentry.onUnhandledRejectionIntegration(),
     ],
-    beforeSend: (event) => scrubSentryEvent(event as unknown as Json) as unknown as typeof event,
+    beforeSend: (event, hint) => {
+      // Events Sentry built itself (uncaught exceptions, unhandled rejections) carry frames parsed
+      // from err.stack, which can hold message text. Their exception is rebuilt from the original
+      // error through F-33, so Sentry's own parsing is never used (B-1).
+      const raw = event as unknown as Json;
+      const source =
+        hint.originalException === undefined
+          ? raw
+          : { ...raw, exception: buildErrorEvent(hint.originalException, {})["exception"] };
+      return scrubSentryEvent(source) as unknown as typeof event;
+    },
     beforeBreadcrumb: (crumb) => scrubBreadcrumb(crumb as unknown as Json),
     ...(cfg.httpsProxy === undefined ? {} : { transportOptions: { proxy: cfg.httpsProxy } }),
   });
