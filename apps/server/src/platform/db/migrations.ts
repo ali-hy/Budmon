@@ -27,9 +27,9 @@ export function readJournal(
   // No journal means no migrations: the folder holds only .gitkeep until the first release.
   if (!existsSync(file)) return [];
   const journal = JSON.parse(readFileSync(file, "utf8")) as {
-    entries: { tag: string; when: number }[];
+    entries?: { tag: string; when: number }[];
   };
-  return journal.entries.map((entry) => ({
+  return (journal.entries ?? []).map((entry) => ({
     tag: entry.tag,
     when: entry.when,
     hash: createHash("sha256")
@@ -42,25 +42,25 @@ export async function applyCommittedMigrations(
   database: Database,
   migrationsFolder: string,
 ): Promise<{ applied: number; verified: number }> {
-  const journal = readJournal(migrationsFolder);
-  const table = await database.handle.executeSql(
-    "SELECT to_regclass('drizzle.__drizzle_migrations') IS NOT NULL AS present",
+  // A-146: every migrate-mode database has the table, whatever the journal holds. Drizzle's own
+  // definition, so its migrator later finds it unchanged.
+  await database.handle.executeSql("CREATE SCHEMA IF NOT EXISTS drizzle");
+  await database.handle.executeSql(
+    "CREATE TABLE IF NOT EXISTS drizzle.__drizzle_migrations (id serial PRIMARY KEY, hash text NOT NULL, created_at bigint)",
   );
-  let recorded = 0;
-  if (table.rows[0]?.["present"] === true) {
-    const { rows } = await database.handle.executeSql(
-      "SELECT hash, created_at FROM drizzle.__drizzle_migrations",
+  const journal = readJournal(migrationsFolder);
+  const { rows } = await database.handle.executeSql(
+    "SELECT hash, created_at FROM drizzle.__drizzle_migrations",
+  );
+  for (const row of rows) {
+    const known = journal.some(
+      (entry) => entry.hash === row["hash"] && String(entry.when) === String(row["created_at"]),
     );
-    for (const row of rows) {
-      const known = journal.some(
-        (entry) => entry.hash === row["hash"] && String(entry.when) === String(row["created_at"]),
-      );
-      if (!known) throw new UnknownMigrationError();
-    }
-    recorded = rows.length;
+    if (!known) throw new UnknownMigrationError();
   }
+  const recorded = rows.length;
   if (journal.length === 0) {
-    // Drizzle's migrator needs a journal; with none, there is nothing to apply (A-80).
+    // Drizzle's migrator needs journal entries; with none, there is nothing to apply (A-80, A-146).
     return { applied: 0, verified: recorded };
   }
   try {
