@@ -1,11 +1,12 @@
-// F-22 step 1, waitForPostgres (A-86). TP-2.39 (a) and (b), plus extra cases TP-2.73x for S-2
-// QA's race: the image's init server answers on the socket (so `pg_isready` through
+// F-22 step 1, waitForPostgres (A-86, A-97). TP-2.39 (a), (b) and (b2), plus extra cases TP-2.79x
+// (authorisation errors) and TP-2.73x for S-2 QA's race: the image's init server answers on the socket (so `pg_isready` through
 // `docker compose exec` succeeds) while TCP still refuses or resets connections. The wait must
 // end only on a successful TCP query through `connect`.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 // TP-2.39 (c) tests F-26's runCommand (A-89), in unit/observability/runCommand.test.ts.
 import { describe, expect, it } from "vitest";
-import { waitForPostgres } from "../../../src/main/dev.js";
+import { PostgresNotReadyError, waitForPostgres } from "../../../src/main/dev.js";
+import { runCommand } from "../../../src/platform/observability/describeFailure.js";
 
 const URL = "postgres://postgres:postgres@localhost:5432/postgres";
 const START = 1_700_000_000_000;
@@ -81,12 +82,13 @@ describe("TP-2.39: waitForPostgres", () => {
     ]);
   });
 
-  it("TP-2.39 (b): a connect that always fails rejects with the timeout message once now passes 60 s", async () => {
+  it("TP-2.39 (b): a connect that always fails rejects with PostgresNotReadyError once now passes 60 s (A-97)", async () => {
     const f = fakes(() => systemError("ECONNREFUSED"));
 
     const error = await rejection(waitForPostgres(URL, f.deps));
 
-    expect(error).toBeInstanceOf(Error);
+    expect(error).toBeInstanceOf(PostgresNotReadyError);
+    expect((error as PostgresNotReadyError).reason).toBe("postgres_not_ready");
     expect((error as Error).message).toBe(TIMEOUT_MESSAGE);
     // It kept trying until 60 s had gone by, and gave up within one interval after that.
     const lastAttempt = f.connects.at(-1)?.at ?? START;
@@ -94,6 +96,74 @@ describe("TP-2.39: waitForPostgres", () => {
     expect(f.clock.now).toBeGreaterThanOrEqual(START + 60_000);
     expect(f.clock.now).toBeLessThanOrEqual(START + 60_000 + 500);
     expect(new Set(f.sleeps)).toEqual(new Set([500]));
+  });
+
+  it("TP-2.39 (b): through runCommand the line is exactly pnpm dev failed: PostgresNotReadyError (postgres_not_ready)", async () => {
+    const f = fakes(() => systemError("ECONNREFUSED"));
+    const lines: string[] = [];
+
+    const code = await runCommand(
+      "pnpm dev",
+      () => waitForPostgres(URL, f.deps),
+      (line) => {
+        lines.push(line);
+      },
+    );
+
+    expect(code).toBe(1);
+    expect(lines).toEqual(["pnpm dev failed: PostgresNotReadyError (postgres_not_ready)"]);
+  });
+
+  it("TP-2.39 (b2): a pg error 28P01 rejects with that error after one call, with no sleep (A-97)", async () => {
+    const authError = Object.assign(new Error("password authentication failed"), { code: "28P01" });
+    const f = fakes(() => authError);
+
+    const error = await rejection(waitForPostgres(URL, f.deps));
+
+    expect(error).toBe(authError);
+    expect(f.connects).toHaveLength(1);
+    expect(f.sleeps).toEqual([]);
+  });
+});
+
+describe("TP-2.79x: waitForPostgres, authorisation errors (A-97)", () => {
+  it("TP-2.79x: 28000 (invalid authorisation) also stops at once", async () => {
+    const authError = Object.assign(new Error("role is not permitted to log in"), {
+      code: "28000",
+    });
+    const f = fakes(() => authError);
+
+    const error = await rejection(waitForPostgres(URL, f.deps));
+
+    expect(error).toBe(authError);
+    expect(f.calls).toEqual(["connect"]);
+  });
+
+  it("TP-2.79x: 28P01 after a refused connection stops at that call", async () => {
+    const authError = Object.assign(new Error("password authentication failed"), { code: "28P01" });
+    const f = fakes((n) => (n === 1 ? systemError("ECONNREFUSED") : authError));
+
+    const error = await rejection(waitForPostgres(URL, f.deps));
+
+    expect(error).toBe(authError);
+    expect(f.calls).toEqual(["connect", "sleep:500", "connect"]);
+  });
+
+  it("TP-2.79x: through runCommand a 28P01 prints pnpm dev failed: Error 28P01", async () => {
+    const f = fakes(() =>
+      Object.assign(new Error("password authentication failed"), { code: "28P01" }),
+    );
+    const lines: string[] = [];
+
+    await runCommand(
+      "pnpm dev",
+      () => waitForPostgres(URL, f.deps),
+      (line) => {
+        lines.push(line);
+      },
+    );
+
+    expect(lines).toEqual(["pnpm dev failed: Error 28P01"]);
   });
 });
 

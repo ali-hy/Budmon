@@ -72,6 +72,15 @@ describe("TP-2.40: README (A-85)", () => {
     expect(onlyForTests).toEqual([]);
   });
 
+  it("TP-2.40: doesn't advise -- before db:* flags (A-95)", () => {
+    expect(README).not.toMatch(/db:[a-z]+\s+--\s/);
+    expect(README).not.toMatch(/`--`/);
+  });
+
+  it("TP-2.40: ## Database commands shows pnpm db:reset --no-seed (A-95)", () => {
+    expect(section("Database commands")).toContain("pnpm db:reset --no-seed");
+  });
+
   it("TP-2.40: ## Prerequisites names Docker for the development stack and the integration tests, Node 24 from .nvmrc and pnpm through Corepack", () => {
     const text = section("Prerequisites");
     const dockerLines = text.split("\n- ").filter((item) => /docker/i.test(item));

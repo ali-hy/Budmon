@@ -420,6 +420,9 @@ describe("TP-2.22: SMTP_URL, SMTP_PASSWORD_FILE, EMAIL_FROM and the worker's PUB
     ["smtp://h/path", "must not have a path, query or fragment"],
     ["smtp://h?x=1", "must not have a path, query or fragment"],
     ["smtp://h#f", "must not have a path, query or fragment"],
+    // A-99: an empty query or fragment is refused too.
+    ["smtp://h:25?", "must not have a path, query or fragment"],
+    ["smtp://h:25#", "must not have a path, query or fragment"],
   ])('TP-2.22: SMTP_URL %s is the problem "%s" (A-82)', (url, rule) => {
     const f = prodWorkerGeneral();
     f.env["SMTP_URL"] = url;

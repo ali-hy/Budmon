@@ -1,5 +1,5 @@
 // F-20 guards. TP-2.16 (a) (the refusals; (b) is integration/db/reset.test.ts) and TP-2.24 (a)
-// to (d) for seedDevelopmentDatabase, plus extra cases TP-2.44x, TP-2.66x, TP-2.68x and TP-2.77x
+// to (d) for seedDevelopmentDatabase, plus extra cases TP-2.44x, TP-2.66x, TP-2.68x, TP-2.77x and TP-2.81x
 // for the rest of step 1's guard. IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 // A-79: F-20 never reads process.env; only the explicit `allowNonLocalHost` input relaxes the host
 // allowlist, and nothing else. A-84: each refusal carries a `reason`, and its message is
@@ -421,4 +421,45 @@ describe("TP-2.16 (A-93): F-20 refuses an unknown appEnv without repeating it", 
       expect(seed).not.toHaveBeenCalled();
     },
   );
+});
+
+// TP-2.16 (A-96): URLs the parser can't turn into a single host are unparseable_url, which takes
+// precedence over host_list, socket_path and host_parameter.
+describe("TP-2.16 (A-96): multi-host authorities and an empty host are unparseable_url", () => {
+  it.each([
+    ["a host list with ports", "postgres://u:p@localhost:5432,db.example.com:5432/postgres"],
+    ["an empty host with ?host=/path", "postgres://u:p@/postgres?host=/path"],
+  ])("TP-2.16: %s is refused with reason unparseable_url", async (_label, superuserUrl) => {
+    const deps = fakeResetDeps();
+
+    const error = refused(
+      await rejection(
+        resetDevelopmentDatabase({ ...resetInput("development", "localhost"), superuserUrl }, deps),
+      ),
+    );
+
+    expect(error.reason).toBe("unparseable_url");
+    expect(error.message).toBe(`${RESET_BASE}: the URL can't be parsed`);
+    expect(error.message).not.toContain("db.example.com");
+    expect(deps.runSchemaStep).not.toHaveBeenCalled();
+    expect(deps.seed).not.toHaveBeenCalled();
+  });
+
+  it("TP-2.81x: app_env still comes first for an unparseable URL (A-96 precedence)", async () => {
+    const deps = fakeResetDeps();
+
+    const error = refused(
+      await rejection(
+        resetDevelopmentDatabase(
+          {
+            ...resetInput("production", "localhost"),
+            superuserUrl: "postgres://u:p@[bad/postgres",
+          },
+          deps,
+        ),
+      ),
+    );
+
+    expect(error.reason).toBe("app_env");
+  });
 });

@@ -1,5 +1,5 @@
 // F-94 runDbResetCli (A-58). TP-2.24 (e) to (g), TP-2.29 and TP-2.16's A-93 cases, plus extra cases
-// TP-2.58x, TP-2.67x, TP-2.75x and TP-2.77x.
+// TP-2.58x, TP-2.67x, TP-2.75x, TP-2.77x and TP-2.80x.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -225,6 +225,42 @@ describe("TP-2.29: runDbResetCli arguments and environment", () => {
     await runDbResetCli([], h.deps);
 
     expect(h.readFile).toHaveBeenCalledWith("/tmp/roles.json");
+  });
+
+  it('TP-2.29 (h): ["--", "--no-seed"] resets with seed: false and exits 0 (A-95)', async () => {
+    const h = harness();
+
+    const code = await runDbResetCli(["--", "--no-seed"], h.deps);
+
+    expect(code).toBe(0);
+    expect(h.reset).toHaveBeenCalledTimes(1);
+    expect(h.reset.mock.calls[0]?.[0]).toMatchObject({ seed: false });
+    expect(h.stderr).toEqual([]);
+  });
+
+  it.each([
+    ["a lone --", ["--"], true],
+    ["-- twice around --no-seed", ["--", "--no-seed", "--"], false],
+  ])("TP-2.80x: %s is ignored (A-95)", async (_label, argv, seed) => {
+    const h = harness();
+
+    expect(await runDbResetCli(argv, h.deps)).toBe(0);
+    expect(h.reset.mock.calls[0]?.[0]).toMatchObject({ seed });
+  });
+
+  it('TP-2.80x: "--" with --seed-only seeds only (A-95)', async () => {
+    const h = harness();
+
+    expect(await runDbResetCli(["--", "--seed-only"], h.deps)).toBe(0);
+    expect(h.seed).toHaveBeenCalledTimes(1);
+    expect(h.reset).not.toHaveBeenCalled();
+  });
+
+  it('TP-2.80x: an argument that merely starts with "--" is still unknown (A-95)', async () => {
+    const h = harness();
+
+    expect(await runDbResetCli(["---"], h.deps)).toBe(64);
+    expect(h.stderr).toEqual(["Unknown argument: ---"]);
   });
 
   it("TP-2.29 (g): the real seedAll with an empty seeder list resolves without building a worker container (A-72)", async () => {
