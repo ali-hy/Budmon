@@ -156,6 +156,7 @@ export async function createApiServer(
       addHook: (name, hook) =>
         app.addHook(name, async (request, reply) => {
           const context = request.budmon;
+          const orpcRoute = context?.matched.route ?? request.orpcRoute;
           const logged: RequestLogRequest = {
             method: request.method,
             url: request.url,
@@ -166,9 +167,7 @@ export async function createApiServer(
                 ? {}
                 : { url: request.routeOptions.url }),
             },
-            ...((context?.matched.route ?? request.orpcRoute) === undefined
-              ? {}
-              : { orpcRoute: context?.matched.route ?? request.orpcRoute }),
+            ...(orpcRoute === undefined ? {} : { orpcRoute }),
             requestId: request.id,
             ...(context?.principal?.userId === undefined
               ? {}
