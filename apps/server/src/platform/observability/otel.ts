@@ -25,6 +25,7 @@ import {
   type SpanExporter,
 } from "@opentelemetry/sdk-trace-base";
 import type { AppEnv } from "../config/schema.js";
+import type { Secret } from "./redaction.js";
 import { createMetrics, METRIC_LABELS, type Metrics } from "./metrics.js";
 
 /** What the pinned instrumentations emit beyond the allowlist (F-40). Entries ending in "." are
@@ -109,6 +110,134 @@ export const METRIC_ATTRIBUTE_ALLOWLIST: readonly string[] = [
   "error.type",
 ];
 
+/** A-135: the shape a span name must have to be exported. */
+export const SPAN_NAME = /^[A-Za-z0-9_.:/{} -]{1,120}$/;
+
+const IDENT_START = /[A-Za-z_\u0080-\uffff]/;
+const IDENT_PART = /[A-Za-z0-9_$\u0080-\uffff]/;
+const DIGIT = /[0-9]/;
+const NUMBER = /^(?:0[xXoObB][0-9A-Fa-f_]+|(?:\d[\d_]*(?:\.[\d_]*)?|\.\d[\d_]*)(?:[eE][+-]?\d+)?)/;
+const DOLLAR_TAG = /^\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$/;
+
+/**
+ * A-135: `db.query.text` with every literal replaced by `?`: single-quoted strings (with doubled
+ * quotes, and `E'…'` with backslash escapes), dollar-quoted strings and numeric literals that
+ * aren't part of an identifier or a `$n` placeholder. Comments are removed, since they can hold
+ * anything. Returns `null` when the quoting can't be parsed (an unterminated quote or comment).
+ */
+export function maskQueryText(text: string): string | null {
+  let out = "";
+  let i = 0;
+  const n = text.length;
+  /** The end of a single-quoted string starting at `start` (the quote), or -1. */
+  const quoted = (start: number, backslashEscapes: boolean): number => {
+    let j = start + 1;
+    while (j < n) {
+      const ch = text[j];
+      if (backslashEscapes && ch === "\\") {
+        j += 2;
+        continue;
+      }
+      if (ch === "'") {
+        if (text[j + 1] === "'") {
+          j += 2;
+          continue;
+        }
+        return j + 1;
+      }
+      j += 1;
+    }
+    return -1;
+  };
+  while (i < n) {
+    const ch = text[i] ?? "";
+    const next = text[i + 1];
+    if (ch === "-" && next === "-") {
+      const end = text.indexOf("\n", i);
+      i = end === -1 ? n : end;
+      out += " ";
+      continue;
+    }
+    if (ch === "/" && next === "*") {
+      const end = text.indexOf("*/", i + 2);
+      if (end === -1) return null;
+      i = end + 2;
+      out += " ";
+      continue;
+    }
+    if ((ch === "E" || ch === "e") && next === "'" && !IDENT_PART.test(text[i - 1] ?? " ")) {
+      const end = quoted(i + 1, true);
+      if (end === -1) return null;
+      out += "?";
+      i = end;
+      continue;
+    }
+    if (ch === "'") {
+      const end = quoted(i, false);
+      if (end === -1) return null;
+      out += "?";
+      i = end;
+      continue;
+    }
+    if (ch === '"') {
+      // A quoted identifier, kept as is.
+      let j = i + 1;
+      for (;;) {
+        if (j >= n) return null;
+        if (text[j] === '"') {
+          if (text[j + 1] === '"') {
+            j += 2;
+            continue;
+          }
+          break;
+        }
+        j += 1;
+      }
+      out += text.slice(i, j + 1);
+      i = j + 1;
+      continue;
+    }
+    if (ch === "$") {
+      const placeholder = /^\$\d+/.exec(text.slice(i));
+      if (placeholder !== null) {
+        out += placeholder[0];
+        i += placeholder[0].length;
+        continue;
+      }
+      const tag = DOLLAR_TAG.exec(text.slice(i));
+      if (tag !== null) {
+        const end = text.indexOf(tag[0], i + tag[0].length);
+        if (end === -1) return null;
+        out += "?";
+        i = end + tag[0].length;
+        continue;
+      }
+      out += ch;
+      i += 1;
+      continue;
+    }
+    if (IDENT_START.test(ch)) {
+      let j = i + 1;
+      while (j < n && IDENT_PART.test(text[j] ?? "")) j += 1;
+      out += text.slice(i, j);
+      i = j;
+      continue;
+    }
+    if (DIGIT.test(ch) || (ch === "." && DIGIT.test(next ?? ""))) {
+      const number = NUMBER.exec(text.slice(i));
+      const length = number === null ? 1 : number[0].length;
+      out += "?";
+      i += length;
+      // A trailing identifier part (`1abc`) belongs to the literal too.
+      while (i < n && IDENT_PART.test(text[i] ?? "")) i += 1;
+      continue;
+    }
+    out += ch;
+    i += 1;
+  }
+  return out;
+}
+
 function isExpectedDrop(key: string): boolean {
   return EXPECTED_DROPPED_SPAN_ATTRIBUTES.some((entry) =>
     entry.endsWith(".") ? key.startsWith(entry) : key === entry,
@@ -133,15 +262,26 @@ export class AllowlistSpanExporter implements SpanExporter {
           else unexpected += 1;
           continue;
         }
+        if (key === "db.query.text") {
+          const masked = typeof value === "string" ? maskQueryText(value) : null;
+          if (masked === null) unexpected += 1;
+          else attributes[key] = masked;
+          continue;
+        }
         attributes[key] =
           key === "url.path" && typeof value === "string" ? (value.split(/[?#]/)[0] ?? "") : value;
+      }
+      let name = span.name;
+      if (!SPAN_NAME.test(name)) {
+        name = "span";
+        unexpected += 1;
       }
       for (const event of span.events) {
         if (event.name === "exception") expected += 1;
         else unexpected += 1;
       }
       return {
-        name: span.name,
+        name,
         kind: span.kind,
         spanContext: () => span.spanContext(),
         ...(span.parentSpanContext === undefined
@@ -192,23 +332,39 @@ const noExport: SpanExporter = {
 };
 
 export function startTelemetry(
-  cfg: { endpoint?: URL; service: string; release: string; environment: AppEnv },
+  cfg: {
+    endpoint?: URL;
+    /** A-138: sent with every OTLP export; only used with an endpoint. */
+    headers?: Secret<Record<string, string>>;
+    service: string;
+    release: string;
+    environment: AppEnv;
+  },
   deps: {
     onDrop: (signal: "traces" | "metrics", kind: "expected" | "unexpected", n: number) => void;
     traceExporter?: SpanExporter;
     metricReader?: MetricReader;
   },
 ): { metrics: Metrics; shutdown(): Promise<void> } {
-  const endpoint = cfg.endpoint?.toString().replace(/\/$/, "");
+  // A-138: resolved against the endpoint with a trailing `/`, so a base path is kept.
+  const base =
+    cfg.endpoint === undefined
+      ? undefined
+      : new URL(cfg.endpoint.href.endsWith("/") ? cfg.endpoint.href : `${cfg.endpoint.href}/`);
+  const headers = cfg.headers === undefined ? undefined : { ...cfg.headers.reveal() };
+  const exporterOptions = (path: string): { url: string; headers?: Record<string, string> } => ({
+    url: new URL(path, base).href,
+    ...(headers === undefined ? {} : { headers }),
+  });
   const innerTraceExporter =
     deps.traceExporter ??
-    (endpoint === undefined ? undefined : new OTLPTraceExporter({ url: `${endpoint}/v1/traces` }));
+    (base === undefined ? undefined : new OTLPTraceExporter(exporterOptions("v1/traces")));
   const metricReader =
     deps.metricReader ??
-    (endpoint === undefined
+    (base === undefined
       ? undefined
       : new PeriodicExportingMetricReader({
-          exporter: new OTLPMetricExporter({ url: `${endpoint}/v1/metrics` }),
+          exporter: new OTLPMetricExporter(exporterOptions("v1/metrics")),
           exportIntervalMillis: 60_000,
         }));
 

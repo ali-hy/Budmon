@@ -22,6 +22,7 @@ function main(): void {
     service: "worker",
     release: config.release,
     level: config.logLevel,
+    appEnv: config.appEnv,
   });
   state.reporter = initSentry({
     ...(config.sentryDsn === undefined ? {} : { dsn: config.sentryDsn }),

@@ -8,27 +8,51 @@ function token(value: unknown): string | undefined {
   return typeof value === "string" && TOKEN.test(value) ? value : undefined;
 }
 
+/** A property read that never throws; a throwing getter counts as absent (A-132). */
+function read(value: object, key: string): unknown {
+  try {
+    return (value as Record<string, unknown>)[key];
+  } catch {
+    return undefined;
+  }
+}
+
+function isErrorInstance(err: unknown): err is Error {
+  try {
+    return err instanceof Error;
+  } catch {
+    return false;
+  }
+}
+
 export function describeFailure(err: unknown): {
   errorClass: string;
   errorCode?: string;
   reason?: string;
 } {
-  if (!(err instanceof Error)) return { errorClass: "NonError" };
-  const record = err as unknown as Record<string, unknown>;
-  const errorClass = token(err.constructor.name) ?? "Error";
+  if (!isErrorInstance(err)) return { errorClass: "NonError" };
+  let errorClass: string;
+  let name: unknown;
+  try {
+    name = err.name;
+    errorClass = token(err.constructor.name) ?? "Error";
+  } catch {
+    // A throwing `constructor` or `name` (A-132).
+    return { errorClass: "NonError" };
+  }
 
   let errorCode: string | undefined;
   let reason: string | undefined;
-  if (err.name === "SchemaStepError") {
-    errorCode = token(record["code"]);
-    reason = token(record["subject"]);
+  if (name === "SchemaStepError") {
+    errorCode = token(read(err, "code"));
+    reason = token(read(err, "subject"));
   } else {
-    const code = record["code"];
+    const code = read(err, "code");
     if (typeof code === "string" && (SQLSTATE.test(code) || SYSTEM_CODE.test(code))) {
       errorCode = code;
     }
-    if (err.name === "ResetRefusedError" || err.name === "PostgresNotReadyError")
-      reason = token(record["reason"]);
+    if (name === "ResetRefusedError" || name === "PostgresNotReadyError")
+      reason = token(read(err, "reason"));
   }
   return {
     errorClass,

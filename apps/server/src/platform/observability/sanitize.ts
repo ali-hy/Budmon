@@ -32,9 +32,46 @@ const V8_FRAME = /^at (?:(.+) \((.+):(\d+):(\d+)\)|(.+):(\d+):(\d+))$/;
 export const FRAME_FUNCTION = /^(?:(?:async|new) )?[A-Za-z_$][A-Za-z0-9_$.<>[\]]{0,99}$/;
 export const FRAME_FILENAME = /^[A-Za-z0-9_@./<>:-]{1,200}$/;
 
+/** A property read that never throws: a throwing getter or proxy counts as absent (A-132). */
 function get(value: unknown, key: string): unknown {
   if (typeof value !== "object" || value === null) return undefined;
-  return (value as Record<string, unknown>)[key];
+  try {
+    return (value as Record<string, unknown>)[key];
+  } catch {
+    return undefined;
+  }
+}
+
+/** `err instanceof Error`, false when the check itself throws (a proxy's prototype trap). */
+function isErrorInstance(err: unknown): err is Error {
+  try {
+    return err instanceof Error;
+  } catch {
+    return false;
+  }
+}
+
+/** The class token, or `undefined` when `constructor`, its `name` or the error's own `name` can't
+ * be read (A-132). */
+function className(err: Error): string | undefined {
+  try {
+    // Read only to learn whether it throws.
+    Reflect.get(err, "name");
+    const name: unknown = err.constructor.name;
+    return token(name) ?? "Error";
+  } catch {
+    return undefined;
+  }
+}
+
+function budmonKey(err: unknown): string | undefined {
+  try {
+    if (!(err instanceof BudmonError)) return undefined;
+    const key: unknown = err.key;
+    return typeof key === "string" && ERROR_KEY.test(key) ? key : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function validStatus(value: unknown): number | undefined {
@@ -114,13 +151,21 @@ function stackFrames(err: Error): EventFrame[] {
 }
 
 export function sanitizeError(err: unknown): SanitizedError {
-  const isError = err instanceof Error;
-  const result: SanitizedError = {
-    class: isError ? (token(err.constructor.name) ?? "Error") : "NonError",
-    frames: [],
-  };
+  try {
+    return sanitizeUnguarded(err);
+  } catch {
+    // Every read below is already guarded; this is the backstop for "never throws" (A-132).
+    return { class: "NonError", frames: [] };
+  }
+}
 
-  if (err instanceof BudmonError && ERROR_KEY.test(err.key)) result.key = err.key;
+function sanitizeUnguarded(err: unknown): SanitizedError {
+  const isError = isErrorInstance(err);
+  const cls = isError ? className(err) : undefined;
+  const result: SanitizedError = { class: cls ?? "NonError", frames: [] };
+
+  const key = budmonKey(err);
+  if (key !== undefined) result.key = key;
 
   const code = get(err, "code");
   if (typeof code === "string" && (SQLSTATE.test(code) || SYSTEM_CODE.test(code))) {
@@ -141,7 +186,7 @@ export function sanitizeError(err: unknown): SanitizedError {
     if (reason !== undefined) result.reason = reason;
   }
 
-  if (isError) result.frames = stackFrames(err).map(frameLine);
+  if (isError && cls !== undefined) result.frames = stackFrames(err).map(frameLine);
   return result;
 }
 
@@ -153,11 +198,15 @@ export function buildErrorEvent(err: unknown): {
   stacktrace: { frames: EventFrame[] };
 } {
   const s = sanitizeError(err);
-  return {
-    type: s.class,
-    value: s.key ?? s.code ?? s.class,
-    stacktrace: { frames: err instanceof Error ? stackFrames(err).reverse() : [] },
-  };
+  let frames: EventFrame[] = [];
+  if (s.class !== "NonError" && isErrorInstance(err)) {
+    try {
+      frames = stackFrames(err).reverse();
+    } catch {
+      frames = [];
+    }
+  }
+  return { type: s.class, value: s.key ?? s.code ?? s.class, stacktrace: { frames } };
 }
 
 /** `scheme://host[:port]/path`, without user info, query or fragment. */

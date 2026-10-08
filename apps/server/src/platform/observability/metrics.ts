@@ -1,6 +1,6 @@
 // F-41 createMetrics and F-42 registerPlatformMetrics: instruments with a closed set of labels.
 import type { Meter } from "@opentelemetry/api";
-import { ROUTE, TOKEN } from "./safeFields.js";
+import { isRoute, TOKEN } from "./safeFields.js";
 
 export const METRIC_LABELS: ReadonlySet<string> = new Set([
   "service",
@@ -45,7 +45,12 @@ export interface Metrics {
 
 export function createMetrics(meter: Meter, onDrop: (n: number) => void): Metrics {
   const define = (name: string, labels: readonly string[]): ((given: Labels) => Labels) => {
-    if (!NAME.test(name) || labels.some((label) => !METRIC_LABELS.has(label))) {
+    if (
+      !NAME.test(name) ||
+      labels.some((label) => !METRIC_LABELS.has(label)) ||
+      // A-138: a label listed twice.
+      new Set(labels).size !== labels.length
+    ) {
       throw new Error(`metric definition invalid: ${name}`);
     }
     const declared = new Set(labels);
@@ -57,7 +62,7 @@ export function createMetrics(meter: Meter, onDrop: (n: number) => void): Metric
           continue;
         }
         // http_route holds a route template; every other label a token (A-111).
-        if ((key === "http_route" ? ROUTE : TOKEN).test(value)) {
+        if (key === "http_route" ? isRoute(value) : TOKEN.test(value)) {
           clean[key] = value;
         } else {
           clean[key] = "invalid";

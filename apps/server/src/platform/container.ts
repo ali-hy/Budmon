@@ -55,7 +55,13 @@ function createBase(
   overrides: Partial<BaseContainer>,
 ): BaseContainer {
   const logger =
-    overrides.logger ?? createLogger({ service, release: config.release, level: config.logLevel });
+    overrides.logger ??
+    createLogger({
+      service,
+      release: config.release,
+      level: config.logLevel,
+      appEnv: config.appEnv,
+    });
   const database =
     overrides.database ??
     createDatabase(config.db, {

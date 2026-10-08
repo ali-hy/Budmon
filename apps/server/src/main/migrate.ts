@@ -50,6 +50,7 @@ export async function runMigrate(
     service: "migrate",
     release: config.release,
     level: config.logLevel,
+    appEnv: config.appEnv,
     // stdout carries only the report.
     destination: { write: (line: string) => process.stderr.write(line) },
   });

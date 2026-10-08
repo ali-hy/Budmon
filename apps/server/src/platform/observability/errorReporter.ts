@@ -1,8 +1,8 @@
 // F-34: the error reporter interface, the report event, and the in-memory reporter for tests and
 // the canary suite.
 import { isUuid } from "@budmon/shared";
-import { ERROR_KEY, JOB_NAME, REQUEST_ID, ROUTE } from "./safeFields.js";
-import { buildErrorEvent, stripPathQuery } from "./sanitize.js";
+import { ERROR_KEY, isRoute, JOB_NAME, REQUEST_ID } from "./safeFields.js";
+import { buildErrorEvent, sanitizeError, stripPathQuery } from "./sanitize.js";
 import { scrubSentryEvent } from "./sentry.js";
 
 export interface ErrorContext {
@@ -18,18 +18,30 @@ export interface ErrorReporter {
   flush(timeoutMs: number): Promise<void>;
 }
 
-function valid(value: string | undefined, rule: RegExp): string | undefined {
-  return value !== undefined && rule.test(value) ? value : undefined;
+function valid(value: unknown, rule: RegExp): string | undefined {
+  return typeof value === "string" && rule.test(value) ? value : undefined;
+}
+
+/** A context property read that never throws: a throwing getter counts as absent (A-132). */
+function read(ctx: ErrorContext, key: keyof ErrorContext): unknown {
+  try {
+    return (ctx as Record<string, unknown>)[key];
+  } catch {
+    return undefined;
+  }
 }
 
 /** The context values that pass F-30's rules; a failing value is dropped (A-112). */
 export function checkedContext(ctx: ErrorContext): ErrorContext {
-  const route = ctx.route === undefined ? undefined : valid(stripPathQuery(ctx.route), ROUTE);
+  const rawRoute = read(ctx, "route");
+  const strippedRoute = typeof rawRoute === "string" ? stripPathQuery(rawRoute) : undefined;
+  const route = isRoute(strippedRoute) ? strippedRoute : undefined;
   const checked: ErrorContext = {};
-  const requestId = valid(ctx.requestId, REQUEST_ID);
-  const userId = ctx.userId !== undefined && isUuid(ctx.userId) ? ctx.userId : undefined;
-  const jobName = valid(ctx.jobName, JOB_NAME);
-  const errorKey = valid(ctx.errorKey, ERROR_KEY);
+  const requestId = valid(read(ctx, "requestId"), REQUEST_ID);
+  const rawUserId = read(ctx, "userId");
+  const userId = typeof rawUserId === "string" && isUuid(rawUserId) ? rawUserId : undefined;
+  const jobName = valid(read(ctx, "jobName"), JOB_NAME);
+  const errorKey = valid(read(ctx, "errorKey"), ERROR_KEY);
   if (requestId !== undefined) checked.requestId = requestId;
   if (userId !== undefined) checked.userId = userId;
   if (route !== undefined) checked.route = route;
@@ -47,6 +59,10 @@ export function buildReportEvent(err: unknown, ctx: ErrorContext): Record<string
   if (checked.jobName !== undefined) tags["job"] = checked.jobName;
   if (checked.errorKey !== undefined) tags["error_key"] = checked.errorKey;
   if (checked.requestId !== undefined) tags["request_id"] = checked.requestId;
+  // A-137: F-33's code and status, already safe by format.
+  const sanitized = sanitizeError(err);
+  if (sanitized.code !== undefined) tags["error_code"] = sanitized.code;
+  if (sanitized.status !== undefined) tags["http_status"] = String(sanitized.status);
   return {
     level: "error",
     exception: { values: [buildErrorEvent(err)] },
@@ -62,8 +78,12 @@ export function createMemoryErrorReporter(): ErrorReporter & {
   return {
     events,
     report(err, ctx) {
-      const event = scrubSentryEvent(buildReportEvent(err, ctx));
-      if (event !== null) events.push(event);
+      try {
+        const event = scrubSentryEvent(buildReportEvent(err, ctx));
+        if (event !== null) events.push(event);
+      } catch {
+        // `report` never throws (A-132).
+      }
     },
     flush: () => Promise.resolve(),
   };

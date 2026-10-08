@@ -22,12 +22,18 @@ async function main(): Promise<number | null> {
   );
   if (config?.api === undefined) return EXIT_CONFIG;
 
-  const logger = createLogger({ service: "api", release: config.release, level: config.logLevel });
+  const logger = createLogger({
+    service: "api",
+    release: config.release,
+    level: config.logLevel,
+    appEnv: config.appEnv,
+  });
   state.logger = logger;
   // Telemetry first, so its instrumentations patch pg, http and Fastify as they load.
   const telemetry = startTelemetry(
     {
       ...(config.otlpEndpoint === undefined ? {} : { endpoint: config.otlpEndpoint }),
+      ...(config.otlpHeaders === undefined ? {} : { headers: config.otlpHeaders }),
       service: "api",
       release: config.release,
       environment: config.appEnv,

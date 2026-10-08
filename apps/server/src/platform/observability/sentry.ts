@@ -1,9 +1,9 @@
 // F-34 initSentry and F-35's scrubbers: the only fields that may reach Sentry.
 import * as Sentry from "@sentry/node";
-import type { AppEnv } from "../config/schema.js";
+import { SENTRY_DSN_PATTERN, type AppEnv } from "../config/schema.js";
 import { buildReportEvent, type ErrorReporter } from "./errorReporter.js";
 import { isUuid } from "@budmon/shared";
-import { ERROR_KEY, JOB_NAME, REQUEST_ID, ROUTE, TOKEN } from "./safeFields.js";
+import { ERROR_KEY, isRoute, JOB_NAME, REQUEST_ID, TOKEN } from "./safeFields.js";
 import {
   buildErrorEvent,
   FRAME_FILENAME,
@@ -50,12 +50,26 @@ function frameIsSafe(frame: Json): boolean {
   );
 }
 
+const SQLSTATE = /^[0-9A-Z]{5}$/;
+const SYSTEM_CODE = /^E[A-Z0-9_]{1,30}$/;
+
+/** An integer 100..599, as a number or (as Sentry tags are sent) its decimal string. */
+function isHttpStatus(value: unknown): boolean {
+  const n =
+    typeof value === "number"
+      ? value
+      : typeof value === "string" && /^[1-5]\d\d$/.test(value)
+        ? Number.parseInt(value, 10) // three digits, checked above
+        : Number.NaN;
+  return Number.isInteger(n) && n >= 100 && n <= 599;
+}
+
 /** Tags restricted to their keys and F-30's rules; failing values are dropped (A-112). */
 function checkedTags(tags: Json | undefined): Json {
   const out: Json = {};
   if (tags === undefined) return out;
   const route = tags["route"];
-  if (typeof route === "string" && ROUTE.test(stripPathQuery(route))) {
+  if (typeof route === "string" && isRoute(stripPathQuery(route))) {
     out["route"] = stripPathQuery(route);
   }
   const job = tags["job"];
@@ -66,6 +80,13 @@ function checkedTags(tags: Json | undefined): Json {
   if (typeof requestId === "string" && REQUEST_ID.test(requestId)) out["request_id"] = requestId;
   const errorKey = tags["error_key"];
   if (typeof errorKey === "string" && ERROR_KEY.test(errorKey)) out["error_key"] = errorKey;
+  // A-137.
+  const errorCode = tags["error_code"];
+  if (typeof errorCode === "string" && (SQLSTATE.test(errorCode) || SYSTEM_CODE.test(errorCode))) {
+    out["error_code"] = errorCode;
+  }
+  const httpStatus = tags["http_status"];
+  if (isHttpStatus(httpStatus)) out["http_status"] = httpStatus;
   return out;
 }
 
@@ -122,13 +143,15 @@ export function scrubSentryEvent(event: Record<string, unknown>): Record<string,
   const trace = record(record(event["contexts"])?.["trace"]);
   if (trace !== undefined) out["contexts"] = { trace: pick(trace, ["trace_id", "span_id"]) };
 
-  const crumbs = record(event["breadcrumbs"])?.["values"];
-  if (Array.isArray(crumbs)) {
-    out["breadcrumbs"] = {
-      values: crumbs
-        .map((c: unknown) => scrubBreadcrumb(record(c) ?? {}))
-        .filter((c): c is Json => c !== null),
-    };
+  // A-134: Sentry 11 sends an array; `{ values: [] }` is accepted defensively. Always an array.
+  const rawCrumbs = event["breadcrumbs"];
+  const crumbs = Array.isArray(rawCrumbs) ? rawCrumbs : record(rawCrumbs)?.["values"];
+  if (rawCrumbs !== undefined) {
+    out["breadcrumbs"] = Array.isArray(crumbs)
+      ? crumbs
+          .map((c: unknown) => scrubBreadcrumb(record(c) ?? {}))
+          .filter((c): c is Json => c !== null)
+      : [];
   }
   return out;
 }
@@ -140,11 +163,14 @@ export function initSentry(cfg: {
   service: string;
   httpsProxy?: string;
 }): ErrorReporter {
-  if (cfg.dsn === undefined || cfg.dsn === "") {
+  // A-131: an invalid DSN never reaches Sentry.init, which would print it with its key.
+  if (cfg.dsn === undefined || !SENTRY_DSN_PATTERN.test(cfg.dsn)) {
     return { report: () => undefined, flush: () => Promise.resolve() };
   }
   const client = Sentry.init({
     dsn: cfg.dsn,
+    // A-131: Sentry's console stays silent; its internal logger is never enabled.
+    debug: false,
     environment: cfg.environment,
     release: cfg.release,
     // Sentry 11's form of `sendDefaultPii: false`: collect nothing about users, requests or
@@ -193,7 +219,11 @@ export function initSentry(cfg: {
     report(err, ctx) {
       // The original error object never reaches Sentry: only the event built from F-33.
       // The hint lets beforeSend rebuild the exception from the error, as for Sentry's own events.
-      client?.captureEvent(buildReportEvent(err, ctx), { originalException: err });
+      try {
+        client?.captureEvent(buildReportEvent(err, ctx), { originalException: err });
+      } catch {
+        // `report` never throws (A-132).
+      }
     },
     async flush(timeoutMs) {
       await client?.flush(timeoutMs);

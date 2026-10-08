@@ -147,6 +147,7 @@ export async function resetDevelopmentDatabase(
         service: "db-reset",
         release: "dev",
         level: "info",
+        appEnv: input.appEnv,
         destination: { write: (line: string) => process.stderr.write(line) },
       }),
     });

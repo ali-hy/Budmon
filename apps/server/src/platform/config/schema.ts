@@ -103,6 +103,7 @@ export interface Config {
         secretAccessKey: Secret<string>;
       };
   otlpEndpoint?: URL;
+  otlpHeaders?: Secret<Record<string, string>>;
   sentryDsn?: string;
 }
 
@@ -151,6 +152,7 @@ const ALL_KEYS = [
   "OBJECT_STORE_FS_ROOT",
   "OBJECT_STORE_KIND",
   "OTEL_EXPORTER_OTLP_ENDPOINT",
+  "OTLP_HEADERS_FILE",
   "PORT",
   "PUBLIC_ORIGIN",
   "QUEUE_DB_PASSWORD_FILE",
@@ -398,6 +400,66 @@ function rsaModulusBits(pem: string): number | undefined {
   } catch {
     return undefined;
   }
+}
+
+/** A-131: public key, host, optional port, numeric project id; nothing else. */
+export const SENTRY_DSN_PATTERN =
+  /^https:\/\/[A-Za-z0-9]{1,64}@[A-Za-z0-9.-]{1,253}(:\d{1,5})?\/\d{1,20}$/;
+
+const OTLP_HEADER_NAME = /^[A-Za-z0-9-]{1,64}$/;
+
+/** A-138: https, or http://localhost:<port> in development and test; no query or fragment. */
+function readOtlpEndpoint(r: Reader): URL | undefined {
+  const variable = "OTEL_EXPORTER_OTLP_ENDPOINT";
+  const raw = r.get(variable);
+  if (raw === undefined) return undefined;
+  const url = parseUrl(raw);
+  if (url === null) {
+    r.fail(variable, "must be a URL");
+    return undefined;
+  }
+  const localHttp =
+    !r.prod && url.protocol === "http:" && url.hostname === "localhost" && url.port !== "";
+  if (url.protocol !== "https:" && !localHttp) {
+    r.fail(variable, "must be an https URL");
+    return undefined;
+  }
+  if (url.search !== "" || url.hash !== "" || raw.includes("?") || raw.includes("#")) {
+    r.fail(variable, "must not have a query or fragment");
+    return undefined;
+  }
+  if (url.username !== "" || url.password !== "") {
+    r.fail(variable, "must not contain credentials");
+    return undefined;
+  }
+  return url;
+}
+
+/** A-138: a JSON object of header names to string values. */
+function readOtlpHeaders(r: Reader): Secret<Record<string, string>> | undefined {
+  const variable = "OTLP_HEADERS_FILE";
+  const content = r.file(variable, false);
+  if (content === undefined) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content);
+  } catch {
+    r.fail(variable, "invalid");
+    return undefined;
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    r.fail(variable, "invalid");
+    return undefined;
+  }
+  const headers: Record<string, string> = {};
+  for (const [name, value] of Object.entries(parsed)) {
+    if (!OTLP_HEADER_NAME.test(name) || typeof value !== "string") {
+      r.fail(variable, "invalid");
+      return undefined;
+    }
+    headers[name] = value;
+  }
+  return Secret.of(headers);
 }
 
 function trustedProxy(r: Reader): string[] {
@@ -894,13 +956,12 @@ export function parseConfig(
   } else if (r.prod && release === "dev") {
     r.fail("BUDMON_RELEASE", "not allowed in production");
   }
-  const otlpRaw = r.get("OTEL_EXPORTER_OTLP_ENDPOINT");
-  const otlp = otlpRaw === undefined ? undefined : parseUrl(otlpRaw);
-  if (otlpRaw !== undefined && otlp === null)
-    r.fail("OTEL_EXPORTER_OTLP_ENDPOINT", "must be a URL");
+  const otlp = readOtlpEndpoint(r);
+  const otlpHeaders = readOtlpHeaders(r);
   const sentryDsn = r.get("SENTRY_DSN");
-  if (sentryDsn !== undefined && parseUrl(sentryDsn) === null)
-    r.fail("SENTRY_DSN", "must be a URL");
+  // A-131: the value is never echoed.
+  if (sentryDsn !== undefined && !SENTRY_DSN_PATTERN.test(sentryDsn))
+    r.fail("SENTRY_DSN", "invalid DSN");
 
   const roles = kind === "worker" ? readWorkerRoles(r) : undefined;
   const db = readDb(r, kind, roles);
@@ -952,7 +1013,8 @@ export function parseConfig(
     release,
     db,
     ...partial,
-    ...(otlp === undefined || otlp === null ? {} : { otlpEndpoint: otlp }),
+    ...(otlp === undefined ? {} : { otlpEndpoint: otlp }),
+    ...(otlpHeaders === undefined ? {} : { otlpHeaders }),
     ...(sentryDsn === undefined ? {} : { sentryDsn }),
   };
   return { ok: true, config };
