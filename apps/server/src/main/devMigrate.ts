@@ -20,6 +20,15 @@ export function devMigrateEnv(
   };
 }
 
+/** A-94: the shell's values (with the migrator login defaulted) over `.env`'s. Changes neither
+ * argument. */
+export function buildDevMigrateEnv(
+  shellEnv: Readonly<Record<string, string | undefined>>,
+  dotEnv: Readonly<Record<string, string>>,
+): Record<string, string | undefined> {
+  return { ...dotEnv, ...devMigrateEnv(shellEnv) };
+}
+
 if (
   process.argv[1] !== undefined &&
   import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href
@@ -32,10 +41,10 @@ if (
       const dotenv = path.join(root, ".env");
       // The shell wins over .env, and process.env isn't changed. The migrator's login defaults
       // apply unless the shell sets them: .env's DB_USER and DB_PASSWORD_FILE are the api's.
-      const env = {
-        ...(existsSync(dotenv) ? parseEnv(readFileSync(dotenv, "utf8")) : {}),
-        ...devMigrateEnv(process.env),
-      };
+      const dotEnv = existsSync(dotenv)
+        ? (parseEnv(readFileSync(dotenv, "utf8")) as Record<string, string>)
+        : {};
+      const env = buildDevMigrateEnv(process.env, dotEnv);
       return runMigrate(env);
     },
     (line) => process.stderr.write(`${line}\n`),

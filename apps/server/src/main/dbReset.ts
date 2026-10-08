@@ -6,10 +6,11 @@ import { parseEnv } from "node:util";
 import { runCommand } from "../platform/observability/describeFailure.js";
 import { loadConfig } from "../platform/config/loadConfig.js";
 import { serverRoot } from "../platform/config/serverRoot.js";
-import type { AppEnv, DbLoginRole } from "../platform/config/schema.js";
+import type { DbLoginRole } from "../platform/config/schema.js";
 import { createWorkerContainer } from "../platform/container.js";
 import {
   ResetRefusedError,
+  isAppEnv,
   resetDevelopmentDatabase,
   seedDevelopmentDatabase,
 } from "../platform/db/reset.js";
@@ -73,7 +74,13 @@ export async function runDbResetCli(
     deps.stderr("DEV_SUPERUSER_URL is not set");
     return 64;
   }
-  const appEnv = (deps.env["APP_ENV"] ?? "development") as AppEnv;
+  const rawAppEnv = deps.env["APP_ENV"] ?? "development";
+  if (!isAppEnv(rawAppEnv)) {
+    // Refused without ever writing the value (A-93).
+    deps.stderr(new ResetRefusedError(seedOnly ? "db:seed" : "db:reset", "app_env").message);
+    return 2;
+  }
+  const appEnv = rawAppEnv;
 
   const command = seedOnly ? "db:seed" : "db:reset";
   return runCommand(

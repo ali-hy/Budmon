@@ -11,6 +11,12 @@ import path from "node:path";
 import type { AppEnv, DbLoginRole } from "../config/schema.js";
 import type { runSchemaStep } from "./schemaStep.js";
 
+const APP_ENVS: readonly AppEnv[] = ["development", "test", "rehearsal", "production"];
+
+export function isAppEnv(value: unknown): value is AppEnv {
+  return APP_ENVS.some((env) => env === value);
+}
+
 export type ResetRefusedReason =
   "app_env" | "non_local_host" | "host_parameter" | "host_list" | "socket_path" | "unparseable_url";
 
@@ -26,8 +32,14 @@ const PHRASES: Record<Exclude<ResetRefusedReason, "app_env">, string> = {
 export class ResetRefusedError extends Error {
   readonly reason: ResetRefusedReason;
 
-  constructor(command: "db:reset" | "db:seed", reason: ResetRefusedReason, appEnv?: AppEnv) {
-    const phrase = reason === "app_env" ? `APP_ENV is ${appEnv ?? "unknown"}` : PHRASES[reason];
+  constructor(command: "db:reset" | "db:seed", reason: ResetRefusedReason, appEnv?: unknown) {
+    // Only a known AppEnv is ever written; anything else gets a fixed phrase (A-93).
+    const phrase =
+      reason !== "app_env"
+        ? PHRASES[reason]
+        : isAppEnv(appEnv)
+          ? `APP_ENV is ${appEnv}`
+          : "APP_ENV is not a known environment";
     super(`${command} only runs against a local development or test database: ${phrase}`);
     this.name = "ResetRefusedError";
     this.reason = reason;
@@ -64,7 +76,8 @@ function assertLocalDevelopment(
   superuserUrl: string,
   allowNonLocalHost: boolean,
 ): void {
-  if (appEnv !== "development" && appEnv !== "test") {
+  // The input type can be bypassed, so the value is checked here too (A-93).
+  if (!isAppEnv(appEnv) || (appEnv !== "development" && appEnv !== "test")) {
     throw new ResetRefusedError(command, "app_env", appEnv);
   }
   const refusal = urlRefusal(superuserUrl, allowNonLocalHost);
