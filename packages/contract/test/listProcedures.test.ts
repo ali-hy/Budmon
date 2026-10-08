@@ -27,4 +27,16 @@ describe("TP-4.25x: listProcedures", () => {
       { path: "a.make", method: "POST", route: "/a" },
     ]);
   });
+
+  it("TP-4.25x: a prefix lists a sub-router under its key (A-127)", () => {
+    expect(listProcedures(contract.meta, "meta")).toEqual([
+      { path: "meta.clientConfig", method: "GET", route: "/meta/client-config" },
+    ]);
+  });
+
+  it("TP-4.25x: no prefix on a sub-router gives paths relative to it", () => {
+    expect(listProcedures(contract.meta)).toEqual([
+      { path: "clientConfig", method: "GET", route: "/meta/client-config" },
+    ]);
+  });
 });

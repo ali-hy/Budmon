@@ -1,30 +1,55 @@
-// F-160 renderMessage. TP-4.20, plus extra cases TP-4.33x.
+// F-160 createMessageRenderer (A-126). TP-4.20, plus extra cases TP-4.33x. The tests build their own
+// catalogues; the shipped en.json isn't touched.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
-// TP-4.20 needs `test.hello` = "Hello {name}" in apps/server/src/i18n/messages/en.json and no
-// ar catalog (raised: a test message in the shipped catalog).
 import { describe, expect, it } from "vitest";
-import { renderMessage } from "../../../src/i18n/render.js";
+import { createMessageRenderer } from "../../../src/i18n/render.js";
 
-describe("TP-4.20: renderMessage", () => {
+const render = createMessageRenderer({ en: { "test.hello": "Hello {name}" } });
+
+describe("TP-4.20: createMessageRenderer", () => {
   it("TP-4.20: en, test.hello with name Ali isolates the value", () => {
-    expect(renderMessage("en", "test.hello", { name: "Ali" })).toBe("Hello ⁨Ali⁩");
+    expect(render("en", "test.hello", { name: "Ali" })).toBe("Hello ⁨Ali⁩");
   });
 
-  it("TP-4.20: ar-EG falls back to en", () => {
-    expect(renderMessage("ar-EG", "test.hello", { name: "Ali" })).toBe("Hello ⁨Ali⁩");
+  it("TP-4.20: ar-EG (no ar catalogue) falls back to en", () => {
+    expect(render("ar-EG", "test.hello", { name: "Ali" })).toBe("Hello ⁨Ali⁩");
   });
 
   it("TP-4.20: an unknown id throws Error('unknown message id')", () => {
-    expect(() => renderMessage("en", "test.nope")).toThrow(new Error("unknown message id"));
+    expect(() => render("en", "test.nope")).toThrow(new Error("unknown message id"));
+  });
+
+  it("TP-4.20: catalogues without en throw TypeError", () => {
+    expect(() => createMessageRenderer({ ar: {} })).toThrow(TypeError);
   });
 });
 
-describe("TP-4.33x: renderMessage, further cases (F-160)", () => {
-  it("TP-4.33x: a number value isn't isolated", () => {
-    expect(renderMessage("en", "test.hello", { name: 7 })).toBe("Hello 7");
+describe("TP-4.33x: createMessageRenderer, further cases (F-160)", () => {
+  it("TP-4.33x: a locale with its own catalogue uses it", () => {
+    const r = createMessageRenderer({
+      en: { "test.hello": "Hello {name}" },
+      ar: { "test.hello": "مرحبا {name}" },
+    });
+
+    expect(r("ar-EG", "test.hello", { name: "Ali" })).toBe("مرحبا ⁨Ali⁩");
   });
 
-  it("TP-4.33x: a value with markup-like text is isolated and left as text", () => {
-    expect(renderMessage("en", "test.hello", { name: "<b>x</b>" })).toBe("Hello ⁨<b>x</b>⁩");
+  it("TP-4.33x: an id present only in en falls back to en for another locale", () => {
+    const r = createMessageRenderer({
+      en: { "test.hello": "Hello {name}", "test.bye": "Bye" },
+      ar: { "test.hello": "مرحبا {name}" },
+    });
+
+    expect(r("ar", "test.bye")).toBe("Bye");
+  });
+
+  it("TP-4.33x: an id missing from en throws even if another locale has it", () => {
+    const r = createMessageRenderer({ en: {}, ar: { "test.only": "x" } });
+
+    expect(() => r("ar", "test.only")).toThrow(new Error("unknown message id"));
+  });
+
+  it("TP-4.33x: a number value isn't isolated", () => {
+    expect(render("en", "test.hello", { name: 7 })).toBe("Hello 7");
   });
 });

@@ -1,5 +1,5 @@
-// The API server with its default contract and router (F-55, F-58, F-52, F-38). TP-4.7, TP-4.14,
-// TP-4.15 and TP-4.17.
+// The API server with its default contract and router (F-55, F-58, F-52, F-38, F-61). TP-4.7,
+// TP-4.14, TP-4.15, TP-4.17 and TP-5.1 (moved to S-4, A-124).
 import { API_VERSION } from "@budmon/contract";
 import { CANARIES, scanForCanaries } from "@budmon/test-support";
 import type { FastifyInstance } from "fastify";
@@ -93,5 +93,16 @@ describe("TP-4.17: request log", () => {
       (p) => p.attributes["http_route"] === "/meta/client-config",
     );
     expect(point?.value).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe("TP-5.1: security headers (F-61)", () => {
+  it("TP-5.1: GET /api/v1/meta/client-config carries CSP, HSTS, referrer policy and nosniff", async () => {
+    const res = await injectJson(app, "GET", "/api/v1/meta/client-config");
+
+    expect(String(res.headers["content-security-policy"])).toContain("default-src 'none'");
+    expect(String(res.headers["strict-transport-security"])).toContain("max-age=31536000");
+    expect(res.headers["referrer-policy"]).toBe("no-referrer");
+    expect(res.headers["x-content-type-options"]).toBe("nosniff");
   });
 });

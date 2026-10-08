@@ -1,6 +1,6 @@
 // The API server with a test contract and router (S-4 AC 1). TP-4.10 (F-52's interceptor),
-// TP-4.11's integration part (F-56's middleware) and TP-4.19 (body handling, F-55 step 5 with
-// F-62), plus extra cases TP-4.34x.
+// TP-4.11's integration part (F-56's middleware), TP-4.19 (body handling, F-55 step 5 with F-62)
+// and TP-5.2 to TP-5.4 (F-62, moved to S-4, A-124), plus extra cases TP-4.34x.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { CANARIES, scanForCanaries } from "@budmon/test-support";
 import type { FastifyInstance } from "fastify";
@@ -196,6 +196,72 @@ describe("TP-4.19: body handling, Fastify's parser before oRPC", () => {
     const body = res.json() as { code: string; data: { issues: { code: string }[] } };
     expect(body.code).toBe("VALIDATION_FAILED");
     expect(body.data.issues.map((i) => i.code)).toContain("unrecognized_keys");
+    expect(routes.createHandler).not.toHaveBeenCalled();
+  });
+});
+
+describe("TP-5.2 to TP-5.4: body handling (F-62)", () => {
+  it("TP-5.2: invalid JSON carrying a canary is 400 invalid_json; no canary in the response or the logs", async () => {
+    const res = await injectJson(
+      app,
+      "POST",
+      "/api/v1/test/things",
+      `{"a":"${CANARIES.token}`,
+      IDEMPOTENCY,
+    );
+
+    expect(res.status).toBe(400);
+    expect(res.json()).toEqual({
+      defined: true,
+      code: "VALIDATION_FAILED",
+      status: 400,
+      message: "Validation failed",
+      data: {
+        issues: [{ path: [], code: "invalid_json", message: "Request body is not valid JSON." }],
+      },
+    });
+    expect(
+      scanForCanaries(
+        [
+          { name: "body", text: res.body },
+          { name: "logs", text: obs.capture.text() },
+          { name: "reports", text: JSON.stringify(obs.reporter.events) },
+        ],
+        CANARIES,
+      ),
+    ).toEqual([]);
+  });
+
+  it("TP-5.3: a body of 100 KiB + 1 is 413 PAYLOAD_TOO_LARGE", async () => {
+    const name = "y".repeat(102_401 - '{"name":""}'.length);
+
+    const res = await injectJson(
+      app,
+      "POST",
+      "/api/v1/test/things",
+      `{"name":"${name}"}`,
+      IDEMPOTENCY,
+    );
+
+    expect(res.status).toBe(413);
+    expect(res.json()).toEqual({
+      defined: true,
+      code: "PAYLOAD_TOO_LARGE",
+      status: 413,
+      message: "Payload too large",
+    });
+  });
+
+  it("TP-5.4: Content-Type text/plain is 400 with issue code unsupported_media_type", async () => {
+    const res = await injectJson(app, "POST", "/api/v1/test/things", "name=x", {
+      ...IDEMPOTENCY,
+      "content-type": "text/plain",
+    });
+
+    expect(res.status).toBe(400);
+    const body = res.json() as { code: string; data: { issues: { code: string }[] } };
+    expect(body.code).toBe("VALIDATION_FAILED");
+    expect(body.data.issues.map((i) => i.code)).toEqual(["unsupported_media_type"]);
     expect(routes.createHandler).not.toHaveBeenCalled();
   });
 });

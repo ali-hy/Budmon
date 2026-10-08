@@ -25,8 +25,9 @@ import {
   registerPlatformMetrics,
   type PlatformMetrics,
 } from "../../src/platform/observability/metrics.js";
-import { devApi, readFileFrom } from "./configEnv.js";
+import { devApi, readFileFrom, type Fixture } from "./configEnv.js";
 import { logCapture, type LogCapture } from "./telemetry.js";
+import type { LoginRole } from "./postgres.js";
 import { createTestDatabase, type TestDatabase } from "./testDatabase.js";
 
 export const TEST_USER_ID = "0190a0b0-1c2d-7e3f-8a4b-5c6d7e8f9a0b";
@@ -80,9 +81,12 @@ export function observed(): Observed {
   };
 }
 
-/** An api configuration from the development fixture, with `env` applied on top. */
-export function testApiConfig(env: Record<string, string | undefined> = {}): Config {
-  const f = devApi();
+/** An api configuration from the development (or production) fixture, with `env` on top. */
+export function testApiConfig(
+  env: Record<string, string | undefined> = {},
+  fixture: () => Fixture = devApi,
+): Config {
+  const f = fixture();
   Object.assign(f.env, env);
   return loadConfig("api", f.env, readFileFrom(f.files));
 }
@@ -94,15 +98,18 @@ export interface BuiltContainer {
 }
 
 /**
- * An ApiContainer (F-96) on a fresh copy of the template database, connected as budmon_app, with
+ * An ApiContainer (F-96) on a fresh copy of the template database, connected as `role`
+ * (budmon_app unless a test needs another), with
  * a silent observed logger, reporter and metrics unless `overrides` replaces them.
  */
 export async function buildApiContainer(
   overrides: Partial<ApiContainer> = {},
   env: Record<string, string | undefined> = {},
+  fixture: () => Fixture = devApi,
+  role: LoginRole = "budmon_app",
 ): Promise<BuiltContainer> {
-  const testDb = await createTestDatabase("budmon_app");
-  const container = createApiContainer(testApiConfig(env), {
+  const testDb = await createTestDatabase(role);
+  const container = createApiContainer(testApiConfig(env, fixture), {
     ...observed().overrides,
     database: testDb.database,
     ...overrides,

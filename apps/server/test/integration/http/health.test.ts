@@ -1,15 +1,17 @@
 // F-57 health routes and checkReadiness. TP-4.13, plus extra cases TP-4.35x.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 //
-// (c) runs checkReadiness directly: F-57's registerHealthRoutes deps are not specified, and
-// createApiServer reads the journal from the image's drizzle/ folder, so the route itself can't be
-// given a journal one entry ahead (raised).
+// (c) runs over HTTP with the journal injected through createApiServer's opts.journal (A-125), a
+// production configuration, and the container's database connected as budmon_migrator, which owns
+// the drizzle.__drizzle_migrations table the test creates (the template database is pushed, so it
+// has none).
 import { createServer } from "node:net";
 import type { FastifyInstance } from "fastify";
 import { afterAll, describe, expect, it } from "vitest";
 import { checkReadiness } from "../../../src/platform/http/health.js";
 import { createApiServer } from "../../../src/platform/http/server.js";
 import { buildApiContainer, injectJson, type BuiltContainer } from "../../support/api.js";
+import { prodApi } from "../../support/configEnv.js";
 import { connectDatabase } from "../../support/platform.js";
 import { TEST_ROLE_PASSWORDS } from "../../support/postgres.js";
 
@@ -82,11 +84,40 @@ describe("TP-4.13 (b): the pool points at a closed port", () => {
 });
 
 describe("TP-4.13 (c): production with the journal one entry ahead of the database", () => {
-  it("TP-4.13 (c): checkReadiness is not ready, schema_behind", async () => {
-    const built = await buildApiContainer();
+  it("TP-4.13 (c): /health/ready is 503 schema_behind; /health/live stays 200", async () => {
+    const built = await buildApiContainer({}, {}, prodApi, "budmon_migrator");
     cleanups.push(() => built.close());
-    const migrator = built.testDb.connectAs("budmon_migrator");
-    cleanups.push(() => migrator.close());
+    const migrator = built.container.database;
+    await migrator.handle.executeSql("CREATE SCHEMA IF NOT EXISTS drizzle");
+    await migrator.handle.executeSql(
+      "CREATE TABLE IF NOT EXISTS drizzle.__drizzle_migrations (id serial PRIMARY KEY, hash text NOT NULL, created_at bigint)",
+    );
+    await migrator.handle.executeSql(
+      "INSERT INTO drizzle.__drizzle_migrations (hash, created_at) VALUES ('h0', 1760000000000)",
+    );
+    const app = await createApiServer(built.container, {
+      journal: [
+        { hash: "h0", when: 1760000000000 },
+        { hash: "h1", when: 1760000100000 },
+      ],
+    });
+    cleanups.push(() => app.close());
+
+    const ready = await injectJson(app, "GET", "/health/ready");
+    const live = await injectJson(app, "GET", "/health/live");
+
+    expect([ready.status, ready.json()]).toEqual([
+      503,
+      { status: "not_ready", reason: "schema_behind" },
+    ]);
+    expect(ready.headers["cache-control"]).toBe("no-store");
+    expect([live.status, live.json()]).toEqual([200, { status: "ok" }]);
+  });
+
+  it("TP-4.35x: the same database with the journal equal to it is ready", async () => {
+    const built = await buildApiContainer({}, {}, prodApi, "budmon_migrator");
+    cleanups.push(() => built.close());
+    const migrator = built.container.database;
     await migrator.handle.executeSql("CREATE SCHEMA IF NOT EXISTS drizzle");
     await migrator.handle.executeSql(
       "CREATE TABLE IF NOT EXISTS drizzle.__drizzle_migrations (id serial PRIMARY KEY, hash text NOT NULL, created_at bigint)",
@@ -98,13 +129,10 @@ describe("TP-4.13 (c): production with the journal one entry ahead of the databa
     const result = await checkReadiness({
       db: migrator,
       appEnv: "production",
-      journal: [
-        { hash: "h0", when: 1760000000000 },
-        { hash: "h1", when: 1760000100000 },
-      ],
+      journal: [{ hash: "h0", when: 1760000000000 }],
     });
 
-    expect(result).toEqual({ ready: false, reason: "schema_behind" });
+    expect(result).toEqual({ ready: true });
   });
 });
 
