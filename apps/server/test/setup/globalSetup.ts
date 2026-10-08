@@ -123,6 +123,9 @@ export default async function setup(project: TestProject): Promise<() => Promise
         ? `CREATE ROLE ${role} LOGIN CREATEDB NOSUPERUSER PASSWORD ${password}`
         : `ALTER ROLE ${role} LOGIN CREATEDB NOSUPERUSER PASSWORD ${password}`,
     );
+    // B-3 (S-4 review): DROP DATABASE … WITH (FORCE) terminates the remaining sessions, which
+    // needs the right to signal the login roles' backends (never a superuser's).
+    await client.query(`GRANT pg_signal_backend TO ${role}`);
     await client.query(
       `ALTER DATABASE ${client.escapeIdentifier(TEMPLATE_DATABASE)} IS_TEMPLATE true`,
     );

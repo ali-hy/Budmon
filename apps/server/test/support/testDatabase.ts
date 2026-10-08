@@ -50,6 +50,23 @@ async function asDbCreator<T>(database: string, fn: (client: pg.Client) => Promi
   }
 }
 
+/** Polls pg_stat_activity until no backend is connected to `database`, or the timeout passes. */
+async function waitForNoSessions(
+  client: pg.Client,
+  database: string,
+  timeoutMs: number,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const { rows } = await client.query<{ n: string }>(
+      "SELECT count(*) AS n FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()",
+      [database],
+    );
+    if (rows[0]?.n === "0" || Date.now() >= deadline) return;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+}
+
 export async function createTestDatabase(role: LoginRole = "budmon_app"): Promise<TestDatabase> {
   const info = inject("integrationDatabase");
   const name = `t_${randomBytes(6).toString("hex")}`;
@@ -84,6 +101,10 @@ export async function createTestDatabase(role: LoginRole = "budmon_app"): Promis
     drop: async () => {
       await database.close();
       await asDbCreator("postgres", async (client) => {
+        // B-3 (S-4 review): pool.end() resolves before the server-side backends have exited, so
+        // wait (up to 10 s) for the database's sessions to go before dropping; FORCE then ends any
+        // straggler (the creator holds pg_signal_backend).
+        await waitForNoSessions(client, name, 10_000);
         await client.query(`DROP DATABASE IF EXISTS ${client.escapeIdentifier(name)} WITH (FORCE)`);
       });
     },
