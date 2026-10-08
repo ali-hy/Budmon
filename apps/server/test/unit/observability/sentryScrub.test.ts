@@ -24,7 +24,11 @@ function rawEvent(value: string = CANARIES.message): Record<string, unknown> {
     message: CANARIES.message,
     request: { url: `https://x.io/a?token=${CANARIES.token}`, data: CANARIES.payee },
     extra: { payee: CANARIES.payee },
-    user: { id: "u1", email: CANARIES.email, ip_address: "10.1.2.3" },
+    user: {
+      id: "0190a0b0-1c2d-7e3f-8a4b-5c6d7e8f9a0b",
+      email: CANARIES.email,
+      ip_address: "10.1.2.3",
+    },
     // A-112: the route tag loses its query.
     tags: {
       route: `/v1/entries/{id}?token=${CANARIES.token}`,
@@ -144,7 +148,7 @@ describe("TP-3.5: scrubSentryEvent", () => {
         ],
       },
       tags: { route: "/v1/entries/{id}", job: "fx.fetch" },
-      user: { id: "u1" },
+      user: { id: "0190a0b0-1c2d-7e3f-8a4b-5c6d7e8f9a0b" },
       contexts: { trace: { trace_id: "t".repeat(32), span_id: "s".repeat(16) } },
       breadcrumbs: {
         values: [
@@ -221,12 +225,18 @@ describe("TP-3.24x: scrubSentryEvent and scrubBreadcrumb, further cases (F-35)",
   it("TP-3.24x: tags keep only route, job, client_kind and error_key", () => {
     const event = {
       ...rawEvent(),
-      tags: { route: "/a", job: "j", client_kind: "web", error_key: "NOT_FOUND", other: "x" },
+      tags: {
+        route: "/a",
+        job: "platform.fx-rates-fetch",
+        client_kind: "web",
+        error_key: "NOT_FOUND",
+        other: "x",
+      },
     };
 
     expect((scrubSentryEvent(event) as { tags: unknown }).tags).toEqual({
       route: "/a",
-      job: "j",
+      job: "platform.fx-rates-fetch",
       client_kind: "web",
       error_key: "NOT_FOUND",
     });

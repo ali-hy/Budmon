@@ -144,12 +144,22 @@ describe("TP-3.14: the real Sentry SDK", () => {
       jobName: `${CANARIES.payee} x`,
       errorKey: `${CANARIES.message} x`,
     });
+    // A-121: token-shaped canaries fail the tighter userId, jobName and requestId formats too.
+    reporter.report(new Error(CANARIES.message), {
+      userId: CANARIES.token,
+      jobName: CANARIES.payee,
+      requestId: CANARIES.payee,
+    });
     await reporter.flush(5_000);
 
     const events = sentryEvents(sentry.bodies);
-    expect(events).toHaveLength(1);
+    expect(events).toHaveLength(2);
     const tags = (events[0]?.["tags"] ?? {}) as Record<string, unknown>;
     expect(tags["route"]).toBe("/x");
+    for (const event of events) {
+      expect((event["user"] as Record<string, unknown> | undefined)?.["id"]).toBeUndefined();
+      expect((event["tags"] ?? {}) as Record<string, unknown>).not.toHaveProperty("job");
+    }
     expect(tags).not.toHaveProperty("job");
     expect(tags).not.toHaveProperty("error_key");
     expect((events[0]?.["user"] as Record<string, unknown> | undefined)?.["id"]).toBeUndefined();

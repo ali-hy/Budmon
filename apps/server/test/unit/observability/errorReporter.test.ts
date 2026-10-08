@@ -86,6 +86,49 @@ describe("TP-3.6: ErrorContext values are validated before use (A-112)", () => {
   });
 });
 
+describe("TP-3.6: token-shaped canaries in ErrorContext are dropped, valid values kept (A-121)", () => {
+  const VALID = {
+    userId: "0190a0b0-1c2d-7e3f-8a4b-5c6d7e8f9a0b",
+    jobName: "platform.fx-rates-fetch",
+    requestId: "0123456789abcdef0123456789abcdef",
+  };
+
+  it("TP-3.6: userId, jobName and requestId holding token-shaped canaries are dropped", async () => {
+    const sentry = await server();
+    const reporter = initSentry({ ...CFG, dsn: sentry.dsn });
+
+    reporter.report(new Error(CANARIES.message), {
+      userId: CANARIES.token,
+      jobName: CANARIES.payee,
+      requestId: CANARIES.payee,
+    });
+    await reporter.flush(5_000);
+
+    const [event] = eventsOf(sentry.bodies);
+    expect((event?.["user"] as Record<string, unknown> | undefined)?.["id"]).toBeUndefined();
+    expect((event?.["tags"] ?? {}) as Record<string, unknown>).not.toHaveProperty("job");
+    expect(
+      scanForCanaries([{ name: "envelope", text: sentry.bodies.join("\n") }], CANARIES),
+    ).toEqual([]);
+  });
+
+  it("TP-3.6: with a UUID userId, a job-name jobName and a 32-hex requestId, user.id and the job tag are present", async () => {
+    const sentry = await server();
+    const reporter = initSentry({ ...CFG, dsn: sentry.dsn });
+
+    reporter.report(new Error("x"), VALID);
+    await reporter.flush(5_000);
+
+    const [event] = eventsOf(sentry.bodies);
+    expect(event?.["user"]).toEqual({ id: VALID.userId });
+    expect((event?.["tags"] ?? {}) as Record<string, unknown>).toMatchObject({
+      job: VALID.jobName,
+    });
+    // TP-3.6 says all three are present, but F-34's event has no field for the request id (only
+    // the route, job and error_key tags and user.id), so only those two are checked (raised).
+  });
+});
+
 describe("TP-3.25x: ErrorReporter, further cases (F-34)", () => {
   it("TP-3.25x: the event carries the context as tags route, job, error_key and user.id, never the canary", async () => {
     const sentry = await server();
@@ -96,10 +139,10 @@ describe("TP-3.25x: ErrorReporter, further cases (F-34)", () => {
     });
 
     reporter.report(err, {
-      requestId: "r1",
-      userId: "u1",
+      requestId: "0123456789abcdef0123456789abcdef",
+      userId: "0190a0b0-1c2d-7e3f-8a4b-5c6d7e8f9a0b",
       route: "/v1/entries/{id}",
-      jobName: "fx.fetch",
+      jobName: "platform.fx-rates-fetch",
       errorKey: "SERVICE_UNAVAILABLE",
     });
     await reporter.flush(5_000);
@@ -107,10 +150,10 @@ describe("TP-3.25x: ErrorReporter, further cases (F-34)", () => {
     const [event] = eventsOf(sentry.bodies);
     expect(event?.["tags"]).toMatchObject({
       route: "/v1/entries/{id}",
-      job: "fx.fetch",
+      job: "platform.fx-rates-fetch",
       error_key: "SERVICE_UNAVAILABLE",
     });
-    expect(event?.["user"]).toEqual({ id: "u1" });
+    expect(event?.["user"]).toEqual({ id: "0190a0b0-1c2d-7e3f-8a4b-5c6d7e8f9a0b" });
     const exception = (event?.["exception"] as { values: Record<string, unknown>[] }).values[0];
     expect(exception).toMatchObject({ type: "Error", value: "ECONNREFUSED" });
     expect(
