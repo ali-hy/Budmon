@@ -2,7 +2,7 @@
 module: platform
 doc: lld
 status: approved # draft | in-review | approved
-version: 0.27
+version: 0.28
 hld_version: 1.3
 author: planner
 approved_by: the user (project owner), delegated auto-approval
@@ -93,6 +93,7 @@ Nothing in that list changes application code (D-29 rule 2).
 | 0.25    | 2026-10-08 | Implementation-time amendment A-92 (CI blocker on PR #1): F-6 ignores exactly `apps/server/drizzle/.gitkeep`, so the placeholder that keeps the empty migrations folder in git isn't reported as a migration file. AC-2 clarified. Tests: TP-0.5, TP-0.17 extended. Approval stands. |
 | 0.26    | 2026-10-08 | Implementation-time amendments A-93, A-94 (S-2 round-4 review notes). **A-93:** an `APP_ENV` outside `AppEnv` refuses with the fixed phrase `APP_ENV is not a known environment` and never echoes the value. **A-94:** `db:migrate`'s environment order restated: `devMigrateEnv` applies to the shell environment only, and its result is laid over `.env`; A-83's wording corrected. Tests: TP-2.16 extended; TP-2.41 added. Approval stands. |
 | 0.27    | 2026-10-08 | Implementation-time amendments A-95 to A-99 (S-2 QA minor findings; built with S-3). **A-95:** `runDbResetCli` ignores a bare `--`; the README drops the "if your shell needs it" advice. **A-96:** multi-host and empty-host `?host=` URLs refuse as `unparseable_url` (accepted). **A-97:** `waitForPostgres` fails at once on an authentication error and otherwise ends with `PostgresNotReadyError` (reason `postgres_not_ready`). **A-98:** `db:seed` with no seeders stays a no-op that needs no database. **A-99:** `SMTP_URL` with a trailing `?` or `#` is refused. Tests: TP-2.16, TP-2.22, TP-2.29, TP-2.39, TP-2.40 extended. Approval stands. |
+| 0.28    | 2026-10-08 | Implementation-time amendments A-100 to A-103 (test-architect, S-3 tests `38e3cc0`). **A-100:** F-50 `BudmonError` moves from S-4 to S-3. **A-101:** F-35 replaces every exception `value` by its `type` unless it is an API error key. **A-102:** §10.1 projects include `apps/server/test/privacy/**` (`server-int`) and `packages/test-support/test/**` (`tools`); `@budmon/test-support` and the OpenTelemetry SDK test dependencies recorded. **A-103:** kept breadcrumbs keep `category`. Tests: TP-3.5 extended. Approval stands. |
 
 ## Amendments
 
@@ -197,6 +198,10 @@ Nothing in that list changes application code (D-29 rule 2).
 | A-97 | M-2 (S-2 QA): a wrong superuser password makes `pnpm dev` retry for 60 s and then print a bare `pnpm dev failed: Error`. | `waitForPostgres` **stops at once** when `connect` rejects with SQLSTATE `28P01` (invalid password) or `28000` (invalid authorisation), rethrowing that error, so `runCommand` prints `pnpm dev failed: <class> 28P01`. Every other error is retried as before. On timeout it throws new `PostgresNotReadyError` (in `main/dev.ts`, `reason = "postgres_not_ready"`, message "Postgres didn't become ready within 60 s"); `describeFailure` (F-26) reads `reason` from it as it does for `ResetRefusedError`, so the line is `pnpm dev failed: PostgresNotReadyError (postgres_not_ready)`. | F-22, F-26, TP-2.39 | none | planner decision |
 | A-98 | M-3 (S-2 QA): `db:seed` with no seeders exits 0 without contacting the database, even when it's down. | **Accepted, no change.** With no seeders, seeding has nothing to do, so success is the right answer; checking reachability would only fail on a database `db:seed` doesn't need. From S-9, `seedAll` builds the worker container and any database problem surfaces then (A-72). | none | none | planner decision |
 | A-99 | M-4 (S-2 QA): `smtp://h:25?` and `smtp://h:25#` are accepted because WHATWG URL gives empty `search` and `hash`. | **Refused.** Besides A-82's checks on the parsed URL, the raw value must not contain `?` or `#` at all; problem "must not have a path, query or fragment" (value not echoed). | F-10, TP-2.22 | none | planner decision |
+| A-100 | TP-3.4 uses `BudmonError` (F-50), which belongs to S-4 (test-architect, S-3). | **S-3 delivers F-50** (`platform/errors/BudmonError.ts`, the class only, exactly as specified); its test TP-4.18 moves to S-3 with it. F-51's platform errors, F-52's interceptor and everything else in S-4 stay in S-4. F-50 has no dependencies, so moving it adds no risk. | F-50, S-3, S-4, TP-4.18 | none | planner decision |
+| A-101 | TP-3.5 expects `exception.values[0].value = CANARIES.message` replaced by the `type`, but `"CANARYMESSAGE7f3a"` passes F-30's `token` rule, so F-35 as written keeps it (test-architect, S-3). | **F-35 tightens; TP-3.5 stays.** A real message can be token-shaped (a payee, a code, a merchant name), so the `token` rule isn't a safe filter for exception text. `scrubSentryEvent` replaces **every** `exception.values[].value` by that entry's `type`, except a value matching the API error-key format `^[A-Z][A-Z0-9_]{1,63}$` (F-50's key rule; what F-34 and Android's F-260 put there for `BudmonError`s). The test-architect's extra case with a spaced message stays as well. | F-35, TP-3.5 | none | planner decision |
+| A-102 | §10.1's project table doesn't list `apps/server/test/privacy/**` under `server-int` or `packages/test-support/test/**` under `tools`; the test-architect added both and the `@budmon/test-support` package (test-architect, S-3). | **Confirmed in place.** `server-int` includes `apps/server/test/integration/**/*.test.ts` and `apps/server/test/privacy/**/*.test.ts` (the canary suite needs the database); `tools` includes `packages/test-support/test/**/*.test.ts`. §2.2 already lists `packages/test-support/` (`@budmon/test-support`, test-architect's, S-3); it is a `devDependency` (`workspace:*`) of the root and of `@budmon/server`, never a runtime dependency (F-24 never bundles it). §2.4 pins the test dependencies `@opentelemetry/sdk-trace-base` 2.11.0 and `@opentelemetry/sdk-metrics` 2.11.0 (in-memory exporters and readers for `inMemoryTelemetry()`). | §2.2, §2.4, §10.1 | none | planner decision |
+| A-103 | F-35 doesn't say whether a kept breadcrumb keeps its `category` (test-architect, S-3). | **Kept.** A kept breadcrumb has exactly `category` (`"http"` or `"navigation"`), `timestamp`, `type`, `level`, and `data.{url, method, status_code}` (each only when present), with `data.url` reduced as F-37 says. | F-35, TP-3.5 | none | planner decision |
 
 ## 1. Deviations from the HLD, and decisions the HLD left open
 
@@ -249,7 +254,7 @@ Nothing in that list changes application code (D-29 rule 2).
 | `.github/workflows/rehearsal.yml` | Reusable release rehearsal, stage-0 shape (D-41, F-195). |
 | `.github/workflows/tag.yml` | Stage-0 tagging: on a merged `release/*` PR, or dispatched with a hotfix PR number, re-runs check (i) on the commit and pushes the tag with `GITHUB_TOKEN` through `tools/ci/tagRelease.sh` (§4.17 "Stage-0 tagging", TP-14.10). `permissions: contents: write` only. The stage-1 LLD replaces it with the App-based chain. |
 | `.github/workflows/*.yml`, `*.yaml` (rules for every workflow, A-17) | (1) Every `uses:`, at job level (reusable workflows) and step level, is pinned to a full 40-hex commit SHA (`owner/repo[/path]@<40 lowercase hex>`, a version comment after it is allowed); references starting with `./` (local actions and reusable workflows in this repository) are exempt. (2) No `run:` script contains `${{`: values reach scripts only through `env:` (`${{ }}` is allowed in `env:`, `with:`, `if:` and other keys). Enforced by TP-0.23 from S-0; every later slice that adds or edits a workflow keeps to them. |
-| `packages/test-support/` (`@budmon/test-support`) | Test tooling owned by the test-architect: `src/canaries.ts` (F-198), shared fakes and helpers (§10.1) (S-3). |
+| `packages/test-support/` (`@budmon/test-support`) | Test tooling owned by the test-architect: `src/canaries.ts` (F-198), shared fakes and helpers (§10.1) (S-3). A `devDependency` (`workspace:*`) of the root and of `@budmon/server` only; never a runtime dependency or bundled (A-102). |
 | `packages/config/` (`@budmon/config`) | `tsconfig/base.json`, `tsconfig/node.json`, `tsconfig/web.json`, exported as `./tsconfig/*.json` (consumers write `@budmon/config/tsconfig/node.json`, A-66); `eslint/index.js` (F-1); `eslint/rules/*.js` (custom ESLint rules F-2, F-3, F-3b; S-0); `prettier/index.js`; `stylelint/index.js` (F-4; S-11a, exported as `./stylelint`, A-14). |
 | `packages/shared/` (`@budmon/shared`) | `src/money/*`, `src/time/*`, `src/ids/*`, `src/i18n/*`, `src/json/canonical.ts`, `src/index.ts`, `test-vectors/*.json` (S-1). |
 | `packages/contract/` (`@budmon/contract`) | `src/common/{money,dates,ids,cursor,errors,create,version}.ts`, `src/meta/metaContract.ts`, `src/index.ts`, `src/rules/contractRules.ts`, `scripts/emitOpenapi.ts`, `openapi.json` (S-4). |
@@ -358,7 +363,7 @@ Versions were checked against npm and Maven Central on 2026-10-05. Exact version
 | Server | `fastify` 5.12.5, `@fastify/helmet` 13.1.1, `@fastify/rate-limit` 11.2.0, `@fastify/cookie` 11.1.2, `@orpc/server`/`@orpc/contract`/`@orpc/openapi`/`@orpc/zod`/`@orpc/client`/`@orpc/openapi-client` 1.15.4, `zod` 4.6.5, `drizzle-orm` 0.45.3, `drizzle-kit` 0.31.11 (dev only), `pg` 8.23.1, `pg-boss` 12.36.0, `pino` 10.4.0, `@sentry/node` 11.4.0, `@opentelemetry/sdk-node` 0.222.0 (with the matching `@opentelemetry/auto-instrumentations-node`), `@google-cloud/kms` 6.2.1, `@node-rs/argon2` 2.2.1, `@aws-sdk/client-s3` and `@aws-sdk/s3-request-presigner` 3.1146.0, `undici` 8.11.2, `uuid` 14.0.2, `@js-temporal/polyfill` 0.5.1, `esbuild` (dev, server build F-24; latest 0.x, pinned exactly in S-2, A-43) |
 | Web | `solid-js` 1.9.15, `vite` 8.3.2, `vite-plugin-solid` 2.11.14, `@tanstack/solid-router` 1.170.38, `@tanstack/solid-query` 5.104.1, `@orpc/tanstack-query` 1.15.4, `@tanstack/solid-table` 9.2.x, `@tanstack/solid-virtual` 3.13.x, `@tanstack/solid-form` 1.33.x, `@kobalte/core` 0.13.14, `@formatjs/intl` 6.1.2, `@sentry/solid` 11.4.0, `tailwindcss` 4.3.3 |
 | Lint | `eslint` 10.12.0, `typescript-eslint` 8.71.0, `eslint-plugin-formatjs` **8.1.1** (peer `eslint 9 || 10`), `eslint-plugin-jsx-a11y` **6.10.2** (declares an ESLint 9 peer; accepted for ESLint 10 through `pnpm-workspace.yaml` `peerDependencyRules`, A-13), `eslint-plugin-solid` (latest), `stylelint` 17.16.0, `stylelint-use-logical` 2.1.3, `prettier` 3.x |
-| Tests | `vitest` 5.0.3, `@vitest/coverage-v8` 5.0.3 (always equal to `vitest`, A-35), `testcontainers` and `@testcontainers/postgresql` 12.2.0, `@playwright/test` 1.63.0, `@axe-core/playwright` 4.13.0, `msw` 3.0.2, `@solidjs/testing-library` 0.8.10, `node-pty` 1.1.0 (release tooling) |
+| Tests | `@opentelemetry/sdk-trace-base` 2.11.0 and `@opentelemetry/sdk-metrics` 2.11.0 (test-only, A-102), `vitest` 5.0.3, `@vitest/coverage-v8` 5.0.3 (always equal to `vitest`, A-35), `testcontainers` and `@testcontainers/postgresql` 12.2.0, `@playwright/test` 1.63.0, `@axe-core/playwright` 4.13.0, `msw` 3.0.2, `@solidjs/testing-library` 0.8.10, `node-pty` 1.1.0 (release tooling) |
 | Android | Kotlin 2.x latest stable (not a pre-release), AGP latest stable, Compose BOM latest stable, Room, WorkManager and Paging 3 latest stable, Hilt 2.60.1, OkHttp 5.5.0, Retrofit 3.0.0, kotlinx.serialization (latest stable), OpenAPI Generator Gradle plugin 7.14.0, Sentry Android 8.59.0, Robolectric 4.17, MockK 1.14.11, Turbine 1.2.1, ktlint 1.8.0 |
 | Infrastructure (stage 0) | Postgres **18** (image pinned by digest), Mailpit `axllent/mailpit` 1.x (pinned by digest; A-2), pgBackRest 2.x from PGDG apt (installed, unused until stage 1), Caddy 2.x, Docker Desktop with the WSL2 backend and Compose v2, Tailscale (Windows client), bats-core, shellcheck (pinned by version in CI). Alloy, Squid, cosign, crane, sops, age and OpenTofu are stage-1 tools (stage-1 LLD). |
 
@@ -1172,8 +1177,8 @@ Pure functions with no I/O. Imported by the server and the web app. Android mirr
     - `contexts.trace.{trace_id, span_id}`;
     - `breadcrumbs.values[]` passed through `scrubBreadcrumb`.
 
-    Any `value` that doesn't match the `token` rule is replaced by the `type`.
-  - `scrubBreadcrumb` keeps only `category ∈ {"http", "navigation"}` with `data.url` reduced to scheme, host and path (F-37), `data.method` and `data.status_code`, plus `timestamp`, `type` and `level`. Anything else returns `null`.
+    Every `exception.values[].value` is replaced by that entry's `type`, unless it matches the API error-key format `^[A-Z][A-Z0-9_]{1,63}$` (A-101; the `token` rule isn't a safe filter for exception text).
+  - `scrubBreadcrumb` keeps only `category ∈ {"http", "navigation"}`; a kept breadcrumb has exactly `category`, `timestamp`, `type`, `level` and `data.{url, method, status_code}` (each only when present), with `data.url` reduced to scheme, host and path (F-37) (A-103). Anything else returns `null`.
 
 #### F-36: `startTelemetry`
 - **File:** `platform/observability/otel.ts`
@@ -3064,7 +3069,7 @@ The platform's slices are **capability slices** rather than one story each. Each
 
 ### S-3: Observability and privacy layers (US-10, US-11 part, PLT-BR-1)
 - **Depends on:** S-2
-- **Functions:** F-30 to F-38, F-40 to F-42; F-198 and the privacy canary harness in `@budmon/test-support` (§10.1, test-architect).
+- **Functions:** F-30 to F-38, F-40 to F-42, F-50 `BudmonError` (moved from S-4, A-100); F-198 and the privacy canary harness in `@budmon/test-support` (§10.1, test-architect).
 - **Scenarios:**
 
 | Scenario | Happy / unhappy | Expected | Tests |
@@ -3084,7 +3089,7 @@ The platform's slices are **capability slices** rather than one story each. Each
 
 ### S-4: Contract, OpenAPI, API server and error model (US-3, US-9)
 - **Depends on:** S-3
-- **Functions:** F-8, F-50 to F-59 (F-59 `appRouter`, A-26), F-90 (complete), F-96 (API members used so far, plus `moduleRoutes`, A-26), F-160, F-340 to F-349, root script `contract:openapi` (§2.2.2, A-14), CI step 2 (contract checks: drift, `oasdiff`, F-8, F-348).
+- **Functions:** F-8, F-51 to F-59 (F-50 is S-3's, A-100) (F-59 `appRouter`, A-26), F-90 (complete), F-96 (API members used so far, plus `moduleRoutes`, A-26), F-160, F-340 to F-349, root script `contract:openapi` (§2.2.2, A-14), CI step 2 (contract checks: drift, `oasdiff`, F-8, F-348).
 - **Scenarios:**
 
 | Scenario | Happy / unhappy | Expected | Tests |
@@ -3387,9 +3392,9 @@ The repository has no test tooling yet. The test-architect sets it up in S-0 to 
   | `shared` | node | `packages/shared/test/**/*.test.ts` |
   | `contract` | node | `packages/contract/test/**/*.test.ts` |
   | `server-unit` | node | `apps/server/test/unit/**/*.test.ts` |
-  | `server-int` | node, `globalSetup` | `apps/server/test/integration/**/*.test.ts` |
+  | `server-int` | node, `globalSetup` | `apps/server/test/integration/**/*.test.ts`, `apps/server/test/privacy/**/*.test.ts` (A-102) |
   | `web-unit` | jsdom, `@solidjs/testing-library`, MSW | `apps/web/test/**/*.test.tsx?` |
-  | `tools` | node | `tools/*/test/**/*.test.ts`, `infra/budmonctl/test/**/*.test.ts`, `packages/config/test/**/*.test.ts` |
+  | `tools` | node | `tools/*/test/**/*.test.ts`, `infra/budmonctl/test/**/*.test.ts`, `packages/config/test/**/*.test.ts`, `packages/test-support/test/**/*.test.ts` (A-102) |
 - **Scripts** (exact commands and owning slices in §2.2.2, A-14): root `pnpm test` runs all projects except `server-int`. `pnpm test:int` runs `server-int`. `pnpm test:e2e` runs Playwright (S-11b). `pnpm test:bats` runs the bats suites (S-15). `pnpm check` = format + lint + typecheck + `test` + `test:int`; `pnpm check:all` = `check` + `test:e2e` (S-11b) + Android `./gradlew check` (S-13).
 - **Integration database** (`apps/server/test/setup/globalSetup.ts`):
   1. Start `POSTGRES_IMAGE` from `apps/server/test/setup/postgresImage.ts` (`postgres:18@sha256:<64 hex>`; S-15's `images/postgres` base uses the same reference, checked by TP-15.30, A-61) with Testcontainers and the command `postgres -c shared_preload_libraries=pg_stat_statements -c pg_stat_statements.track_utility=off`, or use `TEST_DATABASE_URL` (a superuser URL) if set.
@@ -3512,7 +3517,7 @@ Types: **U** unit, **I** integration (real Postgres and/or HTTP in-process), **E
 | TP-3.2 | S-3 | U | F-31 | `logCapture`, `onDrop` spy | `info("Bad Event!", {payee: CANARIES.payee})`; `error("x_failed", {}, new Error(CANARIES.message))` | Line 1 `event:"invalid_event"`, `dropped:2`, `onDrop(2)`; line 2 has `err.class:"Error"`; the canary is absent from all lines |
 | TP-3.3 | S-3 | U | F-32 | `Secret.of(CANARIES.token)` | `JSON.stringify`, `util.inspect({s})`, template, `console.log` captured | `[redacted]`; no canary |
 | TP-3.4 | S-3 | U | F-33 | errors: `BudmonError("NOT_FOUND",404)`; pg `DatabaseError` code `23505` detail with canary; `Object.assign(new Error("x"),{code:"ECONNREFUSED"})`; a Gaxios-like `{response:{status:403,data:{error:{errors:[{reason:"rateLimitExceeded"}]}}}, config:{headers:{Authorization:"Bearer "+token}}}`; an error whose stack contains a line with canary text; `AggregateError`; `"str"` | | `{class:"BudmonError",key:"NOT_FOUND"}`; `{class:"DatabaseError",code:"23505"}`; `code:"ECONNREFUSED"`; `{status:403, reason:"rateLimitExceeded"}`; the frame with canary text dropped; `class:"AggregateError"`; `class:"NonError"`; no canary anywhere |
-| TP-3.5 | S-3 | U | F-35 | event with `request`, `extra`, `user.email`, tag `foo`, `exception.values[0].value = CANARIES.message`, breadcrumbs `console` and `http` with a query URL | `scrubSentryEvent` | Only allowlisted keys; value = type; console breadcrumb gone; http URL without query |
+| TP-3.5 | S-3 | U | F-35 | event with `request`, `extra`, `user.email`, tag `foo`, `exception.values[0].value = CANARIES.message`, breadcrumbs `console` and `http` with a query URL | `scrubSentryEvent` ; a second exception entry with value `NOT_FOUND` (A-101) | Only allowlisted keys; value = type (the canary is replaced although it's token-shaped, A-101); `NOT_FOUND` kept; the http breadcrumb keeps `category "http"` (A-103); console breadcrumb gone; http URL without query |
 | TP-3.6 | S-3 | U | F-34 | Sentry test transport | `report(new Error(CANARIES.message), {requestId:"r1"})`; no DSN | One envelope with type `Error`, value `Error`, tag-free of the canary; no-op |
 | TP-3.7 | S-3 | U | F-40 | InMemory exporter | A span with `http.route`, `url.full` with a query, `http.request.header.cookie`, `user.email`, an exception event, an event `custom` | Exported span keeps `http.route` only; no events; `onDrop("expected", 3)` (url.full, header, exception) and `onDrop("unexpected", 2)` (user.email, custom) |
 | TP-3.8 | S-3 | U | F-41 | `MeterProvider` + `InMemoryMetricExporter` | Register with label `user_id`; record with undeclared label `foo` and value `"a b"` | Throws; recorded without `foo`, value `"invalid"`; `onDrop` called twice |
@@ -3537,7 +3542,7 @@ Types: **U** unit, **I** integration (real Postgres and/or HTTP in-process), **E
 | TP-4.15 | S-4 | I | F-52 | API | `GET /api/v1/nope` | 404, body exactly `{"defined":true,"code":"NOT_FOUND","status":404,"message":"Not found"}` |
 | TP-4.16 | S-4 | I | F-53, F-54 | test router with authed and owner procedures, whose handlers echo `ctx.principal`; auth hooks returning `testPrincipal({ sessionId: "s-1" })`, a non-owner, or throwing | Call | 200 with `{ userId, isOwner, sessionId: "s-1" }` echoed unchanged (A-1); owner procedure → 403 `FORBIDDEN`; throwing hook → 500 INTERNAL |
 | TP-4.17 | S-4 | I | F-38 | `logCapture` | `GET /api/v1/meta/client-config?x=CANARY` | One `http_request` line with route `/meta/client-config`, status 200, no `x`, no canary; `http_server_requests_total` incremented |
-| TP-4.18 | S-4 | U | F-50 | none | `new BudmonError("bad key", 400)`; `("OK_KEY", 200)` | `TypeError` ×2 |
+| TP-4.18 | S-3 (A-100) | U | F-50 | none | `new BudmonError("bad key", 400)`; `("OK_KEY", 200)` | `TypeError` ×2 |
 | TP-4.19 | S-4 | I | F-55 body handling (spike) | API with a test create procedure | Valid JSON; malformed JSON; 100 KiB + 1 body; valid JSON with an extra unknown field | 201; F-62's 400 `invalid_json` (oRPC handler never invoked: interceptor spy not called); 413; 400 `VALIDATION_FAILED` from oRPC with code `unrecognized_keys` |
 | TP-4.20 | S-4 | U | F-160 | catalogs `en.json` with `test.hello` = `Hello {name}`; `ar` missing | `renderMessage("en","test.hello",{name:"Ali"})`; `("ar-EG", …)`; unknown id | `Hello \u2068Ali\u2069`; falls back to `en`; throws |
 | TP-4.21 | S-4 | I | F-40 with real instrumentation | full API with `startTelemetry` and an in-memory trace exporter; `onDrop` spy | `GET /api/v1/meta/client-config?x=1` with a `User-Agent`; a request that runs a query | `onDrop("unexpected", n)` never called with n > 0; exported spans contain no `url.full`, `user_agent.original` or `x=1` |
