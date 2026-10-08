@@ -2,7 +2,7 @@
 module: platform
 doc: lld
 status: approved # draft | in-review | approved
-version: 0.34
+version: 0.35
 hld_version: 1.3
 author: planner
 approved_by: the user (project owner), delegated auto-approval
@@ -100,6 +100,7 @@ Nothing in that list changes application code (D-29 rule 2).
 | 0.32    | 2026-10-08 | Implementation-time amendments A-120, A-121 (test-architect, S-3 leak tests `2228e71`). **A-120:** new F-39 `startupState` and `installFatalHandlers` (`platform/observability/fatal.ts`) with injectable logger destination, exit and event target; how TP-3.16 and TP-3.17 drive them. **A-121:** A-112 tightened: `userId` a UUID, `requestId` 32 lower-case hex, `jobName` F-70's job-name format; `route` and `errorKey` stay shape-checked code constants. Tests: TP-3.6, TP-3.14, TP-3.16, TP-3.17 rewritten. Approval stands. |
 | 0.33    | 2026-10-08 | Implementation-time amendment A-122: F-34 sends the request id as a `request_id` tag, allowed by F-35 under A-121's rule. TP-3.6 wording made exact. Approval stands. |
 | 0.34    | 2026-10-08 | Implementation-time amendments A-123 to A-129 (test-architect, S-4 tests `67e5515`). **A-123:** F-53 exports `requireAuth`, `requireOwner` and `procedureBases(contract)`. **A-124:** F-61 and F-62 move to S-4 (with TP-5.1 to TP-5.4); F-65's coarse limit stays S-5. **A-125:** `registerHealthRoutes` deps defined; `createApiServer` takes `opts.journal`, so TP-4.13 (c) runs over HTTP. **A-126:** F-160 gets injectable catalogues (`createMessageRenderer`); no test message in `en.json`. **A-127:** F-349's `prefix` defined. **A-128:** TP-4.7's version is `API_VERSION`. **A-129:** Kotlin spike toolchain pins. Tests: TP-4.7, TP-4.13, TP-4.20, TP-5.1 to TP-5.4 changed. Approval stands. |
+| 0.35    | 2026-10-08 | Implementation-time amendment A-130 (test-architect, S-4): `budmon_app` gets `USAGE` on schema `drizzle` and `SELECT` on `drizzle.__drizzle_migrations` (F-16 step 5) for F-57's readiness check; §3.4's leftover "English ISO names" line aligned with A-69. Tests: TP-2.11, TP-4.13 extended. Approval stands. |
 
 ## Amendments
 
@@ -234,6 +235,7 @@ Nothing in that list changes application code (D-29 rule 2).
 | A-127 | Q-5 (test-architect, S-4): F-349's `prefix?` has no stated meaning. | `prefix` (default `""`) is prepended, followed by `.`, to every dotted path, for listing a sub-router under its key: `listProcedures(contract.meta, "meta")` returns `meta.clientConfig`, the same as listing the whole contract. Methods and routes are unaffected. | F-349 | none | planner decision |
 | A-128 | Q-6 (test-architect, S-4): TP-4.7 says `"1.0"`; the test asserts `API_VERSION`. | **Confirmed.** The expected header and `apiVersion` are `API_VERSION` (F-341, `"1." + API_MINOR`), which is `"1.0"` while `API_MINOR` is 0; asserting the constant keeps the test right after a bump. | TP-4.7 | none | planner decision |
 | A-129 | The Kotlin spike's toolchain (TP-4.3) isn't pinned; §2.4 says "latest stable" (test-architect, S-4). | §2.4 records the spike's toolchain: Kotlin **2.2.20**, kotlinx-serialization **1.9.0**, with OkHttp 5.5.0 and Retrofit 3.0.0 (already listed). S-13 starts from these pins; moving to a newer Kotlin there is a reviewed change recorded in §2.4. | §2.4 | none | planner decision |
+| A-130 | In production and rehearsal F-57's `checkReadiness` reads `drizzle.__drizzle_migrations` as `budmon_app` (the API's connection), which has no privilege on schema `drizzle`, so readiness would fail with 42501; TP-4.13 (c) worked around it by connecting as `budmon_migrator` (test-architect, S-4). | **Option (a), for `budmon_app` only.** The table holds only migration hashes and timestamps, so read access leaks nothing, and it avoids a `SECURITY DEFINER` function or a second connection. F-16 (schema step 4), **when schema `drizzle` exists** (it's created by F-18 in migrate mode; push-mode databases have none and readiness then skips the check, F-57 step 2): `GRANT USAGE ON SCHEMA drizzle TO budmon_app` and `GRANT SELECT ON drizzle.__drizzle_migrations TO budmon_app`; nothing else on that schema, and nothing for `budmon_capture`, `budmon_queue` or `budmon_monitor` (only the API serves `/health/ready`; workers use the heartbeat, F-79). §3.3 records it. TP-4.13 (c) connects as **`budmon_app`**, like the real API. Also fixed in passing: §3.4's "Names are the English ISO names" now says CLDR English names (A-69). | F-16, §3.3, §3.4, F-57, TP-2.11, TP-4.13 | none | planner decision |
 
 ## 1. Deviations from the HLD, and decisions the HLD left open
 
@@ -487,7 +489,7 @@ The existing `users`, `accounts`, `account_owners`, `refresh_tokens` and `curren
 | ---- | ---------- | ------- | ---------- |
 | `budmon_admin` | SUPERUSER, LOGIN | Owner (`docker exec -u postgres … psql -U budmon_admin`), `budmon-local`'s `pg_dump`/`pg_restore`, and pgBackRest from stage 1, over the container's Unix socket only: `pg_hba` `local all budmon_admin peer map=local_admin`, with `pg_ident.conf` mapping OS user `postgres` to `budmon_admin`; no `host` line | All. |
 | `budmon_migrator` | LOGIN, CREATEROLE, NOINHERIT | `migrate` container; dev/test schema step; `cli restore:verify` | Owns database `budmon` and schema `public`. Granted `budmon_queue` `WITH SET TRUE, INHERIT FALSE`; `pg_read_all_data` `WITH INHERIT TRUE`; `pg_monitor` `WITH ADMIN TRUE, INHERIT FALSE, SET FALSE`; `EXECUTE` on `bt_index_check`. Has ADMIN on the roles it creates. |
-| `budmon_app` | LOGIN, NOINHERIT | api, worker-general (domain writes) | Per `tableGrants` (F-16). On `pgboss`: `USAGE` on the schema, `SELECT, INSERT, UPDATE` on its tables and `EXECUTE` on its functions, through `ALTER DEFAULT PRIVILEGES FOR ROLE budmon_queue IN SCHEMA pgboss`. |
+| `budmon_app` | LOGIN, NOINHERIT | api, worker-general (domain writes) | Per `tableGrants` (F-16). On schema `drizzle` (when it exists): `USAGE` and `SELECT` on `__drizzle_migrations` only, for F-57's readiness check (A-130). On `pgboss`: `USAGE` on the schema, `SELECT, INSERT, UPDATE` on its tables and `EXECUTE` on its functions, through `ALTER DEFAULT PRIVILEGES FOR ROLE budmon_queue IN SCHEMA pgboss`. |
 | `budmon_capture` | LOGIN, NOINHERIT | worker-capture | Per `tableGrants`. On `pgboss`: the same as `budmon_app`; pg-boss runs with maintenance and scheduling off (F-77). |
 | `budmon_queue` | LOGIN, NOINHERIT | worker-general's pg-boss connections | Owns schema `pgboss`. |
 | `budmon_monitor` | LOGIN, NOINHERIT; member of `pg_monitor` **WITH INHERIT TRUE** | Alloy's postgres exporter (from stage 1; the role is created from the first release so the schema step is the same in every stage) | `CONNECT`, plus `pg_monitor`'s statistics views. |
@@ -508,7 +510,7 @@ The existing `users`, `accounts`, `account_owners`, `refresh_tokens` and `curren
 **Reference data:** `apps/server/src/platform/fx/iso4217.json` is an array of `{ "code": "EGP", "name": "Egyptian Pound", "minorUnits": 2, "active": true }`. **Sources (A-69):** codes, `active` and `minorUnits` from ISO 4217 List One (current, published by SIX); kept withdrawn currencies from List Three (its minor units, else 2); `name` = CLDR English display name (`Intl.DisplayNames("en", { type: "currency" })` on Node 24), display only, kept verbatim with CLDR's own casing (A-78). Regenerating the file is a reviewed change.
 - It contains every currency in ISO 4217 table A.1 (as published by SIX on the date the slice is built), plus currencies withdrawn since 2000-01-01 (table A.3) with `active: false`.
 - It excludes metals (XAU, XAG, XPT, XPD), XDR, the bond-market units XBA to XBD, XSU, XUA, the testing and "no currency" codes XTS and XXX, and every fund code (BOV, CHE, CHW, CLF, COU, MXV, USN, UYI, UYW).
-- Names are the English ISO names. The file is loaded by F-21.
+- Names are CLDR English display names (A-69). The file is loaded by F-21.
 
 ### 3.4 Migration and seed data
 
@@ -1009,6 +1011,7 @@ Pure functions with no I/O. Imported by the server and the web app. Android mirr
   2. Grants exactly the listed privileges.
   3. Grants `USAGE, SELECT` on the table's sequences when `INSERT` is granted.
   4. `budmon_monitor` gets no table privileges (`pg_monitor` covers statistics).
+  5. If schema `drizzle` exists: `GRANT USAGE ON SCHEMA drizzle TO budmon_app` and `GRANT SELECT ON drizzle.__drizzle_migrations TO budmon_app` (F-57's readiness check, A-130); no other role gets anything there.
 
   Modules add their tables to `tableGrants` in their own slices, through an import of `<module>Grants` merged in `grants.ts`.
 - **Errors:**
@@ -1391,7 +1394,7 @@ Pure functions with no I/O. Imported by the server and the web app. Android mirr
   - `checkReadiness`:
     1. `SELECT 1` with a 2 s timeout; failure → `database_unreachable`.
     2. In `development`/`test`, or if `drizzle.__drizzle_migrations` doesn't exist and the journal is empty → ready.
-    3. Otherwise reads the migrations table (`hash`, `created_at`) and applies `schemaWindow`.
+    3. Otherwise reads the migrations table (`hash`, `created_at`) through the API's own `budmon_app` connection (granted by F-16 step 5, A-130) and applies `schemaWindow`.
   - Routes:
     - `GET /health/live` → `200 {"status":"ok"}`.
     - `GET /health/ready` → `200 {"status":"ready"}` or `503 {"status":"not_ready","reason":"<reason>"}`.
@@ -3535,7 +3538,7 @@ Types: **U** unit, **I** integration (real Postgres and/or HTTP in-process), **E
 | TP-2.9 | S-2 | I | F-14 | fresh container | Run twice | Second run succeeds; `budmon_migrator` owns the database; `CREATE` on `public` revoked from `PUBLIC` |
 | TP-2.10 | S-2 | I | F-15 | after F-14; recording fake `Logger` (A-51); container started with `pg_stat_statements` | (a) password forms with the password = `CANARIES.token`; (b) a verifier from F-190 for `budmon_app`; (c) verifier `"SCRAM-SHA-256$bad"`; (d) password form with `appEnv: "production"`; (e) (A-77) `budmon_app` pre-created by the superuser as `LOGIN SUPERUSER`, then F-15; (f) `budmon_queue` pre-created `LOGIN CREATEDB INHERIT` | (a) roles exist, NOINHERIT; one `role_password_set` per role; the canary appears in no log call and no `pg_stat_statements.query` row (spans: TP-3.12); (b) login as `budmon_app` with the password succeeds; (c) `SchemaStepError` with `code "invalid_verifier"`, `subject "budmon_app"` (A-52) and no role altered; (d) `password_form_in_production`; (e) `SchemaStepError` `code "role_attributes_unexpected"`, `subject "budmon_app"`, no password changed and no role created; (f) the same with `subject "budmon_queue"` |
 | TP-2.20 | S-2 | I | F-14, F-15 (P-7) | after the schema step | As `budmon_migrator`: `SELECT count(*) FROM pgboss.job` and `SELECT bt_index_check('currencies_pkey'::regclass, true)`; as `budmon_monitor`: `SELECT count(*) FROM pg_stat_activity WHERE usename = 'budmon_app'` sees other roles' rows | All succeed (no 42501); the monitor sees non-own sessions (`pg_monitor` inherited) |
-| TP-2.11 | S-2 | I | F-16 | template DB | As `budmon_app`: `SELECT` from and `INSERT` into `currencies`; as `budmon_capture`: `SELECT` from `idempotency_records`; F-16 with a grants map missing `currencies`; a map with `credential: true, capture: ["SELECT"]` | ok; 42501; 42501; `table_without_grants`; `credential_table_granted_to_capture` |
+| TP-2.11 | S-2 | I | F-16 | template DB | As `budmon_app`: `SELECT` from and `INSERT` into `currencies`; as `budmon_capture`: `SELECT` from `idempotency_records`; F-16 with a grants map missing `currencies`; a map with `credential: true, capture: ["SELECT"]`; (A-130) after migrate mode on an empty-journal fixture that creates schema `drizzle`: as `budmon_app` `SELECT hash FROM drizzle.__drizzle_migrations` and `INSERT` into it; as `budmon_capture` the same `SELECT`; F-16 on a push-mode database (no schema `drizzle`) | ok; 42501; 42501; `table_without_grants`; `credential_table_granted_to_capture`; (A-130) ok; 42501; 42501; completes without error |
 | TP-2.12 | S-2 | I | F-17 | empty database; non-empty database | Push | Four tables exist; `relpersistence` of `rate_limit_counters` = `u`; `PushTargetNotEmptyError` |
 | TP-2.13 | S-2 | I | F-18 | fixture migrations folder (2 migrations); a database with an extra recorded hash; (A-80) a folder with no `meta/_journal.json`, on a fresh database and on one with a recorded hash | Apply | `{applied:2}` then `{applied:0, verified:2}`; `UnknownMigrationError`; (A-80) `readJournal` → `[]`, `{applied:0, verified:0}` without calling Drizzle's `migrate`, and `UnknownMigrationError` |
 | TP-2.14 | S-2 | U+I | F-21, `iso4217.json` | file; database | (U) invariants; (I) load, then change a name in the input, then change EGP's `minorUnits` | (U) unique codes; every entry has a non-empty `name` and `minorUnits` in 0..4 (A-69); EGP 2, JPY 0, KWD 3, BHD 3, USD 2; none of XAU, XAG, XPT, XPD, XDR, XTS, XXX, CLF, BOV; (I) upserted count; name updated; `minor_units_changed` and nothing changed |
@@ -3594,7 +3597,7 @@ Types: **U** unit, **I** integration (real Postgres and/or HTTP in-process), **E
 | TP-4.10 | S-4 | I | F-52 interceptor | test router whose handlers throw: `RateLimitedError(30)`, `new Error(CANARIES.message)` | Call through HTTP | 429 with `Retry-After: 30`, no report; 500 envelope `{"defined":true,"code":"INTERNAL","status":500,"message":"Internal error","data":{"outcome":"not_applied"}}`, one report without the canary, one `request_failed` log line |
 | TP-4.11 | S-4 | U+I | F-56 | min android 5, min web 2 | Headers `android/4`, `android/5`, `web/1`, `ios/1`, missing; and `android/1` on `meta.clientConfig` | 400 `CLIENT_UPDATE_REQUIRED` `{minimumVersion:5}`; pass; 400 `{minimumVersion:2}`; pass (other); pass; pass |
 | TP-4.12 | S-4 | U | F-57 `schemaWindow` | journals | applied = journal; journal + 1 extra; + 2 extra; missing one | ok; ok; ahead; behind |
-| TP-4.13 | S-4 | I | F-57 routes | (a) database up; (b) pool pointed at a closed port; (c) `appEnv: "production"` with the journal one entry ahead of the database, injected through `createApiServer`'s `opts.journal` (A-125) | `GET /health/ready`, `GET /health/live` | (a) 200 ready; (b) 503 `database_unreachable`; (c) 503 `schema_behind`; live always 200; `Cache-Control: no-store` |
+| TP-4.13 | S-4 | I | F-57 routes | (a) database up; (b) pool pointed at a closed port; (c) `appEnv: "production"` with the journal one entry ahead of the database, injected through `createApiServer`'s `opts.journal` (A-125), the API connecting as `budmon_app` (A-130) | `GET /health/ready`, `GET /health/live` | (a) 200 ready; (b) 503 `database_unreachable`; (c) 503 `schema_behind`; live always 200; `Cache-Control: no-store` |
 | TP-4.14 | S-4 | I | F-55 | API | `OPTIONS /api/v1/meta/client-config` with `Origin: https://evil.example` | 404 envelope; no `Access-Control-*` headers |
 | TP-4.15 | S-4 | I | F-52 | API | `GET /api/v1/nope` | 404, body exactly `{"defined":true,"code":"NOT_FOUND","status":404,"message":"Not found"}` |
 | TP-4.16 | S-4 | I | F-53, F-54 | test router with authed and owner procedures, whose handlers echo `ctx.principal`; auth hooks returning `testPrincipal({ sessionId: "s-1" })`, a non-owner, or throwing | Call | 200 with `{ userId, isOwner, sessionId: "s-1" }` echoed unchanged (A-1); owner procedure → 403 `FORBIDDEN`; throwing hook → 500 INTERNAL |
