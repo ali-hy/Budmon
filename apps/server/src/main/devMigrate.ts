@@ -30,12 +30,13 @@ if (
       const root = repoRoot();
       process.chdir(root);
       const dotenv = path.join(root, ".env");
-      // The shell wins over .env, and process.env isn't changed.
+      // The shell wins over .env, and process.env isn't changed. The migrator's login defaults
+      // apply unless the shell sets them: .env's DB_USER and DB_PASSWORD_FILE are the api's.
       const env = {
         ...(existsSync(dotenv) ? parseEnv(readFileSync(dotenv, "utf8")) : {}),
-        ...process.env,
+        ...devMigrateEnv(process.env),
       };
-      return runMigrate(devMigrateEnv(env));
+      return runMigrate(env);
     },
     (line) => process.stderr.write(`${line}\n`),
   );
