@@ -27,6 +27,8 @@ const ROWS: Readonly<Record<string, string>> = {
   "db:reset": "pnpm --filter @budmon/server db:reset",
   "db:seed": "pnpm --filter @budmon/server db:seed",
   "db:migrate": "pnpm --filter @budmon/server db:migrate",
+  // S-4 (A-14)
+  "contract:openapi": "pnpm --filter @budmon/contract contract:openapi",
 };
 
 /** §2.2.2's package-script column for apps/server, plus F-24's build (A-43). */
@@ -74,5 +76,17 @@ describe("TP-0.26x: apps/server package scripts (§2.2.2, F-24)", () => {
     };
 
     expect(pkg.scripts?.[name]).toBe(command);
+  });
+});
+
+// TP-0.26x: the contract package's script that the root contract:openapi delegates to (§2.2.2).
+describe("TP-0.26x: packages/contract package scripts (§2.2.2, F-347)", () => {
+  it('TP-0.26x: contract:openapi is "tsx scripts/emitOpenapi.ts"', () => {
+    const pkg = JSON.parse(
+      readFileSync(path.join(ROOT, "packages/contract/package.json"), "utf8"),
+    ) as { name?: string; scripts?: Record<string, unknown> };
+
+    expect(pkg.name).toBe("@budmon/contract");
+    expect(pkg.scripts?.["contract:openapi"]).toBe("tsx scripts/emitOpenapi.ts");
   });
 });
