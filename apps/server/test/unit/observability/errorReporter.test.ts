@@ -107,12 +107,13 @@ describe("TP-3.6: token-shaped canaries in ErrorContext are dropped, valid value
     const [event] = eventsOf(sentry.bodies);
     expect((event?.["user"] as Record<string, unknown> | undefined)?.["id"]).toBeUndefined();
     expect((event?.["tags"] ?? {}) as Record<string, unknown>).not.toHaveProperty("job");
+    expect((event?.["tags"] ?? {}) as Record<string, unknown>).not.toHaveProperty("request_id");
     expect(
       scanForCanaries([{ name: "envelope", text: sentry.bodies.join("\n") }], CANARIES),
     ).toEqual([]);
   });
 
-  it("TP-3.6: with a UUID userId, a job-name jobName and a 32-hex requestId, user.id and the job tag are present", async () => {
+  it("TP-3.6: a UUID userId, a job-name jobName and a 32-hex requestId give user.id, the job tag and the request_id tag (A-122)", async () => {
     const sentry = await server();
     const reporter = initSentry({ ...CFG, dsn: sentry.dsn });
 
@@ -124,8 +125,9 @@ describe("TP-3.6: token-shaped canaries in ErrorContext are dropped, valid value
     expect((event?.["tags"] ?? {}) as Record<string, unknown>).toMatchObject({
       job: VALID.jobName,
     });
-    // TP-3.6 says all three are present, but F-34's event has no field for the request id (only
-    // the route, job and error_key tags and user.id), so only those two are checked (raised).
+    expect((event?.["tags"] ?? {}) as Record<string, unknown>).toMatchObject({
+      request_id: VALID.requestId,
+    });
   });
 });
 

@@ -222,7 +222,7 @@ describe("TP-3.24x: scrubSentryEvent and scrubBreadcrumb, further cases (F-35)",
     },
   );
 
-  it("TP-3.24x: tags keep only route, job, client_kind and error_key", () => {
+  it("TP-3.24x: tags keep only route, job, client_kind, error_key and request_id (A-122)", () => {
     const event = {
       ...rawEvent(),
       tags: {
@@ -230,6 +230,7 @@ describe("TP-3.24x: scrubSentryEvent and scrubBreadcrumb, further cases (F-35)",
         job: "platform.fx-rates-fetch",
         client_kind: "web",
         error_key: "NOT_FOUND",
+        request_id: "0123456789abcdef0123456789abcdef",
         other: "x",
       },
     };
@@ -239,8 +240,18 @@ describe("TP-3.24x: scrubSentryEvent and scrubBreadcrumb, further cases (F-35)",
       job: "platform.fx-rates-fetch",
       client_kind: "web",
       error_key: "NOT_FOUND",
+      request_id: "0123456789abcdef0123456789abcdef",
     });
   });
+
+  it.each([["r1"], [CANARIES.payee], ["0123456789ABCDEF0123456789ABCDEF"], ["0".repeat(33)]])(
+    "TP-3.24x: a request_id tag %j that isn't 32 lowercase hex is dropped (A-122)",
+    (requestId) => {
+      const event = { ...rawEvent(), tags: { route: "/a", request_id: requestId } };
+
+      expect((scrubSentryEvent(event) as { tags: unknown }).tags).toEqual({ route: "/a" });
+    },
+  );
 
   it.each([["console"], ["query"], ["ui.click"], ["sentry.event"]])(
     "TP-3.24x: a %s breadcrumb is removed",
