@@ -9,6 +9,7 @@ import { createDatabase } from "../platform/db/client.js";
 import {
   JournalInvalidError,
   MigrationFailedError,
+  readJournal,
   UnknownMigrationError,
 } from "../platform/db/migrations.js";
 import { runSchemaStep, SchemaStepError } from "../platform/db/schemaStep.js";
@@ -62,6 +63,14 @@ export async function runMigrate(
     logger.error("startup_failed", { reason: "DB_USER must be budmon_migrator" });
     return 1;
   }
+  const migrationsFolder = path.join(serverRoot(), "drizzle");
+  // A-160: the journal is checked before the database is touched (read again by F-18).
+  try {
+    readJournal(migrationsFolder);
+  } catch (error) {
+    logger.error("startup_failed", describeFailure(error));
+    return error instanceof JournalInvalidError ? 5 : 1;
+  }
 
   let attempt = await connect(config, config.db.password, logger);
   const previous = config.migrate.previousPassword;
@@ -82,7 +91,7 @@ export async function runMigrate(
     const report = await runSchemaStep({
       mode: "migrate",
       database,
-      migrationsFolder: path.join(serverRoot(), "drizzle"),
+      migrationsFolder,
       roleSecrets,
       appEnv: config.appEnv,
       referenceData: { currencies: iso4217 },

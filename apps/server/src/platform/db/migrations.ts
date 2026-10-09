@@ -29,6 +29,8 @@ export class JournalInvalidError extends Error {
   }
 }
 
+const JOURNAL_TAG = /^[0-9]{4}_[a-z0-9_]+$/;
+
 export function readJournal(
   migrationsFolder: string,
 ): { tag: string; when: number; hash: string }[] {
@@ -42,26 +44,42 @@ export function readJournal(
     throw new JournalInvalidError();
   }
   if (!Array.isArray(entries)) throw new JournalInvalidError();
-  return (entries as { tag: string; when: number }[]).map((entry) => ({
-    tag: entry.tag,
-    when: entry.when,
-    hash: createHash("sha256")
-      .update(readFileSync(path.join(migrationsFolder, `${entry.tag}.sql`), "utf8"))
-      .digest("hex"),
-  }));
+  return entries.map((raw: unknown, position) => {
+    // A-160: every entry is checked; any failure is the same error, without the file's content.
+    const entry = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : {};
+    const { tag, when, idx } = entry;
+    if (
+      typeof tag !== "string" ||
+      !JOURNAL_TAG.test(tag) ||
+      typeof when !== "number" ||
+      !Number.isSafeInteger(when) ||
+      when < 0 ||
+      idx !== position
+    ) {
+      throw new JournalInvalidError();
+    }
+    let sql: string;
+    try {
+      sql = readFileSync(path.join(migrationsFolder, `${tag}.sql`), "utf8");
+    } catch {
+      throw new JournalInvalidError();
+    }
+    return { tag, when, hash: createHash("sha256").update(sql).digest("hex") };
+  });
 }
 
 export async function applyCommittedMigrations(
   database: Database,
   migrationsFolder: string,
 ): Promise<{ applied: number; verified: number }> {
+  // A-160: an invalid journal fails before any statement.
+  const journal = readJournal(migrationsFolder);
   // A-146: every migrate-mode database has the table, whatever the journal holds. Drizzle's own
   // definition, so its migrator later finds it unchanged.
   await database.handle.executeSql("CREATE SCHEMA IF NOT EXISTS drizzle");
   await database.handle.executeSql(
     "CREATE TABLE IF NOT EXISTS drizzle.__drizzle_migrations (id serial PRIMARY KEY, hash text NOT NULL, created_at bigint)",
   );
-  const journal = readJournal(migrationsFolder);
   const { rows } = await database.handle.executeSql(
     "SELECT hash, created_at FROM drizzle.__drizzle_migrations",
   );
