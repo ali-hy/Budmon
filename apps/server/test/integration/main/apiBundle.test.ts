@@ -7,7 +7,15 @@
 // additions, not LLD test-plan IDs.
 import { spawn, spawnSync } from "node:child_process";
 import { createServer as createHttpServer, type Server } from "node:http";
-import { cpSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  cpSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { createConnection, createServer, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -618,6 +626,91 @@ function devApiEnvironment(
   };
 }
 
+// ---- A-225 (S-6 review B-1): a start-up failure after pg-boss started closes the container ----
+
+describe("A-225: a start-up failure after container.boss.start() closes the pool and pg-boss before exit 1 (F-90)", () => {
+  let testDb: TestDatabase;
+
+  beforeAll(async () => {
+    testDb = await createTestDatabase("budmon_app");
+  }, 60_000);
+
+  afterAll(async () => {
+    await testDb.drop();
+  });
+
+  /** The test database's session counters (pg_stat_database, PostgreSQL 14+). */
+  async function sessionCounters(): Promise<{ sessions: number; abandoned: number }> {
+    const [row] = await query<{ sessions: string; abandoned: string }>(
+      testDb.urlAs("budmon_migrator"),
+      "SELECT sessions::text AS sessions, sessions_abandoned::text AS abandoned FROM pg_stat_database WHERE datname = $1",
+      [testDb.name],
+    );
+    return { sessions: Number(row?.sessions ?? 0), abandoned: Number(row?.abandoned ?? 0) };
+  }
+
+  it("A-225: listen fails (the port is taken): exit 1 with startup_failed, and every session the api opened ended cleanly (none abandoned)", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "budmon-api-taken-port-"));
+    const blocker = createServer();
+    await new Promise<void>((resolve) => blocker.listen(0, "127.0.0.1", resolve));
+    const address = blocker.address();
+    const port = typeof address === "object" && address !== null ? address.port : 0;
+    try {
+      const before = await sessionCounters();
+
+      const result = await new Promise<{ code: number | null; output: string }>((resolve) => {
+        const child = spawn(process.execPath, START_COMMAND, {
+          cwd: SERVER_DIR,
+          env: devApiEnvironment(dir, testDb, port),
+          stdio: ["ignore", "pipe", "pipe"],
+        });
+        let output = "";
+        child.stdout.on("data", (c: Buffer) => (output += c.toString()));
+        child.stderr.on("data", (c: Buffer) => (output += c.toString()));
+        const timer = setTimeout(() => child.kill("SIGKILL"), 30_000);
+        child.on("exit", (code) => {
+          clearTimeout(timer);
+          resolve({ code, output });
+        });
+      });
+
+      expect(result.code, result.output).toBe(1);
+      const failures = result.output
+        .split("\n")
+        .flatMap((line): Record<string, unknown>[] => {
+          try {
+            const parsed: unknown = JSON.parse(line);
+            return isJsonObject(parsed) ? [parsed] : [];
+          } catch {
+            return [];
+          }
+        })
+        .filter((l) => l["event"] === "startup_failed");
+      expect(failures, result.output).toHaveLength(1);
+      expect(failures[0]?.["errorCode"], result.output).toBe("EADDRINUSE");
+      // The server records a session's end when its backend exits; give it a moment.
+      let after = await sessionCounters();
+      for (let i = 0; i < 20 && after.sessions <= before.sessions; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        after = await sessionCounters();
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      after = await sessionCounters();
+      // pg-boss started, so the api had connected; none of those sessions was dropped without
+      // the client's Terminate message (pool.end / boss.stop send it; a bare exit doesn't).
+      expect(after.sessions, result.output).toBeGreaterThan(before.sessions);
+      expect(after.abandoned - before.abandoned, result.output).toBe(0);
+    } finally {
+      await new Promise<void>((resolve) => {
+        blocker.close(() => {
+          resolve();
+        });
+      });
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 90_000);
+});
+
 // ---- S-6: the worker process ----
 
 /** The development worker fixture for `roles`, its files written into `dir`, APP_ENV test. */
@@ -643,6 +736,8 @@ function devWorkerEnvironment(
     ...env,
     APP_ENV: "test",
     WORKER_ROLES: roles,
+    // A-226: a heartbeat file of its own, never /tmp/heartbeat (healthcheck.test.ts reads it).
+    HEARTBEAT_FILE: path.join(dir, "heartbeat"),
     DB_HOST: db.host,
     DB_PORT: String(db.port),
     DB_NAME: db.name,
@@ -736,11 +831,18 @@ describe("TP-6.13, TP-6.15: the built worker with test jobs (fixture worker.mjs,
     };
   }
 
-  /** Spawns the fixture and resolves once it has logged worker_started (A-161). */
+  let runs = 0;
+
+  /**
+   * Spawns the fixture with a HEARTBEAT_FILE of its own (A-226) and resolves once it has logged
+   * worker_started (A-161).
+   */
   async function startFixture(extra: Record<string, string> = {}) {
+    runs += 1;
+    const heartbeatFile = path.join(dir, `heartbeat-${String(runs)}`);
     const child = spawn(process.execPath, FIXTURE, {
       cwd: SERVER_DIR,
-      env: fixtureEnv(extra),
+      env: fixtureEnv({ HEARTBEAT_FILE: heartbeatFile, ...extra }),
       stdio: ["ignore", "pipe", "pipe"],
     });
     let output = "";
@@ -759,7 +861,7 @@ describe("TP-6.13, TP-6.15: the built worker with test jobs (fixture worker.mjs,
       }
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
-    return { child, exited, output: () => output };
+    return { child, exited, output: () => output, heartbeatFile };
   }
 
   async function send(name: string): Promise<string> {
@@ -790,6 +892,9 @@ describe("TP-6.13, TP-6.15: the built worker with test jobs (fixture worker.mjs,
       expect(code, run.output()).toBe(0);
       expect(at - sentAt, run.output()).toBeLessThan(30_000);
       expect(await state("test.slow", id)).toBe("completed");
+      // A-226: F-79 wrote this run's HEARTBEAT_FILE, with the epoch seconds.
+      const beat = Number(readFileSync(run.heartbeatFile, "utf8"));
+      expect(Math.abs(Math.floor(Date.now() / 1000) - beat)).toBeLessThan(120);
     } finally {
       if (run.child.exitCode === null) run.child.kill("SIGKILL");
     }

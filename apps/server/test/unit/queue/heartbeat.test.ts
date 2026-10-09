@@ -14,7 +14,7 @@ import {
   registerPlatformMetrics,
 } from "../../../src/platform/observability/metrics.js";
 import { logCapture } from "../../support/telemetry.js";
-import { startHeartbeat } from "../../../src/platform/queue/heartbeat.js";
+import { heartbeatFile, startHeartbeat } from "../../../src/platform/queue/heartbeat.js";
 
 function harness() {
   const exporter = new InMemoryMetricExporter(AggregationTemporality.CUMULATIVE);
@@ -150,5 +150,16 @@ describe("TP-6.10: startHeartbeat (F-79)", () => {
     expect(h.setIntervalFake).toHaveBeenCalledWith(expect.any(Function), 1000);
     expect(h.writeFile).toHaveBeenLastCalledWith("/tmp/other-heartbeat", "1791547200");
     heartbeat.stop();
+  });
+});
+
+describe("TP-6.10: heartbeatFile (A-226)", () => {
+  it.each([
+    ["an absolute HEARTBEAT_FILE", { HEARTBEAT_FILE: "/var/tmp/hb-test" }, "/var/tmp/hb-test"],
+    ["the relative rel/hb", { HEARTBEAT_FILE: "rel/hb" }, "/tmp/heartbeat"],
+    ["an empty HEARTBEAT_FILE", { HEARTBEAT_FILE: "" }, "/tmp/heartbeat"],
+    ["no HEARTBEAT_FILE", {}, "/tmp/heartbeat"],
+  ])("TP-6.10: %s gives %s", (_label, env: Record<string, string>, expected) => {
+    expect(heartbeatFile(env)).toBe(expected);
   });
 });

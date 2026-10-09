@@ -7,7 +7,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { CANARIES, scanForCanaries } from "@budmon/test-support";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { recordingLogger } from "../../support/platform.js";
 import { query } from "../../support/postgres.js";
@@ -37,15 +37,17 @@ import {
   startWorkers,
 } from "../../../src/platform/queue/workers.js";
 
-// F-79 writes the fixed /tmp/heartbeat, which healthcheck.test.ts (running in parallel) reads:
-// the workers started here write that one path nowhere.
-vi.mock("node:fs", async (importOriginal) => {
-  const fs = await importOriginal<typeof import("node:fs")>();
-  const writeFileSync: typeof fs.writeFileSync = (file, ...rest) => {
-    if (file === "/tmp/heartbeat") return;
-    fs.writeFileSync(file, ...rest);
-  };
-  return { ...fs, default: { ...fs, writeFileSync }, writeFileSync };
+// A-226: every worker started here writes a heartbeat file of its own, never /tmp/heartbeat
+// (which healthcheck.test.ts reads).
+const heartbeatDir = mkdtempSync(path.join(tmpdir(), "budmon-workers-heartbeat-"));
+let heartbeats = 0;
+function heartbeatPath(): string {
+  heartbeats += 1;
+  return path.join(heartbeatDir, `heartbeat-${String(heartbeats)}`);
+}
+
+afterAll(() => {
+  rmSync(heartbeatDir, { recursive: true, force: true });
 });
 
 function queueBoss(c: WorkerContainer): PgBossLike {
@@ -80,7 +82,7 @@ describe("TP-6.7: handler success and failure through a running worker (F-76)", 
       [TEST_JOBS.ok.name, () => Promise.resolve({ secret: CANARIES.token })],
       [TEST_JOBS.fail.name, () => Promise.reject(new Error(CANARIES.message))],
     ]);
-    const w = await startWorkers(built.container, handlers);
+    const w = await startWorkers(built.container, handlers, { heartbeatPath: heartbeatPath() });
     stop = () => w.stop();
   }, 60_000);
 
@@ -152,6 +154,7 @@ describe("TP-6.7: attempts with retryLimit 2 (F-76, A-207)", () => {
           },
         ],
       ]),
+      { heartbeatPath: heartbeatPath() },
     );
     stop = () => w.stop();
   }, 60_000);
@@ -185,6 +188,7 @@ describe("TP-6.8: worker-capture as budmon_capture (F-77)", () => {
     const w = await startWorkers(
       built.container,
       new Map<string, JobHandler>([[TEST_JOBS.capture.name, () => Promise.resolve(undefined)]]),
+      { heartbeatPath: heartbeatPath() },
     );
     stop = () => w.stop();
   }, 60_000);
@@ -248,7 +252,9 @@ describe("TP-6.9: start-up checks and schedules (F-78)", () => {
         [missing.name, () => Promise.resolve(undefined)],
       ]);
 
-      const error = await startWorkers(built.container, handlers).then(
+      const error = await startWorkers(built.container, handlers, {
+        heartbeatPath: heartbeatPath(),
+      }).then(
         async (w) => {
           await w.stop();
           return undefined;
@@ -265,9 +271,9 @@ describe("TP-6.9: start-up checks and schedules (F-78)", () => {
   it("TP-6.19x: a definition without a handler: startWorkers throws 'no handler for <name>'", async () => {
     const built = await buildWorkerContainer("general", { registry: registryOf([TEST_JOBS.ok]) });
     try {
-      await expect(startWorkers(built.container, new Map())).rejects.toThrow(
-        `no handler for ${TEST_JOBS.ok.name}`,
-      );
+      await expect(
+        startWorkers(built.container, new Map(), { heartbeatPath: heartbeatPath() }),
+      ).rejects.toThrow(`no handler for ${TEST_JOBS.ok.name}`);
     } finally {
       await built.close();
     }
@@ -284,7 +290,7 @@ describe("TP-6.9: start-up checks and schedules (F-78)", () => {
     );
     try {
       await syncQueues(queueBoss(general.container), registry, recordingLogger());
-      const w = await startWorkers(general.container, handlers);
+      const w = await startWorkers(general.container, handlers, { heartbeatPath: heartbeatPath() });
       const { rows } = await general.testDb.database.handle.executeSql(
         "SELECT name, cron, timezone FROM pgboss.schedule",
       );
@@ -298,7 +304,7 @@ describe("TP-6.9: start-up checks and schedules (F-78)", () => {
     // A capture-only worker on another copy (no schedule rows yet).
     const capture = await buildWorkerContainer("capture", { registry });
     try {
-      const w = await startWorkers(capture.container, handlers);
+      const w = await startWorkers(capture.container, handlers, { heartbeatPath: heartbeatPath() });
       const { rows } = await capture.testDb.database.handle.executeSql(
         "SELECT name FROM pgboss.schedule",
       );
@@ -318,6 +324,7 @@ describe("TP-6.9: platform.fx-gap-check only when registered (F-78, A-203)", () 
       const w = await startWorkers(
         built.container,
         new Map<string, JobHandler>([[TEST_JOBS.ok.name, () => Promise.resolve(undefined)]]),
+        { heartbeatPath: heartbeatPath() },
       );
       await w.stop();
 
@@ -337,6 +344,7 @@ async function withDeadLetteredJob(): Promise<{ built: BuiltWorker; failId: stri
   const w = await startWorkers(
     built.container,
     new Map<string, JobHandler>([[TEST_JOBS.fail.name, () => Promise.reject(new Error("x"))]]),
+    { heartbeatPath: heartbeatPath() },
   );
   const c = built.container;
   const failId = await c.queue.enqueue(c.database.handle, TEST_JOBS.fail, { n: 3 });

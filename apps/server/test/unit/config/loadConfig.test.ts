@@ -569,6 +569,15 @@ describe("TP-2.30: DEV_SUPERUSER_URL is a development-tools variable, not config
     expect(JSON.stringify(config)).not.toContain("s3cr3tSuperUser");
     expect(JSON.stringify(config)).not.toContain("localhost:5432/postgres");
   });
+
+  it("TP-2.30: (A-226) with HEARTBEAT_FILE set, the worker config is accepted and holds no field for it", () => {
+    const f = devWorker();
+    f.env["HEARTBEAT_FILE"] = "/tmp/tp-2-30-heartbeat-path";
+
+    const config = load(f);
+
+    expect(JSON.stringify(config)).not.toContain("tp-2-30-heartbeat-path");
+  });
 });
 
 describe("TP-2.33: *_FILE paths (A-73)", () => {

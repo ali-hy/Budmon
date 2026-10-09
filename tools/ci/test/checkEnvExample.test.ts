@@ -1,5 +1,5 @@
 // F-7 checkEnvExample. TP-2.7, TP-2.30 (the committed .env.example against F-10's allConfigKeys,
-// including DEV_SUPERUSER_URL, A-59), plus extra cases TP-2.57x.
+// including DEV_SUPERUSER_URL, A-59, and HEARTBEAT_FILE, A-226), plus extra cases TP-2.57x.
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -44,6 +44,13 @@ describe("TP-2.7: checkEnvExample", () => {
 
   it("TP-2.30: allConfigKeys includes DEV_SUPERUSER_URL", () => {
     expect(allConfigKeys()).toContain("DEV_SUPERUSER_URL");
+  });
+
+  it("TP-2.30: (A-226) allConfigKeys includes HEARTBEAT_FILE, and .env.example leaves it empty", () => {
+    const example = readFileSync(path.join(ROOT, ".env.example"), "utf8");
+
+    expect(allConfigKeys()).toContain("HEARTBEAT_FILE");
+    expect(example.split(/\r?\n/)).toContain("HEARTBEAT_FILE=");
   });
 
   it("TP-2.30: .env.example sets DEV_SUPERUSER_URL to the local superuser", () => {
