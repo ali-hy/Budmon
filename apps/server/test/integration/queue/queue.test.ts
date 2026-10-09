@@ -15,10 +15,13 @@ import type { Database } from "../../../src/platform/db/types.js";
 import { testApiConfigFor } from "../../support/api.js";
 import {
   TEST_JOBS,
+  policyQueues,
+  queuePolicies,
   jobRows,
   registryOf,
   type JobDefinition,
   type PgBossLike,
+  NOT_SENDABLE,
 } from "../../support/jobs.js";
 import { connectDatabase, recordingLogger } from "../../support/platform.js";
 import {
@@ -52,6 +55,16 @@ describe("TP-6.4: the queue schema (F-74)", () => {
     await testDb.drop();
   });
 
+  /** The api's send-only pg-boss on this database, started once. */
+  async function startBoss(): Promise<PgBossLike> {
+    if (boss === undefined) {
+      const b = createPgBoss(testApiConfigFor(testDb), "send-only");
+      await b.start();
+      boss = b;
+    }
+    return boss;
+  }
+
   it("TP-6.4: schema pgboss belongs to budmon_queue", async () => {
     const [row] = await query<{ owner: string }>(
       testDb.urlAs("budmon_migrator"),
@@ -66,13 +79,31 @@ describe("TP-6.4: the queue schema (F-74)", () => {
   });
 
   it("TP-6.4: budmon_app (the api's send-only pg-boss) sends a job", async () => {
-    boss = createPgBoss(testApiConfigFor(testDb), "send-only");
-    await boss.start();
+    const boss = await startBoss();
 
     const id = await boss.send(TEST_JOBS.ok.name, { n: 1 });
 
     expect(typeof id).toBe("string");
     expect((await jobRows(testDb.database, TEST_JOBS.ok.name)).map((r) => r.id)).toContain(id);
+  });
+
+  it.each([
+    ["UPDATE pgboss.job_common", "UPDATE pgboss.job_common SET name = name WHERE false"],
+    ["DELETE FROM pgboss.job_common", "DELETE FROM pgboss.job_common WHERE false"],
+    ["UPDATE pgboss.queue", "UPDATE pgboss.queue SET name = name WHERE false"],
+  ])("TP-6.4: (A-227) as budmon_app, %s is 42501", async (_label, sql) => {
+    const code = await query(testDb.urlAs("budmon_app"), sql).then(
+      () => "allowed",
+      (error: unknown) => String((error as { code?: unknown }).code),
+    );
+
+    expect(code).toBe("42501");
+  });
+
+  it("TP-6.4: (A-227) budmon_app still sends", async () => {
+    const id = await (await startBoss()).send(TEST_JOBS.ok.name, { n: 2 });
+
+    expect(typeof id).toBe("string");
   });
 
   it("TP-6.18x: budmon_capture and budmon_app can use the schema; budmon_monitor can't", async () => {
@@ -183,6 +214,7 @@ describe("TP-6.6: syncQueues (F-75)", () => {
   let boss: PgBossLike | undefined;
 
   const a: JobDefinition<unknown> = {
+    ...NOT_SENDABLE,
     name: "sync.a",
     role: "general",
     payload: z.object({}),
@@ -256,6 +288,45 @@ describe("TP-6.6: syncQueues (F-75)", () => {
     }
   });
 
+  it("TP-6.6: (A-227) step 6b: RLS on job_common (not forced), capture's policy lists match the registry and follow it, every queue non-partitioned", async () => {
+    if (migrator === undefined) throw new Error("no migrator");
+    const db = migrator;
+    const { applyQueuePolicies } = await queuePolicies();
+    const registry = registryOf([a, b]);
+
+    await syncQueues(started(), registry, recordingLogger());
+    await applyQueuePolicies(db.handle, registry);
+
+    const { rows: rls } = await db.handle.executeSql(
+      "SELECT relrowsecurity, relforcerowsecurity FROM pg_class WHERE oid = 'pgboss.job_common'::regclass",
+    );
+    expect(rls[0]).toEqual({ relrowsecurity: true, relforcerowsecurity: false });
+    expect(await policyQueues(db, "budmon_capture")).toEqual({
+      using: ["dead-letter.capture", "sync.b"],
+      check: ["dead-letter.capture", "sync.b"],
+    });
+    const { rows: partitioned } = await db.handle.executeSql(
+      "SELECT name FROM pgboss.queue WHERE partition IS DISTINCT FROM false",
+    );
+    expect(partitioned).toEqual([]);
+
+    // A capture job and a general one marked sendableFromCapture: the lists follow.
+    const c: JobDefinition<unknown> = { ...b, name: "sync.c", policy: "standard" };
+    const d = { ...a, name: "sync.d", sendableFromCapture: true } as JobDefinition<unknown>;
+    const grown = registryOf([a, b, c, d]);
+    await syncQueues(started(), grown, recordingLogger());
+    await applyQueuePolicies(db.handle, grown);
+
+    expect(await policyQueues(db, "budmon_capture")).toEqual({
+      using: ["dead-letter.capture", "sync.b", "sync.c"],
+      check: ["dead-letter.capture", "sync.b", "sync.c", "sync.d"],
+    });
+    const { rows: still } = await db.handle.executeSql(
+      "SELECT name FROM pgboss.queue WHERE partition IS DISTINCT FROM false",
+    );
+    expect(still).toEqual([]);
+  });
+
   it("TP-6.6: a changed option is updated; a changed policy throws SchemaStepError queue_policy_changed", async () => {
     await syncQueues(started(), registryOf([{ ...a, retryLimit: 4 }, b]), recordingLogger());
     expect(await started().getQueue("sync.a")).toMatchObject({ retryLimit: 4 });
@@ -280,8 +351,13 @@ describe("TP-6.6: syncQueues (F-75)", () => {
 
     expect(await started().getQueue("other.x")).toMatchObject({ retryLimit: 9 });
     // A-205: the warning goes through the logger passed in.
-    const warned = logger.lines.filter((l) => l.event === "queue_unregistered");
+    // (sync.c and sync.d from the A-227 case are unregistered here too.)
+    const warned = logger.lines.filter(
+      (l) =>
+        l.event === "queue_unregistered" &&
+        (l.fields as { fields?: { queue?: unknown } }).fields?.queue === "other.x",
+    );
     expect(warned).toHaveLength(1);
-    expect(warned[0]).toMatchObject({ level: "warn", fields: { fields: { queue: "other.x" } } });
+    expect(warned[0]).toMatchObject({ level: "warn" });
   });
 });

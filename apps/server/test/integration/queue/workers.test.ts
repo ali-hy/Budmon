@@ -20,8 +20,10 @@ import {
   type JobHandler,
   type PgBossLike,
   type WorkerContainer,
+  NOT_SENDABLE,
 } from "../../support/jobs.js";
-import { createTestDatabase } from "../../support/testDatabase.js";
+import { testApiConfigFor } from "../../support/api.js";
+import { createTestDatabase, type TestDatabase } from "../../support/testDatabase.js";
 import { createWorkerContainer } from "../../../src/platform/container.js";
 import {
   buildWorkerContainer,
@@ -228,8 +230,128 @@ describe("TP-6.8: worker-capture as budmon_capture (F-77)", () => {
   });
 });
 
+describe("TP-6.8: budmon_capture under row-level security (A-227)", () => {
+  let testDb: TestDatabase;
+  let capture: PgBossLike | undefined;
+  let app: PgBossLike | undefined;
+
+  beforeAll(async () => {
+    testDb = await createTestDatabase();
+    const c = createPgBoss(testWorkerConfig(testDb.endpoint, testDb.name, "capture"), "capture");
+    await c.start();
+    capture = c;
+    const a = createPgBoss(testApiConfigFor(testDb), "send-only");
+    await a.start();
+    app = a;
+  }, 60_000);
+
+  afterAll(async () => {
+    await capture?.stop({ graceful: false });
+    await app?.stop({ graceful: false });
+    await testDb.drop();
+  });
+
+  function bosses(): { capture: PgBossLike; app: PgBossLike } {
+    if (capture === undefined || app === undefined) throw new Error("pg-boss didn't start");
+    return { capture, app };
+  }
+
+  async function asCapture(sql: string, values: unknown[] = []) {
+    return query(testDb.urlAs("budmon_capture"), sql, values);
+  }
+
+  async function stateOf(id: string): Promise<string | undefined> {
+    return (
+      await query<{ state: string }>(
+        testDb.urlAs("budmon_migrator"),
+        "SELECT state::text AS state FROM pgboss.job WHERE id = $1",
+        [id],
+      )
+    )[0]?.state;
+  }
+
+  it("TP-6.8: (A-227) fetch and complete a capture job", async () => {
+    const { capture: boss } = bosses();
+    const id = await boss.send(TEST_JOBS.capture.name, { n: 1 });
+
+    const [fetched] = await boss.fetch(TEST_JOBS.capture.name);
+    expect(fetched?.id).toBe(id);
+    await boss.complete(TEST_JOBS.capture.name, fetched?.id ?? "");
+
+    expect(await stateOf(id ?? "")).toBe("completed");
+  });
+
+  it("TP-6.8: (A-227) fail a capture job to retry, then to dead-letter.capture", async () => {
+    const { capture: boss } = bosses();
+    const name = TEST_JOBS.captureRetry.name;
+    const id = await boss.send(name, { n: 2 }, { retryLimit: 1, retryDelay: 0 });
+
+    const [first] = await boss.fetch(name);
+    await boss.fail(name, first?.id ?? "");
+    expect(await stateOf(id ?? "")).toBe("retry");
+    let second: { id: string } | undefined;
+    await waitFor(
+      async () => {
+        [second] = await boss.fetch(name);
+        return second !== undefined;
+      },
+      15_000,
+      "the retry to be fetchable",
+    );
+    await boss.fail(name, second?.id ?? "");
+
+    expect(await stateOf(id ?? "")).toBe("failed");
+    const dead = await query<{ n: number }>(
+      testDb.urlAs("budmon_migrator"),
+      "SELECT count(*)::int AS n FROM pgboss.job WHERE name = 'dead-letter.capture'",
+    );
+    expect(dead[0]?.n).toBeGreaterThanOrEqual(1);
+  }, 30_000);
+
+  it("TP-6.8: (A-227) sending to a general queue without sendableFromCapture is 42501, row-level security", async () => {
+    const error = await bosses()
+      .capture.send(TEST_JOBS.ok.name, { n: 3 })
+      .then(
+        () => undefined,
+        (e: unknown) => e as { code?: unknown; message?: string },
+      );
+
+    expect(error?.code).toBe("42501");
+    expect(error?.message).toContain("violates row-level security policy");
+  });
+
+  it("TP-6.8: (A-227) sending to a general queue marked sendableFromCapture succeeds", async () => {
+    const id = await bosses().capture.send(TEST_JOBS.fromCapture.name, { n: 4 });
+
+    expect(typeof id).toBe("string");
+  });
+
+  it("TP-6.8: (A-227) with general jobs present, budmon_capture sees only capture-queue rows and updates no general job", async () => {
+    const generalId = await bosses().app.send(TEST_JOBS.ok.name, { n: 5 });
+    await bosses().capture.send(TEST_JOBS.capture.name, { n: 6 });
+
+    const visible = await asCapture("SELECT DISTINCT name FROM pgboss.job_common");
+    const updated = await asCapture(
+      "UPDATE pgboss.job_common SET name = name WHERE id = $1 RETURNING id",
+      [generalId],
+    );
+
+    const names = visible.map((r) => String(r["name"]));
+    expect(names.length).toBeGreaterThan(0);
+    for (const name of names) {
+      expect([
+        TEST_JOBS.capture.name,
+        TEST_JOBS.captureRetry.name,
+        "dead-letter.capture",
+      ]).toContain(name);
+    }
+    expect(updated).toEqual([]);
+  });
+});
+
 describe("TP-6.9: start-up checks and schedules (F-78)", () => {
   const cron: JobDefinition<unknown> = {
+    ...NOT_SENDABLE,
     name: "test.cron",
     role: "general",
     payload: z.object({}),

@@ -5,7 +5,7 @@
 // database copy has `test.*` queues and both dead-letter queues.
 import type { PgBoss } from "pg-boss";
 import { z } from "zod";
-import type { Database } from "../../src/platform/db/types.js";
+import type { Database, DbHandle } from "../../src/platform/db/types.js";
 import { buildJobRegistry } from "../../src/platform/queue/appRegistry.js";
 import type { JobDefinition, WorkerRole } from "../../src/platform/queue/jobs.js";
 import { createJobRegistry, type JobRegistry } from "../../src/platform/queue/registry.js";
@@ -27,6 +27,12 @@ export function registryOf(defs: readonly JobDefinition<unknown>[]): JobRegistry
   };
 }
 
+/**
+ * F-70's `sendableFromCapture` (A-227), default false, spread into literal definitions so they
+ * type-check whether or not the field is declared yet.
+ */
+export const NOT_SENDABLE = { sendableFromCapture: false } as const;
+
 function job<P>(
   name: string,
   role: WorkerRole,
@@ -34,6 +40,7 @@ function job<P>(
   extra: Partial<JobDefinition<P>> = {},
 ): JobDefinition<P> {
   return {
+    ...NOT_SENDABLE,
     name,
     role,
     payload,
@@ -70,6 +77,17 @@ export const TEST_JOBS = {
   forever: job("test.forever", "general", z.object({ n: z.number().int() }), { retryLimit: 0 }),
   /** TP-6.15: the fixture's handler runs SELECT 1. */
   select: job("test.select", "general", z.object({ n: z.number().int() }), { retryLimit: 0 }),
+  /** TP-6.8 (A-227): a capture job failed once to retry, then to dead-letter.capture. */
+  captureRetry: job("test.capture-retry", "capture", z.object({ n: z.number().int() }), {
+    retryLimit: 1,
+    retryDelaySeconds: 0,
+    retryBackoff: false,
+  }),
+  /** TP-6.8 (A-227): a general queue that capture may send to (F-70's sendableFromCapture). */
+  fromCapture: {
+    ...job("test.from-capture", "general", z.object({ n: z.number().int() }), { retryLimit: 0 }),
+    sendableFromCapture: true,
+  } as JobDefinition<{ n: number }>,
 } satisfies Record<string, JobDefinition<{ n: number }>>;
 
 /** The test definitions the template's registry adds to the production ones (A-202). */
@@ -110,4 +128,44 @@ export async function waitFor(
 /** The template's registry (A-202): every production definition plus the test ones. */
 export function templateJobRegistry(): JobRegistry {
   return createJobRegistry([...buildJobRegistry().all(), ...TEST_JOB_DEFINITIONS]);
+}
+
+// ---- A-227: row-level security on pgboss.job_common ----
+
+export interface QueuePoliciesModule {
+  applyQueuePolicies: (migrator: DbHandle, registry: JobRegistry) => Promise<void>;
+}
+
+const QUEUE_POLICIES = "../../src/platform/queue/queuePolicies.js";
+
+/** F-19 step 6b's module (A-227), loaded by a variable specifier until it exists. */
+export async function queuePolicies(): Promise<QueuePoliciesModule> {
+  return (await import(/* @vite-ignore */ QUEUE_POLICIES)) as QueuePoliciesModule;
+}
+
+/**
+ * The queue names `role`'s policies on pgboss.job_common allow, read from pg_policies: `using`
+ * from the SELECT/UPDATE/DELETE (or ALL) policies' USING clauses, `check` from the INSERT (or
+ * ALL) policies' WITH CHECK clauses. Names are the quoted literals in those expressions.
+ */
+export async function policyQueues(
+  database: Database,
+  role: string,
+): Promise<{ using: string[]; check: string[] }> {
+  const { rows } = await database.handle.executeSql(
+    "SELECT cmd, qual, with_check FROM pg_policies WHERE schemaname = 'pgboss' AND tablename = 'job_common' AND $1 = ANY(roles)",
+    [role],
+  );
+  const names = (text: unknown): string[] =>
+    [...(typeof text === "string" ? text : "").matchAll(/'([a-z0-9][a-z0-9.-]*)'/g)].map(
+      (m) => m[1] ?? "",
+    );
+  const using = new Set<string>();
+  const check = new Set<string>();
+  for (const row of rows) {
+    const cmd = String(row["cmd"]);
+    if (cmd !== "INSERT") for (const n of names(row["qual"])) using.add(n);
+    if (cmd === "INSERT" || cmd === "ALL") for (const n of names(row["with_check"])) check.add(n);
+  }
+  return { using: [...using].sort(), check: [...check].sort() };
 }
