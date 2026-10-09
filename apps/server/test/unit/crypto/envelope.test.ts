@@ -118,7 +118,10 @@ describe("TP-8.3: seal and unseal with a local key (F-111, F-113)", () => {
     const keys = rsaKeyPair();
     return {
       sealer: createCaptureSealer({ publicKeyPem: keys.publicPem, keyVersion: "local:1" }),
-      unsealer: createLocalCaptureUnsealer({ privateKeyPem: keys.privatePem }),
+      unsealer: createLocalCaptureUnsealer({
+        privateKeyPem: keys.privatePem,
+        keyVersion: "local:1",
+      }),
     };
   }
 
@@ -155,11 +158,35 @@ describe("TP-8.3: seal and unseal with a local key (F-111, F-113)", () => {
     const otherPem = generateKeyPairSync("rsa", { modulusLength: 3072 })
       .privateKey.export({ type: "pkcs8", format: "pem" })
       .toString();
-    const other = createLocalCaptureUnsealer({ privateKeyPem: otherPem });
+    const other = createLocalCaptureUnsealer({ privateKeyPem: otherPem, keyVersion: "local:1" });
     const envelope = s.seal(Buffer.from("x"), CTX);
 
     await expectCryptoError(() => other.unseal(envelope, CTX), "EnvelopeAuthError");
   });
+
+  it("TP-8.3 (A-263): with the unsealer configured local:1, an envelope relabelled local:2 (bytes otherwise unchanged) is UnknownKeyVersionError", async () => {
+    const { sealer: s, unsealer: u } = sealer();
+    const envelope = s.seal(Buffer.from("x"), CTX);
+    const relabelled = encodeEnvelope({ ...decodeEnvelope(envelope), keyVersion: "local:2" });
+
+    await expectCryptoError(() => u.unseal(relabelled, CTX), "UnknownKeyVersionError");
+  });
+
+  it.each([
+    [
+      "a KMS-style version",
+      "projects/p/locations/l/keyRings/r/cryptoKeys/capture/cryptoKeyVersions/1",
+    ],
+    ["TP-8.17x: an empty version", ""],
+    ["TP-8.17x: local:x", "local:x"],
+  ])(
+    "TP-8.3 (A-263): createLocalCaptureUnsealer with %s throws TypeError",
+    (_label, keyVersion) => {
+      expect(() =>
+        createLocalCaptureUnsealer({ privateKeyPem: rsaKeyPair().privatePem, keyVersion }),
+      ).toThrow(TypeError);
+    },
+  );
 
   it("TP-8.17x: two seals of the same plaintext differ (fresh DEK and nonce)", () => {
     const { sealer: s } = sealer();
@@ -175,7 +202,11 @@ describe("TP-8.3: seal and unseal with a local key (F-111, F-113)", () => {
     }).seal(Buffer.from("x"), CTX);
 
     await expectCryptoError(
-      () => createLocalCaptureUnsealer({ privateKeyPem: keys.privatePem }).unseal(kmsEnvelope, CTX),
+      () =>
+        createLocalCaptureUnsealer({
+          privateKeyPem: keys.privatePem,
+          keyVersion: "local:1",
+        }).unseal(kmsEnvelope, CTX),
       "EnvelopeFormatError",
     );
   });

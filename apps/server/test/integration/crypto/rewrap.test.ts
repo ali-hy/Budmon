@@ -5,7 +5,9 @@
 // test wraps the database so that, just before the rewrap's UPDATE of the chosen row runs, another
 // connection changes that row (re-sealed under k2), so the rewrap's `AND <col> = $old` matches 0.
 // A-245 accepts this proxy. A-253's cases re-seal the row under the old key instead, so the run
-// must end (each id tried once per run) and the next run picks the row up.
+// must end (each id tried once per run) and the next run picks the row up. A-264: TP-8.8 (a)
+// calls rewrapCaptureSecrets directly with a two-key unsealer; (b) runs the real job on the local
+// provider, which doesn't support capture-key rotation.
 import { randomBytes } from "node:crypto";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -32,7 +34,11 @@ import {
   createLocalCaptureUnsealer,
 } from "../../../src/platform/crypto/captureUnsealer.js";
 import { keyVersionOf } from "../../../src/platform/crypto/envelope.js";
-import { rewrapApiSecrets, rewrapApiSecretsCommand } from "../../../src/platform/crypto/rewrap.js";
+import {
+  rewrapApiSecrets,
+  rewrapApiSecretsCommand,
+  rewrapCaptureSecrets,
+} from "../../../src/platform/crypto/rewrap.js";
 import { createTestDatabase, type TestDatabase } from "../../support/testDatabase.js";
 import { testWorkerConfig } from "../../support/worker.js";
 
@@ -259,7 +265,33 @@ describe("TP-8.7 (A-253, A-254): a concurrently changed row still on the old key
   });
 });
 
-describe("TP-8.8: the platform.capture-rewrap job (F-118)", () => {
+/** Rows sealed under local:1 with key pair `one`, and the local:1/local:2 unsealer (TP-8.8 (a)). */
+function captureKeys() {
+  const one = freshPair();
+  const two = freshPair();
+  const old = createCaptureSealer({ publicKeyPem: one.publicPem, keyVersion: "local:1" });
+  const sealer = createCaptureSealer({ publicKeyPem: two.publicPem, keyVersion: "local:2" });
+  const unsealOne = createLocalCaptureUnsealer({
+    privateKeyPem: one.privatePem,
+    keyVersion: "local:1",
+  });
+  const unsealTwo = createLocalCaptureUnsealer({
+    privateKeyPem: two.privatePem,
+    keyVersion: "local:2",
+  });
+  // The injected unsealer holding both keys (A-264: the function-level path KMS uses).
+  const both: CaptureUnsealer = {
+    unseal: (envelope, c) =>
+      keyVersionOf(envelope) === "local:1"
+        ? unsealOne.unseal(envelope, c)
+        : unsealTwo.unseal(envelope, c),
+  };
+  return { one, two, old, sealer, unsealTwo, both };
+}
+
+const CAPTURE_COLUMN = { ...COLUMN_API, provider: "capture" as const };
+
+describe("TP-8.8 (a): rewrapCaptureSecrets (F-118, A-264)", () => {
   let testDb: TestDatabase;
 
   beforeAll(async () => {
@@ -271,43 +303,106 @@ describe("TP-8.8: the platform.capture-rewrap job (F-118)", () => {
     await testDb.drop();
   });
 
-  it("TP-8.8: rows sealed under local:1 are re-sealed under local:2 by the job handler", async () => {
-    const pem = () => {
-      const { publicKey, privateKey } = generateKeyPairSync("rsa", { modulusLength: 3072 });
-      return {
-        publicPem: publicKey.export({ type: "spki", format: "pem" }).toString(),
-        privatePem: privateKey.export({ type: "pkcs8", format: "pem" }).toString(),
-      };
-    };
-    const one = pem();
-    const two = pem();
-    const old = createCaptureSealer({ publicKeyPem: one.publicPem, keyVersion: "local:1" });
+  it("TP-8.8 (a): rows sealed under local:1 are re-sealed under local:2 and unseal to their plaintext", async () => {
+    const k = captureKeys();
     const plain = new Map(IDS.slice(0, 2).map((id) => [id, Buffer.from(`capture-${id}`)]));
-    for (const [id, p] of plain) await insert(testDb, id, old.seal(p, ctx(id)));
-    // The local unsealer holding both keys (test override): local:1 rows open with key one.
-    const unsealOne = createLocalCaptureUnsealer({ privateKeyPem: one.privatePem });
-    const unsealTwo = createLocalCaptureUnsealer({ privateKeyPem: two.privatePem });
-    const both: CaptureUnsealer = {
-      unseal: (envelope, c) =>
-        keyVersionOf(envelope) === "local:1"
-          ? unsealOne.unseal(envelope, c)
-          : unsealTwo.unseal(envelope, c),
+    for (const [id, p] of plain) await insert(testDb, id, k.old.seal(p, ctx(id)));
+    const logger = recordingLogger();
+
+    await rewrapCaptureSecrets({
+      database: testDb.database,
+      unsealer: k.both,
+      sealer: k.sealer,
+      columns: [CAPTURE_COLUMN, COLUMN_API],
+      keyVersion: "local:2",
+      logger,
+    });
+
+    for (const row of await rows(testDb)) {
+      expect(keyVersionOf(row.secret), row.id).toBe("local:2");
+      expect(await k.unsealTwo.unseal(row.secret, ctx(row.id)), row.id).toEqual(plain.get(row.id));
+    }
+    expect(logger.lines.filter((l) => l.event === "capture_rewrap")).toHaveLength(1);
+  });
+});
+
+describe("TP-8.8 (a) (A-253): a capture row whose re-seal is skipped", () => {
+  let testDb: TestDatabase;
+
+  beforeAll(async () => {
+    testDb = await createTestDatabase("budmon_capture");
+    await sealedTable(testDb, "budmon_capture");
+  });
+
+  afterAll(async () => {
+    await testDb.drop();
+  });
+
+  it("TP-8.8 (a) (A-253): a row changed under local:1 during the run is skipped and the run ends; the next run re-seals it under local:2", async () => {
+    const k = captureKeys();
+    const plain = new Map(IDS.slice(0, 2).map((id) => [id, Buffer.from(`capture-${id}`)]));
+    for (const [id, p] of plain) await insert(testDb, id, k.old.seal(p, ctx(id)));
+    const raced = IDS[0] ?? "";
+    const changedTo = Buffer.from("changed concurrently, still local:1");
+    const raceDb = interceptUpdate(testDb.database, raced, async () => {
+      await query(
+        testDb.urlAs("budmon_migrator"),
+        "UPDATE sealed_test SET secret = $2 WHERE id = $1",
+        [raced, k.old.seal(changedTo, ctx(raced))],
+      );
+    });
+    const deps = {
+      unsealer: k.both,
+      sealer: k.sealer,
+      columns: [CAPTURE_COLUMN],
+      keyVersion: "local:2",
+      logger: recordingLogger(),
     };
+
+    await rewrapCaptureSecrets({ ...deps, database: raceDb });
+
+    const afterFirst = new Map((await rows(testDb)).map((r) => [r.id, keyVersionOf(r.secret)]));
+    expect(afterFirst.get(raced)).toBe("local:1");
+    expect(afterFirst.get(IDS[1] ?? "")).toBe("local:2");
+
+    await rewrapCaptureSecrets({ ...deps, database: testDb.database });
+
+    for (const row of await rows(testDb)) {
+      expect(keyVersionOf(row.secret), row.id).toBe("local:2");
+      const expected = row.id === raced ? changedTo : plain.get(row.id);
+      expect(await k.unsealTwo.unseal(row.secret, ctx(row.id)), row.id).toEqual(expected);
+    }
+  });
+});
+
+describe("TP-8.8 (b): the job on the local provider (F-118, A-264)", () => {
+  let testDb: TestDatabase;
+
+  beforeAll(async () => {
+    testDb = await createTestDatabase("budmon_capture");
+    await sealedTable(testDb, "budmon_capture");
+  });
+
+  afterAll(async () => {
+    await testDb.drop();
+  });
+
+  it("TP-8.8 (b): KMS_PROVIDER=local, CAPTURE_KEY_VERSION=local:2: the handler completes, rows stay unchanged, and one capture_rewrap_unsupported warn line is logged", async () => {
+    const k = captureKeys();
+    for (const id of IDS.slice(0, 2))
+      await insert(testDb, id, k.old.seal(Buffer.from(id), ctx(id)));
+    const before = await rows(testDb);
     const sealedColumns = createSealedColumnRegistry();
-    sealedColumns.register({ ...COLUMN_API, provider: "capture" });
+    sealedColumns.register(CAPTURE_COLUMN);
     const obs = observed();
     const config = testWorkerConfig(
       testDb.endpoint,
       testDb.name,
       "capture",
-      { CAPTURE_KEY_VERSION: "local:2" },
-      { CAPTURE_PUBLIC_KEY_FILE: two.publicPem, CAPTURE_PRIVATE_KEY_FILE: two.privatePem },
+      { KMS_PROVIDER: "local", CAPTURE_KEY_VERSION: "local:2" },
+      { CAPTURE_PUBLIC_KEY_FILE: k.two.publicPem, CAPTURE_PRIVATE_KEY_FILE: k.two.privatePem },
     );
-    const c = createWorkerContainer(config, {
-      ...obs.overrides,
-      sealedColumns,
-      ...({ captureUnsealer: both } as object),
-    });
+    const c = createWorkerContainer(config, { ...obs.overrides, sealedColumns });
     try {
       const handler = buildHandlerMap(c).get("platform.capture-rewrap");
       expect(handler).toBeDefined();
@@ -317,100 +412,18 @@ describe("TP-8.8: the platform.capture-rewrap job (F-118)", () => {
         {
           jobId: "0190a0b0-1c2d-7e3f-8a4b-5c6d7e8f9a0b",
           attempt: 1,
-          createdOn: (await import("@budmon/shared")).Temporal.Now.instant(),
+          createdOn: Temporal.Now.instant(),
           logger: c.logger,
           signal: new AbortController().signal,
         },
       );
 
-      for (const row of await rows(testDb)) {
-        expect(keyVersionOf(row.secret), row.id).toBe("local:2");
-        expect(await unsealTwo.unseal(row.secret, ctx(row.id)), row.id).toEqual(plain.get(row.id));
-      }
-    } finally {
-      await c.close();
-    }
-  });
-});
-
-describe("TP-8.8 (A-253): a capture row whose re-seal is skipped", () => {
-  let testDb: TestDatabase;
-
-  beforeAll(async () => {
-    testDb = await createTestDatabase("budmon_capture");
-    await sealedTable(testDb, "budmon_capture");
-  });
-
-  afterAll(async () => {
-    await testDb.drop();
-  });
-
-  it("TP-8.8 (A-253): a row changed under local:1 during the run is skipped and the run ends; the next run re-seals it under local:2", async () => {
-    const one = freshPair();
-    const two = freshPair();
-    const old = createCaptureSealer({ publicKeyPem: one.publicPem, keyVersion: "local:1" });
-    const plain = new Map(IDS.slice(0, 2).map((id) => [id, Buffer.from(`capture-${id}`)]));
-    for (const [id, p] of plain) await insert(testDb, id, old.seal(p, ctx(id)));
-    const raced = IDS[0] ?? "";
-    const changedTo = Buffer.from("changed concurrently, still local:1");
-    const unsealOne = createLocalCaptureUnsealer({ privateKeyPem: one.privatePem });
-    const unsealTwo = createLocalCaptureUnsealer({ privateKeyPem: two.privatePem });
-    const both: CaptureUnsealer = {
-      unseal: (envelope, c) =>
-        keyVersionOf(envelope) === "local:1"
-          ? unsealOne.unseal(envelope, c)
-          : unsealTwo.unseal(envelope, c),
-    };
-    const sealedColumns = createSealedColumnRegistry();
-    sealedColumns.register({ ...COLUMN_API, provider: "capture" });
-    const config = testWorkerConfig(
-      testDb.endpoint,
-      testDb.name,
-      "capture",
-      { CAPTURE_KEY_VERSION: "local:2" },
-      { CAPTURE_PUBLIC_KEY_FILE: two.publicPem, CAPTURE_PRIVATE_KEY_FILE: two.privatePem },
-    );
-    const c = createWorkerContainer(config, {
-      ...observed().overrides,
-      sealedColumns,
-      captureUnsealer: both,
-    });
-    try {
-      const raceDb = interceptUpdate(c.database, raced, async () => {
-        await query(
-          testDb.urlAs("budmon_migrator"),
-          "UPDATE sealed_test SET secret = $2 WHERE id = $1",
-          [raced, old.seal(changedTo, ctx(raced))],
-        );
-      });
-      const runOnce = async (container: typeof c): Promise<void> => {
-        const handler = buildHandlerMap(container).get("platform.capture-rewrap");
-        expect(handler).toBeDefined();
-        await handler?.(
-          {},
-          {
-            jobId: "0190a0b0-1c2d-7e3f-8a4b-5c6d7e8f9a0b",
-            attempt: 1,
-            createdOn: Temporal.Now.instant(),
-            logger: container.logger,
-            signal: new AbortController().signal,
-          },
-        );
-      };
-
-      await runOnce({ ...c, database: raceDb });
-
-      const afterFirst = new Map((await rows(testDb)).map((r) => [r.id, keyVersionOf(r.secret)]));
-      expect(afterFirst.get(raced)).toBe("local:1");
-      expect(afterFirst.get(IDS[1] ?? "")).toBe("local:2");
-
-      await runOnce(c);
-
-      for (const row of await rows(testDb)) {
-        expect(keyVersionOf(row.secret), row.id).toBe("local:2");
-        const expected = row.id === raced ? changedTo : plain.get(row.id);
-        expect(await unsealTwo.unseal(row.secret, ctx(row.id)), row.id).toEqual(expected);
-      }
+      expect(await rows(testDb)).toEqual(before);
+      const warned = obs.capture
+        .records()
+        .filter((l) => l["event"] === "capture_rewrap_unsupported");
+      expect(warned).toHaveLength(1);
+      expect(warned[0]?.["level"]).toBe("warn");
     } finally {
       await c.close();
     }
