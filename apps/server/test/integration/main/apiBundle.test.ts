@@ -717,6 +717,49 @@ function unexpectedDrops(requests: readonly OtlpRequest[]): number[] {
 
 const SPAN_KIND_SERVER = 2;
 
+/** The attributes of every recorded data point of the metric `name` (any point type). */
+function metricPointAttributes(
+  requests: readonly OtlpRequest[],
+  name: string,
+): Record<string, unknown>[] {
+  type Point = { attributes?: { key: string; value: Record<string, unknown> }[] };
+  const out: Record<string, unknown>[] = [];
+  for (const r of requests.filter((x) => x.path.endsWith("/v1/metrics"))) {
+    const body = r.body as {
+      resourceMetrics?: {
+        scopeMetrics?: {
+          metrics?: {
+            name?: string;
+            sum?: { dataPoints?: Point[] };
+            gauge?: { dataPoints?: Point[] };
+            histogram?: { dataPoints?: Point[] };
+          }[];
+        }[];
+      }[];
+    };
+    for (const rm of body.resourceMetrics ?? []) {
+      for (const sm of rm.scopeMetrics ?? []) {
+        for (const m of sm.metrics ?? []) {
+          if (m.name !== name) continue;
+          const points = [
+            ...(m.sum?.dataPoints ?? []),
+            ...(m.gauge?.dataPoints ?? []),
+            ...(m.histogram?.dataPoints ?? []),
+          ];
+          for (const p of points) {
+            out.push(
+              Object.fromEntries(
+                (p.attributes ?? []).map((a) => [a.key, Object.values(a.value)[0]]),
+              ),
+            );
+          }
+        }
+      }
+    }
+  }
+  return out;
+}
+
 /** Writes `text` to 127.0.0.1:port over a raw socket; resolves with what came back once closed. */
 function rawHttp(port: number, text: string): Promise<string> {
   return new Promise<string>((resolve, reject) => {
@@ -856,7 +899,8 @@ describe("TP-4.24: the built api exports spans through the production start comm
     );
     expect(servers, seen).toHaveLength(1);
     const server = servers[0];
-    expect(server?.name).toBe("GET /api/v1/*");
+    // `GET /api/v1/*` until A-186 (S-5) names it after the route template; the A-186 case pins it.
+    expect(server?.name).toMatch(/^GET \/api\/v1\//);
     const fastify = all.filter((s) => s.scope === "@fastify/otel");
     const requests = fastify.filter((s) => s.name === "request");
     expect(requests.length, seen).toBeGreaterThanOrEqual(1);
@@ -990,6 +1034,37 @@ describe("TP-4.24: the built api exports spans through the production start comm
         });
       });
     }
+  }, 90_000);
+
+  it("TP-4.24: (A-186) the SERVER span and http.route are the procedure template; an unmatched request stays GET /api/v1/*", async () => {
+    received.length = 0;
+
+    const run = await runApi(START_COMMAND, async (port) => {
+      await (await fetch(`http://127.0.0.1:${String(port)}/api/v1/nope`)).text();
+    });
+
+    expect(run.status, run.output).toBe(200);
+    const servers = exportedSpans(received).filter(
+      (s) => s.kind === SPAN_KIND_SERVER && s.scope === "@opentelemetry/instrumentation-http",
+    );
+    const seen = JSON.stringify(servers.map((s) => [s.name, s.attributes["http.route"]]));
+    expect(servers, seen).toHaveLength(2);
+    expect(
+      servers.filter(
+        (s) =>
+          s.name === "GET /api/v1/meta/client-config" &&
+          s.attributes["http.route"] === "/api/v1/meta/client-config",
+      ),
+      seen,
+    ).toHaveLength(1);
+    expect(
+      servers.filter((s) => s.name === "GET /api/v1/*"),
+      seen,
+    ).toHaveLength(1);
+    const routes = metricPointAttributes(received, "http.server.request.duration").map(
+      (a) => a["http.route"],
+    );
+    expect(routes, JSON.stringify(routes)).toContain("/api/v1/meta/client-config");
   }, 90_000);
 
   it("TP-4.24: without --import, no server span arrives (guards the start command)", async () => {
