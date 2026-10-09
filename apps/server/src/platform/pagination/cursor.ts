@@ -21,6 +21,8 @@ const NONCE_BYTES = 12;
 const TAG_BYTES = 16;
 const MAX_TOKEN_LENGTH = 512;
 const LIFETIME_SECONDS = 86_400;
+/** A-243: a cursor can't expire later than a fresh one would, give or take clock skew. */
+const MAX_SKEW_SECONDS = 300;
 const BASE64URL = /^[A-Za-z0-9_-]+$/;
 
 /** Every decode failure is the same error, so a client learns nothing about why. */
@@ -88,6 +90,7 @@ export function createCursorCodec(deps: {
         typeof p.id !== "string" ||
         typeof p.exp !== "number" ||
         p.exp < nowSeconds() ||
+        p.exp > nowSeconds() + LIFETIME_SECONDS + MAX_SKEW_SECONDS ||
         p.f !== expectedFilterHash
       ) {
         throw invalidCursor();

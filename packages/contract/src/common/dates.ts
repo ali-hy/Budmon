@@ -12,10 +12,19 @@ function isCalendarDate(value: string): boolean {
   );
 }
 
+/** A real instant: the string is exactly what Date renders for it (no 24:00, no 30 February). */
+function isInstant(value: string): boolean {
+  const ms = Date.parse(value);
+  return !Number.isNaN(ms) && new Date(ms).toISOString() === value;
+}
+
 export const PlainDateWire = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/)
   .refine(isCalendarDate, { message: "Invalid date" });
 
-/** RFC 3339 in UTC with "Z", e.g. 2026-10-05T12:00:00.000Z. */
-export const InstantWire = z.iso.datetime();
+/** A-242: RFC 3339 in UTC at millisecond precision, always `YYYY-MM-DDTHH:MM:SS.sssZ`. */
+export const InstantWire = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/)
+  .refine(isInstant, { message: "Invalid instant" });

@@ -48,6 +48,13 @@ export function todayIn(clock: Clock, timeZone: string): Temporal.PlainDate {
   return clock.now().toZonedDateTimeISO(timeZone).toPlainDate();
 }
 
+/** A-242: instants on the wire, always `YYYY-MM-DDTHH:MM:SS.sssZ` (truncated to milliseconds). */
+export function toInstantWire(i: Temporal.Instant): string {
+  return i
+    .round({ smallestUnit: "millisecond", roundingMode: "trunc" })
+    .toString({ fractionalSecondDigits: 3 });
+}
+
 export function utcDateOf(instant: Temporal.Instant): Temporal.PlainDate {
   return instant.toZonedDateTimeISO("UTC").toPlainDate();
 }

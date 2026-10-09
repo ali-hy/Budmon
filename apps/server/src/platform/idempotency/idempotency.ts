@@ -1,7 +1,7 @@
 // F-100 createIdempotency and F-102 runIdempotentCreate: a create replays its first result for
 // the same Idempotency-Key, inside the caller's transaction.
 import { createHash } from "node:crypto";
-import { canonicalJson, isUuid, Temporal, type Clock } from "@budmon/shared";
+import { canonicalJson, isUuid, Temporal, toInstantWire, type Clock } from "@budmon/shared";
 import { withTransaction } from "../db/transaction.js";
 import type { DbHandle } from "../db/types.js";
 import { IdempotencyKeyReusedError, ValidationFailedError } from "../errors/platformErrors.js";
@@ -50,7 +50,7 @@ export function createIdempotency(deps: { clock: Clock; metrics: PlatformMetrics
         const result = await work();
         await complete(h, req.userId, req.key, 201, {
           id: result.id,
-          createdAt: result.createdAt.toString(),
+          createdAt: toInstantWire(result.createdAt),
         });
         return { result, replayed: false, status: 201 };
       };
@@ -110,5 +110,5 @@ export async function runIdempotentCreate<I>(
     { tracker: ctx.commitTracker },
   );
   if (replayed) ctx.responseHeaders.set("Idempotent-Replayed", "true");
-  return { id: result.id, createdAt: result.createdAt.toString() };
+  return { id: result.id, createdAt: toInstantWire(result.createdAt) };
 }
