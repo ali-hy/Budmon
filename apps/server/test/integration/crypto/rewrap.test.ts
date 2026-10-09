@@ -19,7 +19,17 @@ import { buildApiContainer, observed, testApiConfigFor } from "../../support/api
 import { devApi, withFile, type Fixture } from "../../support/configEnv.js";
 import { query } from "../../support/postgres.js";
 import { recordingLogger } from "../../support/platform.js";
-import { s8, type ApiSecretsCipher, type CaptureUnsealer } from "../../support/s8.js";
+import {
+  type ApiSecretsCipher,
+  createApiSecretsCipher,
+} from "../../../src/platform/crypto/apiSecrets.js";
+import { createCaptureSealer } from "../../../src/platform/crypto/captureSealer.js";
+import {
+  type CaptureUnsealer,
+  createLocalCaptureUnsealer,
+} from "../../../src/platform/crypto/captureUnsealer.js";
+import { keyVersionOf } from "../../../src/platform/crypto/envelope.js";
+import { rewrapApiSecrets, rewrapApiSecretsCommand } from "../../../src/platform/crypto/rewrap.js";
 import { createTestDatabase, type TestDatabase } from "../../support/testDatabase.js";
 import { testWorkerConfig } from "../../support/worker.js";
 
@@ -57,8 +67,7 @@ async function insert(testDb: TestDatabase, id: string, secret: Buffer): Promise
   );
 }
 
-async function ciphers() {
-  const { createApiSecretsCipher } = await s8.apiSecrets();
+function ciphers() {
   return {
     k1Only: createApiSecretsCipher({ current: "k1", keys: new Map([["k1", K1]]) }),
     current: createApiSecretsCipher({
@@ -147,9 +156,7 @@ describe("TP-8.7: rewrapApiSecrets (F-117)", () => {
   });
 
   it("TP-8.7: 3 rows under k1 and 1 under k2, one k1 row changed concurrently: {rewrapped 2, skipped 1}; every row ends under k2 and the rewrapped ones unseal to their plaintext", async () => {
-    const { rewrapApiSecrets } = await s8.rewrap();
-    const { keyVersionOf } = await s8.envelope();
-    const { k1Only, current } = await ciphers();
+    const { k1Only, current } = ciphers();
     const plaintexts = new Map(IDS.map((id, i) => [id, Buffer.from(`secret-${String(i)}`)]));
     for (const [i, id] of IDS.entries()) {
       const cipher: ApiSecretsCipher = i < 3 ? k1Only : current;
@@ -194,9 +201,6 @@ describe("TP-8.8: the platform.capture-rewrap job (F-118)", () => {
   });
 
   it("TP-8.8: rows sealed under local:1 are re-sealed under local:2 by the job handler", async () => {
-    const { createCaptureSealer } = await s8.captureSealer();
-    const { createLocalCaptureUnsealer } = await s8.captureUnsealer();
-    const { keyVersionOf } = await s8.envelope();
     const pem = () => {
       const { publicKey, privateKey } = generateKeyPairSync("rsa", { modulusLength: 3072 });
       return {
@@ -270,9 +274,7 @@ describe("TP-8.16: the container's sealed-column registry feeds secrets:rewrap-a
   };
 
   it("TP-8.16: with sealed_test registered through the override, rewrapApiSecretsCommand re-wraps both k1 rows to k2", async () => {
-    const { rewrapApiSecretsCommand } = await s8.rewrap();
-    const { keyVersionOf } = await s8.envelope();
-    const { k1Only } = await ciphers();
+    const { k1Only } = ciphers();
     const sealedColumns = createSealedColumnRegistry();
     sealedColumns.register(COLUMN_API);
     const built = await buildApiContainer({ sealedColumns }, {}, fixture);

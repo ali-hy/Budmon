@@ -11,7 +11,7 @@ import {
   rsaKeyPair,
   withFile,
 } from "../../support/configEnv.js";
-import { s8 } from "../../support/s8.js";
+import { configKeysFor } from "../../../src/platform/config/schema.js";
 
 const CAPTURE_ONLY = [
   "CAPTURE_PRIVATE_KEY_FILE",
@@ -34,17 +34,13 @@ describe("TP-8.15: no capture unsealer on the API side (F-96, F-10)", () => {
     return f;
   }
 
-  it("TP-8.15 (A-248): configKeysFor('api') has none of the capture-only variables", async () => {
-    const { configKeysFor } = await s8.configKeys();
-
+  it("TP-8.15 (A-248): configKeysFor('api') has none of the capture-only variables", () => {
     const keys = configKeysFor("api");
 
     for (const key of CAPTURE_ONLY) expect(keys).not.toContain(key);
   });
 
-  it("TP-8.17x (A-248): configKeysFor is sorted, and a capture worker's list has the capture-only variables", async () => {
-    const { configKeysFor } = await s8.configKeys();
-
+  it("TP-8.17x (A-248): configKeysFor is sorted, and a capture worker's list has the capture-only variables", () => {
     const api = configKeysFor("api");
     const capture = configKeysFor("worker", ["capture"]);
 

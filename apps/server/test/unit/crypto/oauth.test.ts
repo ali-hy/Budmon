@@ -6,7 +6,18 @@ import { CANARIES, scanForCanaries } from "@budmon/test-support";
 import { describe, expect, it, vi } from "vitest";
 import { createSealedColumnRegistry } from "../../../src/platform/crypto/sealedColumns.js";
 import { Secret } from "../../../src/platform/observability/redaction.js";
-import { s8 } from "../../support/s8.js";
+import {
+  CAPTURE_EGRESS_HOSTS,
+  createGuardedFetch,
+  EgressDeniedError,
+} from "../../../src/platform/crypto/egress.js";
+import {
+  buildGoogleAuthorizationUrl,
+  createOAuthState,
+  createPkcePair,
+  exchangeAuthorizationCode,
+  OAuthExchangeError,
+} from "../../../src/platform/crypto/oauth.js";
 
 describe("TP-8.9: the sealed-column registry (F-115)", () => {
   const ok = {
@@ -52,9 +63,7 @@ describe("TP-8.10: PKCE (F-119)", () => {
     105, 214, 191, 240, 91, 88, 5, 88, 83, 132, 141, 121,
   ]);
 
-  it("TP-8.10: with RFC 7636 appendix B's bytes, the verifier and S256 challenge are the RFC's", async () => {
-    const { createPkcePair } = await s8.oauth();
-
+  it("TP-8.10: with RFC 7636 appendix B's bytes, the verifier and S256 challenge are the RFC's", () => {
     const pair = createPkcePair((n) => RFC_BYTES.subarray(0, n));
 
     expect(pair.verifier.reveal()).toBe("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk");
@@ -62,9 +71,7 @@ describe("TP-8.10: PKCE (F-119)", () => {
     expect(pair.method).toBe("S256");
   });
 
-  it("TP-8.18x: a real verifier is 43 base64url characters; state is a 43-character token; two of each differ", async () => {
-    const { createPkcePair, createOAuthState } = await s8.oauth();
-
+  it("TP-8.18x: a real verifier is 43 base64url characters; state is a 43-character token; two of each differ", () => {
     const a = createPkcePair();
     const b = createPkcePair();
 
@@ -76,9 +83,7 @@ describe("TP-8.10: PKCE (F-119)", () => {
 });
 
 describe("TP-8.11: the Google authorisation URL (F-119)", () => {
-  it("TP-8.11: host, path and exactly the listed parameters", async () => {
-    const { buildGoogleAuthorizationUrl } = await s8.oauth();
-
+  it("TP-8.11: host, path and exactly the listed parameters", () => {
     const url = buildGoogleAuthorizationUrl({
       clientId: "123.apps.googleusercontent.com",
       redirectUri: "http://localhost:8080/oauth/callback",
@@ -117,7 +122,6 @@ describe("TP-8.12: exchangeAuthorizationCode (F-120)", () => {
   }
 
   async function exchange(fetchImpl: typeof fetch) {
-    const { exchangeAuthorizationCode } = await s8.oauth();
     return exchangeAuthorizationCode(
       {
         fetch: fetchImpl,
@@ -213,8 +217,6 @@ describe("TP-8.12: exchangeAuthorizationCode (F-120)", () => {
   it.each(cases)(
     "TP-8.12: %s is OAuthExchangeError %s (retryable %s), with no response content kept",
     async (_label, respond, reason, retryable) => {
-      const { OAuthExchangeError } = await s8.oauth();
-
       const error = await failure(respond);
 
       expect(error).toBeInstanceOf(OAuthExchangeError);
@@ -232,8 +234,7 @@ describe("TP-8.12: exchangeAuthorizationCode (F-120)", () => {
 });
 
 describe("TP-8.13: the egress guard (F-121)", () => {
-  async function guarded() {
-    const { createGuardedFetch } = await s8.egress();
+  function guarded() {
     const inner = vi.fn<typeof fetch>(() => Promise.resolve(new Response("ok")));
     return {
       inner,
@@ -242,7 +243,7 @@ describe("TP-8.13: the egress guard (F-121)", () => {
   }
 
   it("TP-8.13: an allowed https URL is passed on with redirect manual", async () => {
-    const { inner, fetch } = await guarded();
+    const { inner, fetch } = guarded();
 
     await fetch("https://gmail.googleapis.com/x", { redirect: "follow" });
 
@@ -256,8 +257,7 @@ describe("TP-8.13: the egress guard (F-121)", () => {
     ["https://gmail.googleapis.com:8443/", "gmail.googleapis.com"],
     ["https://u:p@gmail.googleapis.com/", "gmail.googleapis.com"],
   ])("TP-8.13: %s is EgressDeniedError and the inner fetch isn't called", async (url, host) => {
-    const { EgressDeniedError } = await s8.egress();
-    const { inner, fetch } = await guarded();
+    const { inner, fetch } = guarded();
 
     const error = await fetch(url).then(
       () => undefined,
@@ -270,8 +270,7 @@ describe("TP-8.13: the egress guard (F-121)", () => {
   });
 
   it("TP-8.18x: port 443 written out is allowed; CAPTURE_EGRESS_HOSTS lists the four Google hosts", async () => {
-    const { CAPTURE_EGRESS_HOSTS } = await s8.egress();
-    const { inner, fetch } = await guarded();
+    const { inner, fetch } = guarded();
 
     await fetch("https://gmail.googleapis.com:443/y");
 
