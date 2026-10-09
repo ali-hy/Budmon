@@ -228,7 +228,7 @@ describe("TP-2.13: a malformed journal is an error (A-150)", () => {
     },
   );
 
-  it("TP-2.70x: applyCommittedMigrations with a malformed journal throws JournalInvalidError and records nothing", async () => {
+  it("TP-2.13: applyCommittedMigrations with a malformed journal throws JournalInvalidError before creating schema drizzle (A-162)", async () => {
     const dir = mkdtempSync(path.join(tmpdir(), "budmon-journal-"));
     const database = await freshDatabase("malformed_journal");
     try {
@@ -239,6 +239,12 @@ describe("TP-2.13: a malformed journal is an error (A-150)", () => {
         JournalInvalidError,
       );
       expect(drizzleMigrate).not.toHaveBeenCalled();
+      // A-162: the journal is validated before A-146's CREATE SCHEMA / CREATE TABLE.
+      const [namespaces] = await query<{ n: string }>(
+        pg.superuserUrl("malformed_journal"),
+        "SELECT count(*) AS n FROM pg_namespace WHERE nspname = 'drizzle'",
+      );
+      expect(namespaces?.n).toBe("0");
     } finally {
       await database.close();
       rmSync(dir, { recursive: true, force: true });

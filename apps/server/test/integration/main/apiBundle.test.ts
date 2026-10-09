@@ -377,6 +377,105 @@ describe("TP-2.13: node dist/main/migrate.js with an invalid journal (A-150, A-1
   );
 });
 
+// ---- TP-2.13's api half (A-150): the api refuses to start on an invalid journal ----
+
+describe("TP-2.13: node --import ./dist/main/instrument.js dist/main/api.js with an invalid journal (A-150)", () => {
+  let testDb: TestDatabase;
+
+  beforeAll(async () => {
+    testDb = await createTestDatabase("budmon_app");
+  }, 60_000);
+
+  afterAll(async () => {
+    await testDb.drop();
+  });
+
+  it("TP-2.13: exit 1, one startup_failed line with errorClass JournalInvalidError, no canary, no port", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "budmon-api-journal-"));
+    try {
+      writeFileSync(path.join(dir, "package.json"), '{"name":"@budmon/server","type":"module"}\n');
+      cpSync(path.join(SERVER_DIR, "dist"), path.join(dir, "dist"), { recursive: true });
+      symlinkSync(path.join(SERVER_DIR, "node_modules"), path.join(dir, "node_modules"));
+      mkdirSync(path.join(dir, "drizzle", "meta"), { recursive: true });
+      writeFileSync(
+        path.join(dir, "drizzle", "meta", "_journal.json"),
+        "not json CANARYMESSAGE7f3a",
+      );
+      const port = await freePort();
+      const env = devApiEnvironment(dir, testDb, port);
+
+      const result = spawnSync(process.execPath, START_COMMAND, {
+        cwd: dir,
+        env,
+        encoding: "utf8",
+        timeout: 60_000,
+      });
+      const output = `${result.stdout}${result.stderr}`;
+
+      expect(result.status, output).toBe(1);
+      const failures = output
+        .split("\n")
+        .flatMap((line): Record<string, unknown>[] => {
+          try {
+            const parsed: unknown = JSON.parse(line);
+            return isJsonObject(parsed) ? [parsed] : [];
+          } catch {
+            return [];
+          }
+        })
+        .filter((r) => r["event"] === "startup_failed");
+      expect(failures).toHaveLength(1);
+      expect(failures[0]).toMatchObject({ errorClass: "JournalInvalidError" });
+      expect(output).not.toContain("CANARY");
+      expect(await portAcceptsConnections(port)).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 90_000);
+});
+
+function isJsonObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+/**
+ * A valid development api environment for APP_ENV test: the devApi fixture's secret files written
+ * under `dir`, the database `testDb` as budmon_app, and `port`.
+ */
+function devApiEnvironment(
+  dir: string,
+  testDb: TestDatabase,
+  port: number,
+): Record<string, string> {
+  const f = devApi();
+  const env: Record<string, string> = { PATH: process.env["PATH"] ?? "" };
+  for (const [key, value] of Object.entries(f.env)) {
+    if (value === undefined) continue;
+    const content = f.files.get(value);
+    if (content === undefined) {
+      env[key] = value;
+    } else {
+      const file = path.join(dir, path.basename(value));
+      writeFileSync(file, content);
+      env[key] = file;
+    }
+  }
+  const passwordFile = path.join(dir, "app_password");
+  writeFileSync(passwordFile, `${TEST_ROLE_PASSWORDS.budmon_app}\n`);
+  return {
+    ...env,
+    APP_ENV: "test",
+    PORT: String(port),
+    HOST: "127.0.0.1",
+    DB_HOST: testDb.endpoint.host,
+    DB_PORT: String(testDb.endpoint.port),
+    DB_NAME: testDb.name,
+    DB_USER: "budmon_app",
+    DB_PASSWORD_FILE: passwordFile,
+    OBJECT_STORE_FS_ROOT: path.join(dir, "objects"),
+  };
+}
+
 // ---- TP-4.24 ----
 
 interface OtlpRequest {
