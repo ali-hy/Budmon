@@ -10,7 +10,7 @@ import { defineJob } from "../queue/jobs.js";
 import type { JobQueue } from "../queue/jobQueue.js";
 import type { JobContext } from "../queue/wrapper.js";
 import { normaliseRate } from "./decimal.js";
-import type { FxService } from "./fxService.js";
+import { FX_FALLBACK_FIRST_DATE, type FxService } from "./fxService.js";
 import {
   currencies,
   dayExists,
@@ -51,7 +51,8 @@ export const fxGapCheckJob = defineJob({
   role: "general",
   payload: empty,
   cron: "45 6 * * *",
-  policy: "singleton",
+  // A-273: one queued and one active check at most (singleton only limits active jobs).
+  policy: "stately",
   retryLimit: 3,
 });
 
@@ -136,6 +137,12 @@ export async function runFxBackfill(
   ctx: JobContext,
 ): Promise<void> {
   const { rateDate } = payload;
+  // A-275: worker-capture may send this job, so a date the fallback can't have is refused here.
+  const today = utcDateOf(deps.clock.now()).toString();
+  if (rateDate < FX_FALLBACK_FIRST_DATE || rateDate >= today) {
+    ctx.logger.warn("fx_backfill_out_of_range", { rateDate });
+    return;
+  }
   if (await dayExists(deps.database.handle, rateDate)) return;
   try {
     await storeDayFrom(deps, deps.providers.fallback, rateDate, ctx);

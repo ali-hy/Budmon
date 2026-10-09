@@ -170,8 +170,8 @@ function fxServiceFor(base: BaseCore, queue: JobQueue): FxService {
 }
 
 /**
- * F-133 from config.fx: live → Open Exchange Rates and fawazahmed0; fixed → fixed for both. No
- * FX_PROVIDER → null (the fetch and backfill handlers then fail rather than guess a provider).
+ * F-133 from config.fx: live → Open Exchange Rates and fawazahmed0; fixed → fixed for both. A
+ * general worker always has config.fx (A-276); null stays as a guard.
  */
 function fxProvidersFor(config: Config): FxProviders | null {
   const fx = config.fx;

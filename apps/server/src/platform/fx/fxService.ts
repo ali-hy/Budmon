@@ -12,6 +12,7 @@ import {
 } from "@budmon/shared";
 import { z } from "zod";
 import type { Database, DbHandle } from "../db/types.js";
+import { describeFailure } from "../observability/describeFailure.js";
 import type { Logger } from "../observability/logger.js";
 import type { PlatformMetrics } from "../observability/metrics.js";
 import type { JobDefinition } from "../queue/jobs.js";
@@ -81,15 +82,20 @@ export function createFxService(deps: {
     return currencyInfo;
   };
 
-  /** Outside the caller's transaction, so the job survives its rollback. */
+  /** Outside the caller's transaction, so the job survives its rollback. Never throws. */
   const backfill = async (onDate: Temporal.PlainDate): Promise<void> => {
     const rateDate = onDate.toString();
-    await deps.queue.enqueue(
-      deps.database.handle,
-      fxBackfillJob,
-      { rateDate },
-      { singletonKey: rateDate },
-    );
+    try {
+      await deps.queue.enqueue(
+        deps.database.handle,
+        fxBackfillJob,
+        { rateDate },
+        { singletonKey: rateDate },
+      );
+    } catch (err) {
+      // A-277: best effort; the result is already right and the next convert retries it.
+      deps.logger.warn("fx_backfill_enqueue_failed", { rateDate, ...describeFailure(err) }, err);
+    }
   };
 
   const convert: FxService["convert"] = async (m, to, onDate, h) => {

@@ -840,6 +840,14 @@ function readEmail(r: Reader, publicOriginUrl: URL | undefined): Config["email"]
 }
 
 function readFx(r: Reader): Config["fx"] | undefined {
+  // A-276: absent means fixed in development and test, and is required in prod.
+  if (r.get("FX_PROVIDER") === undefined) {
+    if (r.prod) {
+      r.fail("FX_PROVIDER", "required");
+      return undefined;
+    }
+    return { provider: "fixed" };
+  }
   const provider = r.oneOf("FX_PROVIDER", ["live", "fixed"] as const);
   if (provider === undefined) return undefined;
   if (provider === "fixed") {
