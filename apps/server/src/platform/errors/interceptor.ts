@@ -58,9 +58,13 @@ function declaredError(
   declared?: DeclaredErrors,
 ): ORPCError<string, unknown> {
   const platform: DeclaredErrors = PLATFORM_ERRORS;
-  const entry = Object.hasOwn(platform, err.code) ? platform[err.code] : declared?.[err.code];
-  const message = entry?.message ?? err.code;
-  const data = entry?.data === undefined ? undefined : err.data;
+  const platformEntry = Object.hasOwn(platform, err.code) ? platform[err.code] : undefined;
+  // The message: §6's for platform keys (A-170), else the declared one, else the key.
+  const message = platformEntry?.message ?? declared?.[err.code]?.message ?? err.code;
+  // The data: kept only when the procedure's own declaration (what oRPC validated against) has a
+  // data schema; PLATFORM_ERRORS decides only when no map was passed (A-166(b)).
+  const decidingEntry = declared === undefined ? platformEntry : declared[err.code];
+  const data = decidingEntry?.data === undefined ? undefined : err.data;
   return defined(err.code, err.status, message, data);
 }
 
