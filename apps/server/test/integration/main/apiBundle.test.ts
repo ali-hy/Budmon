@@ -920,6 +920,76 @@ describe("TP-6.13, TP-6.15: the built worker with test jobs (fixture worker.mjs,
     }
   }, 120_000);
 
+  it("TP-6.15: (A-237) a job lifecycle of 25 jobs (completing, retrying, dead-lettering): every pg.query name is pg.query:<KEYWORD>[ <database>], none is span, and no unexpected drop is counted", async () => {
+    const received: OtlpRequest[] = [];
+    const recorder = createHttpServer((req, res) => {
+      const chunks: Buffer[] = [];
+      req.on("data", (c: Buffer) => chunks.push(c));
+      req.on("end", () => {
+        let body: unknown = null;
+        try {
+          body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+        } catch {
+          body = null;
+        }
+        received.push({ path: req.url ?? "", body });
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end("{}");
+      });
+    });
+    await new Promise<void>((resolve) => recorder.listen(0, "127.0.0.1", resolve));
+    const address = recorder.address();
+    const recorderPort = typeof address === "object" && address !== null ? address.port : 0;
+    const run = await startFixture({
+      OTEL_EXPORTER_OTLP_ENDPOINT: `http://localhost:${String(recorderPort)}`,
+    });
+    try {
+      const ids = { ok: [] as string[], retry: [] as string[], dead: [] as string[] };
+      for (let i = 0; i < 10; i++) ids.ok.push(await send("test.ok"));
+      for (let i = 0; i < 8; i++) ids.retry.push(await send("test.fail3"));
+      for (let i = 0; i < 7; i++) ids.dead.push(await send("test.fail"));
+
+      const states = async (name: string, wanted: readonly string[]) =>
+        (await jobRows(testDb.database, name)).filter((r) => wanted.includes(r.id));
+      await waitFor(
+        async () => {
+          const ok = await states("test.ok", ids.ok);
+          const retried = await states("test.fail3", ids.retry);
+          const dead = await states("test.fail", ids.dead);
+          return (
+            ok.every((r) => r.state === "completed") &&
+            retried.every((r) => r.state === "completed") &&
+            dead.every((r) => r.state === "failed") &&
+            (await jobRows(testDb.database, "dead-letter.general")).length >= 7
+          );
+        },
+        90_000,
+        "the 25 jobs to settle",
+      );
+      run.child.kill("SIGTERM");
+      await run.exited;
+
+      const all = exportedSpans(received);
+      const pgQueries = all.filter(
+        (s) => s.scope === "@opentelemetry/instrumentation-pg" && s.name.startsWith("pg.query"),
+      );
+      const seen = JSON.stringify([...new Set(pgQueries.map((s) => s.name))]);
+      expect(pgQueries.length, seen).toBeGreaterThan(0);
+      for (const span of pgQueries) {
+        expect(span.name, seen).toMatch(/^pg\.query:[A-Z]+( [a-z0-9_]+)?$/);
+      }
+      expect(all.filter((s) => s.name === "span").map((s) => s.scope)).toEqual([]);
+      expect(unexpectedDrops(received).filter((v) => v > 0)).toEqual([]);
+    } finally {
+      if (run.child.exitCode === null) run.child.kill("SIGKILL");
+      await new Promise<void>((resolve) => {
+        recorder.close(() => {
+          resolve();
+        });
+      });
+    }
+  }, 180_000);
+
   it("TP-6.15: through the start command, the recorder gets a pg span (SELECT) whose parent is pg-boss's CONSUMER span process test.select (A-219)", async () => {
     const received: OtlpRequest[] = [];
     const recorder = createHttpServer((req, res) => {

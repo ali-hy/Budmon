@@ -1,6 +1,6 @@
 // F-40 AllowlistSpanExporter. TP-3.7 and TP-3.16 (links, A-114), plus extra cases TP-3.26x
-// (classification by prefix, the allowlist itself, status messages, delegation) and TP-3.33x (link
-// attributes). IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
+// (classification by prefix, the allowlist itself, status messages, delegation), TP-3.33x (link
+// attributes) and TP-3.35x (pg.query renames, A-237). IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { SpanKind, SpanStatusCode, type Attributes } from "@opentelemetry/api";
 import {
   BasicTracerProvider,
@@ -482,5 +482,63 @@ describe("TP-3.7: no raw path or client host in traces (A-176, A-177)", () => {
 
   it("TP-3.7: the test's allowlist is F-40's", () => {
     expect([...SPAN_ATTRIBUTE_ALLOWLIST].sort()).toEqual([...ALLOWLIST].sort());
+  });
+});
+
+describe("TP-3.7: pg.query span names rewritten to keyword + database (A-237)", () => {
+  const PG = "@opentelemetry/instrumentation-pg";
+
+  it.each([
+    ["a newline after the keyword", "pg.query:WITH\n budmon", "pg.query:WITH budmon"],
+    [
+      "a quote after the keyword",
+      `pg.query:SELECT'${CANARIES.payee}' budmon`,
+      "pg.query:SELECT budmon",
+    ],
+    [
+      "a prepared statement name",
+      `pg.query:GET-PAYEE-${CANARIES.payee.toUpperCase()} budmon`,
+      "pg.query:GET budmon",
+    ],
+    ["an ordinary name", "pg.query:SELECT budmon", "pg.query:SELECT budmon"],
+  ])("TP-3.7: %s: %j becomes %j, with no drop", (_label, name, expected) => {
+    const { inner, sums } = exportThrough(makeSpans([{ attributes: {} }], name, PG));
+
+    expect(inner.spans[0]?.name).toBe(expected);
+    expect(sums).toEqual({ expected: 0, unexpected: 0 });
+    expect(
+      scanForCanaries([{ name: "span name", text: inner.spans[0]?.name ?? "" }], CANARIES),
+    ).toEqual([]);
+  });
+
+  it.each([["pg.connect"], ["pg-pool.connect"]])(
+    "TP-3.7: %s is unchanged, with no drop",
+    (name) => {
+      const { inner, sums } = exportThrough(makeSpans([{ attributes: {} }], name, PG));
+
+      expect(inner.spans[0]?.name).toBe(name);
+      expect(sums).toEqual({ expected: 0, unexpected: 0 });
+    },
+  );
+
+  it.each([
+    ["a token with no leading letters", "pg.query:(SELECT budmon", "pg.query:UNKNOWN budmon"],
+    ["a database name outside [a-z0-9_]", "pg.query:SELECT Bad-DB", "pg.query:SELECT"],
+    ["no database", "pg.query:INSERT", "pg.query:INSERT"],
+    ["a lower-case keyword", "pg.query:select budmon", "pg.query:SELECT budmon"],
+  ])("TP-3.35x: %s: %j becomes %j", (_label, name, expected) => {
+    const { inner, sums } = exportThrough(makeSpans([{ attributes: {} }], name, PG));
+
+    expect(inner.spans[0]?.name).toBe(expected);
+    expect(sums).toEqual({ expected: 0, unexpected: 0 });
+  });
+
+  it("TP-3.35x: the same multi-line name from another scope still becomes span, with one unexpected drop", () => {
+    const { inner, sums } = exportThrough(
+      makeSpans([{ attributes: {} }], "pg.query:WITH\n budmon", "other-scope"),
+    );
+
+    expect(inner.spans[0]?.name).toBe("span");
+    expect(sums).toEqual({ expected: 0, unexpected: 1 });
   });
 });
