@@ -1,7 +1,8 @@
 // F-52 mapError. TP-4.9, plus extra cases TP-4.35x (every zod code's fixed message, the other
 // oRPC built-ins, every database-unavailable code). IDs ending in "x" are test-architect additions,
 // not LLD test-plan IDs.
-import { ValidationError } from "@orpc/contract";
+import { ValidationError, validateORPCError, type ErrorMap } from "@orpc/contract";
+import { base } from "@budmon/contract";
 import { ORPCError } from "@orpc/server";
 import { CANARIES, scanForCanaries } from "@budmon/test-support";
 import { describe, expect, it } from "vitest";
@@ -423,5 +424,65 @@ describe("TP-4.9: rule 3b, the declared message and only declared data (A-166, A
       message: "Conflict",
       data: { reason: "taken" },
     });
+  });
+});
+
+describe("TP-4.9: a redeclared platform key's data follows the procedure's declaration (A-166(b))", () => {
+  // The real path: oRPC's validateORPCError against the procedure's merged error map decides
+  // `defined` (and validates data), then mapError receives that same map as `declared`.
+  async function throughProcedure(
+    procedure: { "~orpc": { errorMap: ErrorMap } },
+    thrown: ORPCError<string, unknown>,
+  ) {
+    const errorMap = procedure["~orpc"].errorMap;
+    const validated = await validateORPCError(errorMap, thrown);
+    return mapError(validated, NOT_COMMITTED, errorMap);
+  }
+
+  it("TP-4.9: CONFLICT redeclared without data drops the thrown data; message is §6's 'Conflict'", async () => {
+    const procedure = base
+      .errors({ CONFLICT: { status: 409, message: "Payee exists" } })
+      .route({ method: "POST", path: "/payees" });
+
+    const { error, report } = await throughProcedure(
+      procedure,
+      new ORPCError("CONFLICT", { data: { payee: CANARIES.payee, email: "x@y.z" } }),
+    );
+
+    expect(envelope(error)).toEqual({
+      defined: true,
+      code: "CONFLICT",
+      status: 409,
+      message: "Conflict",
+      data: undefined,
+    });
+    expect(report).toBe(false);
+    noCanary(envelope(error));
+  });
+
+  it("TP-4.9: NOT_FOUND redeclared with a data schema keeps the data; message is §6's 'Not found'", async () => {
+    const procedure = base
+      .errors({
+        NOT_FOUND: {
+          status: 404,
+          message: "Payee not found",
+          data: z.object({ resource: z.enum(["payee"]) }),
+        },
+      })
+      .route({ method: "GET", path: "/payees/{id}" });
+
+    const { error, report } = await throughProcedure(
+      procedure,
+      new ORPCError("NOT_FOUND", { data: { resource: "payee" } }),
+    );
+
+    expect(envelope(error)).toEqual({
+      defined: true,
+      code: "NOT_FOUND",
+      status: 404,
+      message: "Not found",
+      data: { resource: "payee" },
+    });
+    expect(report).toBe(false);
   });
 });
