@@ -1,8 +1,9 @@
-// F-100 createIdempotency and F-101 idempotencyRepo on a real database. TP-7.1 to TP-7.6 and
-// TP-7.8 (the canonical request hash, checked against the stored row), plus extra cases TP-7.17x.
+// F-100 createIdempotency and F-101 idempotencyRepo on a real database. TP-7.1 to TP-7.6, plus
+// extra cases TP-7.17x.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { createHash } from "node:crypto";
-import { Temporal, canonicalJson, fixedClock } from "@budmon/shared";
+import { Temporal, fixedClock } from "@budmon/shared";
+import { createTestUser } from "@budmon/test-support";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { withTransaction } from "../../../src/platform/db/transaction.js";
 import { IdempotencyKeyReusedError } from "../../../src/platform/errors/platformErrors.js";
@@ -10,8 +11,9 @@ import { observed, type Observed } from "../../support/api.js";
 import { s7, type CreatedResult, type Idempotency } from "../../support/s7.js";
 import { createTestDatabase, type TestDatabase } from "../../support/testDatabase.js";
 
-const USER_A = "0190a0b0-1c2d-7e3f-8a4b-00000000000a";
-const USER_B = "0190a0b0-1c2d-7e3f-8a4b-00000000000b";
+// A-234: user ids come only from createTestUser.
+let USER_A: string;
+let USER_B: string;
 const NOW = "2026-10-09T12:00:00Z";
 
 let testDb: TestDatabase;
@@ -20,6 +22,8 @@ let idempotency: Idempotency;
 
 beforeAll(async () => {
   testDb = await createTestDatabase();
+  USER_A = await createTestUser(testDb);
+  USER_B = await createTestUser(testDb);
   obs = observed();
   const { createIdempotency } = await s7.idempotency();
   idempotency = createIdempotency({ clock: fixedClock(NOW), metrics: obs.metrics });
@@ -183,23 +187,6 @@ describe("TP-7.6: failing work (F-100)", () => {
 
     expect(retry).toHaveBeenCalledTimes(1);
     expect(out.replayed).toBe(false);
-  });
-});
-
-describe("TP-7.8: the request hash is canonical (F-100)", () => {
-  it("TP-7.8: {a:1,b:2} and {b:2,a:1} hash the same: the second is a replay, and request_hash is sha256(canonicalJson(input))", async () => {
-    const key = newKey();
-
-    await run(USER_A, key, { a: 1, b: 2 }, () => Promise.resolve(created(9)));
-    const second = await run(USER_A, key, { b: 2, a: 1 }, () => Promise.resolve(created(10)));
-
-    expect(second.replayed).toBe(true);
-    const row = await record(USER_A, key);
-    expect(Buffer.from(row?.["request_hash"] as Uint8Array)).toEqual(
-      createHash("sha256")
-        .update(canonicalJson({ a: 1, b: 2 }))
-        .digest(),
-    );
   });
 });
 

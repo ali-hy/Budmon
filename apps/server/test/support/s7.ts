@@ -22,6 +22,8 @@ export interface Idempotency {
 }
 
 export interface IdempotencyModule {
+  /** A-233: sha256(canonicalJson(input)), which run uses. */
+  requestHashOf: (input: unknown) => Buffer;
   createIdempotency: (deps: { clock: Clock; metrics: PlatformMetrics }) => Idempotency;
   runIdempotentCreate: (
     ctx: RequestContext & { principal: Principal },

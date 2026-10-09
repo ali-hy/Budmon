@@ -11,8 +11,8 @@ import { z } from "zod";
 import type { Principal, RequestContext } from "../../../src/platform/http/context.js";
 import { metaRouter } from "../../../src/platform/http/meta.js";
 import { createApiServer } from "../../../src/platform/http/server.js";
+import { createTestUser } from "@budmon/test-support";
 import {
-  TEST_USER_ID,
   buildApiContainer,
   injectJson,
   testPrincipal,
@@ -61,12 +61,16 @@ async function idemRouter(): Promise<Record<string, unknown>> {
 let built: BuiltContainer | undefined;
 let app: FastifyInstance | undefined;
 
+// A-234: the signed-in user's id comes from createTestUser, once the test database exists.
+let userId = "";
+
 beforeAll(async () => {
   const router = await idemRouter();
   const b = await buildApiContainer({
-    authHook: { authenticate: () => Promise.resolve(testPrincipal()) },
+    authHook: { authenticate: () => Promise.resolve(testPrincipal({ userId })) },
   });
   built = b;
+  userId = await createTestUser(b.testDb);
   await query(
     b.testDb.urlAs("budmon_migrator"),
     "CREATE TABLE test_idem_things (id uuid PRIMARY KEY, name text NOT NULL, created_at timestamptz NOT NULL)",
@@ -187,6 +191,20 @@ describe("TP-7.18x: idempotent creates, further cases (F-102)", () => {
       [key],
     );
 
-    expect(row?.user_id).toBe(TEST_USER_ID);
+    expect(row?.user_id).toBe(userId);
+  });
+
+  it("TP-7.18x: (A-233, A-236) the stored request_hash is requestHashOf(the validated input)", async () => {
+    const { requestHashOf } = await s7.idempotency();
+    const key = "0190a0b0-1c2d-7e3f-8a4b-0000000000c5";
+    await post(key, { name: "hashed" });
+
+    const [row] = await query<{ request_hash: Buffer }>(
+      built?.testDb.urlAs("budmon_migrator") ?? "",
+      "SELECT request_hash FROM idempotency_records WHERE idempotency_key = $1",
+      [key],
+    );
+
+    expect(Buffer.from(row?.request_hash ?? [])).toEqual(requestHashOf({ name: "hashed" }));
   });
 });

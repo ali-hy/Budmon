@@ -1,6 +1,6 @@
-// F-100 createIdempotency outside a transaction. TP-7.9. (TP-7.8's canonical hash is checked
-// against the stored request_hash in test/integration/idempotency/idempotency.test.ts.)
-import { fixedClock } from "@budmon/shared";
+// F-100's request hash and createIdempotency outside a transaction. TP-7.8 (A-233) and TP-7.9.
+import { createHash } from "node:crypto";
+import { canonicalJson, fixedClock } from "@budmon/shared";
 import { describe, expect, it, vi } from "vitest";
 import type { DbHandle } from "../../../src/platform/db/types.js";
 import { observed } from "../../support/api.js";
@@ -31,5 +31,29 @@ describe("TP-7.9: idempotency needs a transaction (F-100)", () => {
     ).rejects.toThrow("idempotency requires a transaction");
     expect(executeSql).not.toHaveBeenCalled();
     expect(work).not.toHaveBeenCalled();
+  });
+});
+
+describe("TP-7.8: requestHashOf is canonical (F-100, A-233)", () => {
+  it("TP-7.8: {a:1,b:2} and {b:2,a:1} give the same 32-byte hash, sha256(canonicalJson(input))", async () => {
+    const { requestHashOf } = await s7.idempotency();
+
+    const one = requestHashOf({ a: 1, b: 2 });
+    const two = requestHashOf({ b: 2, a: 1 });
+
+    expect(one).toEqual(two);
+    expect(one.length).toBe(32);
+    expect(one).toEqual(
+      createHash("sha256")
+        .update(canonicalJson({ a: 1, b: 2 }))
+        .digest(),
+    );
+  });
+
+  it("TP-7.8: different inputs give different hashes", async () => {
+    const { requestHashOf } = await s7.idempotency();
+
+    expect(requestHashOf({ a: 1, b: 2 })).not.toEqual(requestHashOf({ a: 1, b: 3 }));
+    expect(requestHashOf({ a: [1, 2] })).not.toEqual(requestHashOf({ a: [2, 1] }));
   });
 });
