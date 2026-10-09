@@ -1,5 +1,5 @@
 // F-53 procedure bases and F-54 auth hooks through HTTP. TP-4.8 (default deny) and TP-4.16, with a
-// test contract built on procedureBases (A-123), plus extra cases TP-4.40x.
+// test contract built on procedureBases (A-123), plus extra cases TP-4.41x.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { listProcedures } from "@budmon/contract";
 import type { FastifyInstance } from "fastify";
@@ -113,8 +113,8 @@ describe("TP-4.16: procedure bases and auth hooks", () => {
   });
 });
 
-describe("TP-4.40x: procedure bases, further cases (F-53)", () => {
-  it("TP-4.40x: an owner on an owner procedure is 200 with the principal", async () => {
+describe("TP-4.41x: procedure bases, further cases (F-53)", () => {
+  it("TP-4.41x: an owner on an owner procedure is 200 with the principal", async () => {
     const principal = testPrincipal({ isOwner: true });
     const app = await serve(hookReturning(principal));
 
@@ -124,13 +124,13 @@ describe("TP-4.40x: procedure bases, further cases (F-53)", () => {
     expect(res.json()).toEqual({ ...principal });
   });
 
-  it("TP-4.40x: the public meta.clientConfig needs no credentials", async () => {
+  it("TP-4.41x: the public meta.clientConfig needs no credentials", async () => {
     const app = await serve();
 
     expect((await injectJson(app, "GET", "/api/v1/meta/client-config")).status).toBe(200);
   });
 
-  it("TP-4.40x: PUBLIC_PROCEDURES holds meta.clientConfig", () => {
+  it("TP-4.41x: PUBLIC_PROCEDURES holds meta.clientConfig", () => {
     expect([...PUBLIC_PROCEDURES]).toContain("meta.clientConfig");
   });
 });

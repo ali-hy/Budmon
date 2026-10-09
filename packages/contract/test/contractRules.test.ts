@@ -1,5 +1,5 @@
 // F-348 checkContractRules. TP-4.5: one fixture document violating each of R1 to R6, and a clean
-// one; plus extra cases TP-4.28x (the real contract's emitted document is clean). IDs ending in "x"
+// one; plus extra cases TP-4.29x (the real contract's emitted document is clean). IDs ending in "x"
 // are test-architect additions, not LLD test-plan IDs.
 //
 // The clean document is generated (F-347's configuration) from a small contract built with F-343's
@@ -123,6 +123,54 @@ describe("TP-4.5: checkContractRules", () => {
     expect(pointer(violations[0]?.location ?? "")).toMatch(new RegExp(`^${GET}`));
   });
 
+  // A-165: bodies are never coerced, so a body-carrying operation's path parameters are strings.
+  function withUpdate(doc: JsonObject, idSchema: JsonObject): JsonObject {
+    obj(doc, "paths")["/things/{id}"] = {
+      patch: {
+        operationId: "things.update",
+        parameters: [{ name: "id", in: "path", required: true, schema: idSchema }],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: { name: { type: "string", maxLength: 100 } },
+                required: ["name"],
+              },
+            },
+          },
+        },
+        responses: {
+          "200": {
+            description: "OK",
+            content: {
+              "application/json": {
+                schema: { type: "object", properties: { ok: { type: "boolean" } } },
+              },
+            },
+          },
+        },
+      },
+    };
+    return doc;
+  }
+
+  it("TP-4.5: (A-165) a body-carrying operation with a uuid path parameter is clean", async () => {
+    const doc = withUpdate(await clean(), { type: "string", format: "uuid" });
+
+    expect(check(doc)).toEqual([]);
+  });
+
+  it("TP-4.5: (A-165) R4, an integer path parameter on an operation with a request body", async () => {
+    const doc = withUpdate(await clean(), { type: "integer", minimum: 1, maximum: 1000 });
+
+    const violations = check(doc);
+
+    expect(violations.map((v) => v.rule)).toEqual(["R4"]);
+    expect(pointer(violations[0]?.location ?? "")).toMatch(/^\/paths\/~1things~1\{id\}\/patch/);
+  });
+
   it("TP-4.5: R5, a create without its Idempotency-Key header", async () => {
     const doc = await clean();
     const post = obj(doc, "paths", "/things", "post");
@@ -147,14 +195,14 @@ describe("TP-4.5: checkContractRules", () => {
   });
 });
 
-describe("TP-4.28x: checkContractRules, further cases (F-348)", () => {
-  it("TP-4.28x: the real contract's emitted document is clean", async () => {
+describe("TP-4.29x: checkContractRules, further cases (F-348)", () => {
+  it("TP-4.29x: the real contract's emitted document is clean", async () => {
     const doc: unknown = JSON.parse(await emitOpenapi());
 
     expect(check(doc)).toEqual([]);
   });
 
-  it("TP-4.28x: R4, a GET with a request body", async () => {
+  it("TP-4.29x: R4, a GET with a request body", async () => {
     const doc = await clean();
     obj(doc, "paths", "/things", "get")["requestBody"] = {
       content: { "application/json": { schema: { type: "object" } } },
@@ -163,7 +211,7 @@ describe("TP-4.28x: checkContractRules, further cases (F-348)", () => {
     expect(check(doc).map((v) => v.rule)).toContain("R4");
   });
 
-  it("TP-4.28x: R3, a number marked x-budmon-allow-number is allowed", async () => {
+  it("TP-4.29x: R3, a number marked x-budmon-allow-number is allowed", async () => {
     const doc = await clean();
     obj(listItemSchema(doc), "properties")["ratio"] = {
       type: "number",
@@ -173,7 +221,7 @@ describe("TP-4.28x: checkContractRules, further cases (F-348)", () => {
     expect(check(doc)).toEqual([]);
   });
 
-  it("TP-4.28x: R5, a create whose 201 response isn't CreatedResult", async () => {
+  it("TP-4.29x: R5, a create whose 201 response isn't CreatedResult", async () => {
     const doc = await clean();
     obj(doc, "paths", "/things", "post", "responses", "201", "content", "application/json")[
       "schema"
@@ -185,7 +233,7 @@ describe("TP-4.28x: checkContractRules, further cases (F-348)", () => {
     expect(check(doc).map((v) => v.rule)).toEqual(["R5"]);
   });
 
-  it("TP-4.28x: the contract builders never leave a .transform() (R1 on the emitted spike)", async () => {
+  it("TP-4.29x: the contract builders never leave a .transform() (R1 on the emitted spike)", async () => {
     const { spike } = await import("./fixtures/spikeContract.js");
 
     expect(check(await generate(spike))).toEqual([]);

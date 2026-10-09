@@ -1,7 +1,8 @@
 // The API server with a test contract and router (S-4 AC 1). TP-4.10 (F-52's interceptor),
 // TP-4.11's integration part (F-56's middleware), TP-4.19 (body handling, F-55 step 5 with F-62)
-// TP-4.25 (query coercion, A-148), TP-4.26 (defined errors, A-149) and TP-5.2 to TP-5.4 (F-62,
-// moved to S-4, A-124; A-152), plus extra cases TP-4.38x.
+// TP-4.25 (query coercion, A-148; bodies never coerced, A-165; no method, no coercion, A-171),
+// TP-4.26 (defined errors, A-149; declared message, A-166) and TP-5.2 to TP-5.4 (F-62,
+// moved to S-4, A-124; A-152), plus extra cases TP-4.39x.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { CANARIES, scanForCanaries } from "@budmon/test-support";
 import type { FastifyInstance } from "fastify";
@@ -133,7 +134,7 @@ describe("TP-4.11: the client version check through HTTP", () => {
     expect(res.status).toBe(200);
   });
 
-  it("TP-4.38x: a blocked request increments client_update_required_total", async () => {
+  it("TP-4.39x: a blocked request increments client_update_required_total", async () => {
     await injectJson(app, "GET", "/api/v1/test/ping", undefined, {
       "x-budmon-client": "android/2",
     });
@@ -327,6 +328,88 @@ describe("TP-4.25: query strings are coerced to the declared types (A-148)", () 
   });
 });
 
+describe("TP-4.25: request bodies are never coerced; DELETE queries are (A-165)", () => {
+  const post = (body: unknown) =>
+    app.inject({
+      method: "POST",
+      url: "/api/v1/t/create",
+      headers: { "content-type": "application/json", ...IDEMPOTENCY },
+      payload: JSON.stringify(body),
+    });
+
+  it("TP-4.25: a body with real numbers and booleans is accepted (control)", async () => {
+    routes.typedInputs.length = 0;
+
+    const res = await post({ limit: 5, amountMinor: 100, flag: true });
+
+    expect(res.statusCode).toBe(201);
+    expect(routes.typedInputs).toEqual([{ limit: 5, amountMinor: 100, flag: true }]);
+  });
+
+  it.each([
+    ["{limit: '5'}", { limit: "5" }],
+    ["{amountMinor: ' 100 ', flag: 'ON'}", { amountMinor: " 100 ", flag: "ON" }],
+    ["{amountMinor: ' 100 '}", { amountMinor: " 100 " }],
+    ["{flag: 'ON'}", { flag: "ON" }],
+  ])("TP-4.25: body %s is VALIDATION_FAILED, the handler not called", async (_l, body) => {
+    routes.typedInputs.length = 0;
+
+    const res = await post(body);
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json<{ code: string }>().code).toBe("VALIDATION_FAILED");
+    expect(routes.typedInputs).toEqual([]);
+  });
+
+  // OPEN QUESTION (reported to the planner): oRPC 1.15.4's compact input structure reads the query
+  // only for GET (OpenAPICodec.decode); a DELETE's input is its path params plus its body, so
+  // ?force=true never reaches the handler. Marked it.fails until the LLD settles how DELETE query
+  // parameters arrive; it turns red when they do, and then becomes a plain it().
+  it.fails(
+    "TP-4.25: DELETE /t/{id}?force=true reaches the handler with force true (boolean)",
+    async () => {
+      routes.removeInputs.length = 0;
+      const id = "0190a0b0-1c2d-7e3f-8a4b-5c6d7e8f9a0d";
+
+      const res = await app.inject({ method: "DELETE", url: `/api/v1/t/${id}?force=true` });
+
+      expect(res.statusCode).toBe(200);
+      expect(routes.removeInputs).toEqual([{ id, force: true }]);
+    },
+  );
+});
+
+describe("TP-4.25: a context without method gets no coercion (A-171)", () => {
+  let bare: FastifyInstance;
+
+  beforeAll(async () => {
+    bare = await createApiServer(built.container, {
+      contract: testContract,
+      router: routes.router as never,
+    });
+    // Runs after F-55's onRequest hook (registered first): the context loses its method.
+    bare.addHook("onRequest", (request, _reply, done) => {
+      if (request.budmon !== null) delete (request.budmon as { method?: string }).method;
+      done();
+    });
+    await bare.ready();
+  });
+
+  afterAll(async () => {
+    await bare.close();
+  });
+
+  it("TP-4.25: GET ?limit=5 is VALIDATION_FAILED without method, and the handler is not called", async () => {
+    routes.listInputs.length = 0;
+
+    const res = await injectJson(bare, "GET", "/api/v1/t/list?limit=5");
+
+    expect(res.status).toBe(400);
+    expect((res.json() as { code: string }).code).toBe("VALIDATION_FAILED");
+    expect(routes.listInputs).toEqual([]);
+  });
+});
+
 describe("TP-4.26: contract-defined errors pass through (A-149)", () => {
   it("TP-4.26: errors.CONFLICT({ data: { reason: 'taken' } }) is the 409 envelope with its data, not reported", async () => {
     const reportsBefore = obs.reporter.events.length;
@@ -340,6 +423,23 @@ describe("TP-4.26: contract-defined errors pass through (A-149)", () => {
       status: 409,
       data: { reason: "taken" },
     });
+    expect(obs.reporter.events.length).toBe(reportsBefore);
+  });
+
+  it("TP-4.26: (A-166) a custom thrown message is replaced by the declared one; the data is kept", async () => {
+    const reportsBefore = obs.reporter.events.length;
+
+    const res = await injectJson(app, "GET", "/api/v1/test/conflict-custom");
+
+    expect(res.status).toBe(409);
+    expect(res.json()).toEqual({
+      defined: true,
+      code: "CONFLICT",
+      status: 409,
+      message: "Conflict",
+      data: { reason: "taken" },
+    });
+    expect(scanForCanaries([{ name: "body", text: res.body }], CANARIES)).toEqual([]);
     expect(obs.reporter.events.length).toBe(reportsBefore);
   });
 });

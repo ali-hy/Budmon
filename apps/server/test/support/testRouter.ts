@@ -3,12 +3,14 @@
 // oRPC, so their handlers can throw what each test needs. Owned by the test-architect.
 import {
   CreatedResultSchema,
+  UuidSchema,
   base,
   contract,
   createRoute,
   listInput,
   listOutput,
 } from "@budmon/contract";
+import { CANARIES } from "@budmon/test-support";
 import { implement } from "@orpc/server";
 import { vi } from "vitest";
 import { z } from "zod";
@@ -36,6 +38,23 @@ export const testContract = {
     conflict: base
       .route({ method: "GET", path: "/test/conflict" })
       .output(z.object({ ok: z.boolean() })),
+    // TP-4.25 (A-165): a body-carrying create whose body has an integer, an amount and a flag.
+    createTyped: createRoute("/t/create").input(
+      z.strictObject({
+        limit: z.number().int().min(1).optional(),
+        amountMinor: z.number().int().optional(),
+        flag: z.boolean().optional(),
+      }),
+    ),
+    // TP-4.25 (A-165): a DELETE, whose query is coerced.
+    remove: base
+      .route({ method: "DELETE", path: "/t/{id}" })
+      .input(z.object({ id: UuidSchema, force: z.boolean().optional() }))
+      .output(z.object({ ok: z.boolean() })),
+    // TP-4.26 (A-166): the same CONFLICT thrown with a custom message.
+    conflictCustom: base
+      .route({ method: "GET", path: "/test/conflict-custom" })
+      .output(z.object({ ok: z.boolean() })),
     // TP-5.2 (A-152): a create whose input keeps unknown keys, to show what the parser removed.
     createLoose: createRoute("/test/loose").input(z.looseObject({ a: z.number().int() })),
   },
@@ -47,8 +66,10 @@ export interface TestRouter {
   createHandler: ReturnType<typeof vi.fn>;
   /** What test.boom throws. */
   boomError: Error;
-  /** The inputs test.list and test.createLoose received. */
+  /** The inputs test.list, test.createTyped, test.remove and test.createLoose received. */
   listInputs: unknown[];
+  typedInputs: unknown[];
+  removeInputs: unknown[];
   looseInputs: unknown[];
 }
 
@@ -56,6 +77,8 @@ export function testRouter(boomError: Error = new Error("boom")): TestRouter {
   const os = implement(testContract).$context<RequestContext>();
   const listInputs: unknown[] = [];
   const looseInputs: unknown[] = [];
+  const typedInputs: unknown[] = [];
+  const removeInputs: unknown[] = [];
   const createHandler = vi.fn(() => ({
     id: "0190a0b0-1c2d-7e3f-8a4b-5c6d7e8f9a0d",
     createdAt: "2026-10-05T12:00:00.000Z",
@@ -82,13 +105,35 @@ export function testRouter(boomError: Error = new Error("boom")): TestRouter {
       conflict: os.test.conflict.handler(({ errors }) => {
         throw errors.CONFLICT({ data: { reason: "taken" } });
       }),
+      createTyped: os.test.createTyped.handler(({ input }) => {
+        typedInputs.push(input);
+        return CreatedResultSchema.parse(createHandler());
+      }),
+      remove: os.test.remove.handler(({ input }) => {
+        removeInputs.push(input);
+        return { ok: true };
+      }),
+      conflictCustom: os.test.conflictCustom.handler(({ errors }) => {
+        throw errors.CONFLICT({
+          message: "custom " + CANARIES.payee,
+          data: { reason: "taken" },
+        });
+      }),
       createLoose: os.test.createLoose.handler(({ input }) => {
         looseInputs.push(input);
         return CreatedResultSchema.parse(createHandler());
       }),
     },
   };
-  return { router, createHandler, boomError, listInputs, looseInputs };
+  return {
+    router,
+    createHandler,
+    boomError,
+    listInputs,
+    typedInputs,
+    removeInputs,
+    looseInputs,
+  };
 }
 
 const PrincipalEcho = z.object({ userId: z.string(), isOwner: z.boolean(), sessionId: z.string() });

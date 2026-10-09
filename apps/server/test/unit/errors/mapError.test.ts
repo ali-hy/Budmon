@@ -1,10 +1,11 @@
-// F-52 mapError. TP-4.9, plus extra cases TP-4.34x (every zod code's fixed message, the other
+// F-52 mapError. TP-4.9, plus extra cases TP-4.35x (every zod code's fixed message, the other
 // oRPC built-ins, every database-unavailable code). IDs ending in "x" are test-architect additions,
 // not LLD test-plan IDs.
 import { ValidationError } from "@orpc/contract";
 import { ORPCError } from "@orpc/server";
 import { CANARIES, scanForCanaries } from "@budmon/test-support";
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import { BudmonError } from "../../../src/platform/errors/BudmonError.js";
 import { mapError } from "../../../src/platform/errors/interceptor.js";
 import { RateLimitedError } from "../../../src/platform/errors/platformErrors.js";
@@ -133,11 +134,11 @@ describe("TP-4.9: mapError", () => {
   });
 
   it.each([
-    ["not committed", NOT_COMMITTED, "not_applied"],
-    ["committed", COMMITTED, "unknown"],
+    ["not committed", "not_applied", NOT_COMMITTED],
+    ["committed", "unknown", COMMITTED],
   ] as const)(
     "TP-4.9: a plain Error (%s) is INTERNAL { outcome: %s }, reported",
-    (_l, state, outcome) => {
+    (_l, outcome, state) => {
       const { error, report } = mapError(new Error(CANARIES.message), state);
 
       expect(envelope(error)).toEqual({
@@ -178,7 +179,7 @@ describe("TP-4.9: contract-defined oRPC errors (A-149)", () => {
   });
 });
 
-describe("TP-4.34x: mapError, further cases (F-52)", () => {
+describe("TP-4.35x: mapError, further cases (F-52)", () => {
   it.each([
     ["invalid_type", "Invalid type"],
     ["too_small", "Too small"],
@@ -188,7 +189,7 @@ describe("TP-4.34x: mapError, further cases (F-52)", () => {
     ["unrecognized_keys", "Unknown field"],
     ["custom", "Invalid value"],
     ["invalid_union", "Invalid value"],
-  ])("TP-4.34x: zod code %s gets the fixed message %j", (code, message) => {
+  ])("TP-4.35x: zod code %s gets the fixed message %j", (code, message) => {
     const { error } = mapError(
       inputValidationError([{ code, path: ["a", 0], message: CANARIES.message }]),
       NOT_COMMITTED,
@@ -200,7 +201,7 @@ describe("TP-4.34x: mapError, further cases (F-52)", () => {
   });
 
   it.each([["METHOD_NOT_SUPPORTED"], ["NOT_ACCEPTABLE"]])(
-    "TP-4.34x: oRPC %s is NOT_FOUND 404",
+    "TP-4.35x: oRPC %s is NOT_FOUND 404",
     (code) => {
       const { error, report } = mapError(new ORPCError(code), NOT_COMMITTED);
 
@@ -216,7 +217,7 @@ describe("TP-4.34x: mapError, further cases (F-52)", () => {
     ["ECONNREFUSED"],
     ["ETIMEDOUT"],
     ["ECONNRESET"],
-  ])("TP-4.34x: %s is SERVICE_UNAVAILABLE, with outcome unknown once committed", (code) => {
+  ])("TP-4.35x: %s is SERVICE_UNAVAILABLE, with outcome unknown once committed", (code) => {
     const { error } = mapError(pgError(code), COMMITTED);
 
     expect([error.code, error.status, error.data]).toEqual([
@@ -226,11 +227,11 @@ describe("TP-4.34x: mapError, further cases (F-52)", () => {
     ]);
   });
 
-  it("TP-4.34x: another SQLSTATE (23505) is INTERNAL", () => {
+  it("TP-4.35x: another SQLSTATE (23505) is INTERNAL", () => {
     expect(mapError(pgError("23505"), NOT_COMMITTED).error.code).toBe("INTERNAL");
   });
 
-  it("TP-4.34x: a RateLimitedError is RATE_LIMITED 429 with retryAfterSeconds, not reported", () => {
+  it("TP-4.35x: a RateLimitedError is RATE_LIMITED 429 with retryAfterSeconds, not reported", () => {
     const { error, report } = mapError(new RateLimitedError(30), NOT_COMMITTED);
 
     expect(envelope(error)).toEqual({
@@ -243,7 +244,184 @@ describe("TP-4.34x: mapError, further cases (F-52)", () => {
     expect(report).toBe(false);
   });
 
-  it("TP-4.34x: a thrown non-Error is INTERNAL", () => {
+  it("TP-4.35x: a thrown non-Error is INTERNAL", () => {
     expect(mapError(CANARIES.message, NOT_COMMITTED).error.code).toBe("INTERNAL");
+  });
+});
+
+describe("TP-4.9: rule 3b, the declared message and only declared data (A-166, A-170, A-172)", () => {
+  it("TP-4.9: a defined NOT_FOUND thrown with a canary message and data is 'Not found' with no data", () => {
+    const err = new ORPCError("NOT_FOUND", {
+      status: 404,
+      message: "no payee " + CANARIES.payee,
+      data: { name: CANARIES.payee },
+      defined: true,
+    });
+
+    const { error, report } = mapError(err, NOT_COMMITTED);
+
+    expect(envelope(error)).toEqual({
+      defined: true,
+      code: "NOT_FOUND",
+      status: 404,
+      message: "Not found",
+      data: undefined,
+    });
+    expect(report).toBe(false);
+    noCanary(envelope(error));
+  });
+
+  it.each([
+    ["not committed", "not_applied", NOT_COMMITTED],
+    ["committed", "unknown", COMMITTED],
+  ] as const)(
+    "TP-4.9: a defined INTERNAL (%s) is INTERNAL { outcome: %s }, reported",
+    (_l, outcome, state) => {
+      const err = new ORPCError("INTERNAL", {
+        status: 500,
+        message: CANARIES.message,
+        data: { outcome: "not_applied", leak: CANARIES.payee },
+        defined: true,
+      });
+
+      const { error, report } = mapError(err, state);
+
+      expect(envelope(error)).toEqual({
+        defined: true,
+        code: "INTERNAL",
+        status: 500,
+        message: "Internal error",
+        data: { outcome },
+      });
+      expect(report).toBe(true);
+      noCanary(envelope(error));
+    },
+  );
+
+  it.each([
+    ["not committed", "not_applied", NOT_COMMITTED],
+    ["committed", "unknown", COMMITTED],
+  ] as const)(
+    "TP-4.9: (A-172) a defined SERVICE_UNAVAILABLE (%s) is 503 { outcome: %s }, reported",
+    (_l, outcome, state) => {
+      const err = new ORPCError("SERVICE_UNAVAILABLE", {
+        status: 503,
+        message: CANARIES.message,
+        // Thrown data is ignored; the outcome comes from the commit tracker.
+        data: { outcome: state.committed ? "not_applied" : "unknown" },
+        defined: true,
+      });
+
+      const { error, report } = mapError(err, state);
+
+      expect(envelope(error)).toEqual({
+        defined: true,
+        code: "SERVICE_UNAVAILABLE",
+        status: 503,
+        message: "Service unavailable",
+        data: { outcome },
+      });
+      expect(report).toBe(true);
+      noCanary(envelope(error));
+    },
+  );
+
+  it("TP-4.9: an input validation failure is VALIDATION_FAILED even when the contract declares BAD_REQUEST", () => {
+    const err = new ORPCError("BAD_REQUEST", {
+      message: "Input validation failed",
+      defined: true,
+      cause: new ValidationError({
+        message: "Input validation failed",
+        issues: [
+          {
+            code: "invalid_type",
+            path: ["payee"],
+            message: `Expected number, received "${CANARIES.payee}"`,
+            input: CANARIES.payee,
+          } as never,
+        ],
+      }),
+    });
+
+    const { error, report } = mapError(err, NOT_COMMITTED, { BAD_REQUEST: { message: "Bad" } });
+
+    expect(envelope(error)).toEqual({
+      defined: true,
+      code: "VALIDATION_FAILED",
+      status: 400,
+      message: "Validation failed",
+      data: { issues: [{ path: ["payee"], code: "invalid_type", message: "Invalid type" }] },
+    });
+    expect(report).toBe(false);
+    noCanary(envelope(error));
+  });
+
+  // A-170: a module key (not in PLATFORM_ERRORS) takes the declared message, and keeps data only
+  // when declared with a schema. A platform key always takes §6's message.
+  const moduleError = () =>
+    new ORPCError("PAYEE_EXISTS", {
+      status: 409,
+      message: "custom " + CANARIES.payee,
+      data: { reason: "taken" },
+      defined: true,
+    });
+
+  it("TP-4.9: (A-170) a defined module error with declared gets the declared message and keeps its data", () => {
+    const { error, report } = mapError(moduleError(), NOT_COMMITTED, {
+      PAYEE_EXISTS: { message: "Already exists", data: z.object({ reason: z.string() }) },
+    });
+
+    expect(envelope(error)).toEqual({
+      defined: true,
+      code: "PAYEE_EXISTS",
+      status: 409,
+      message: "Already exists",
+      data: { reason: "taken" },
+    });
+    expect(report).toBe(false);
+    noCanary(envelope(error));
+  });
+
+  it("TP-4.9: (A-170) the same error without declared gets its key as message and no data", () => {
+    const { error, report } = mapError(moduleError(), NOT_COMMITTED);
+
+    expect(envelope(error)).toEqual({
+      defined: true,
+      code: "PAYEE_EXISTS",
+      status: 409,
+      message: "PAYEE_EXISTS",
+      data: undefined,
+    });
+    expect(report).toBe(false);
+    noCanary(envelope(error));
+  });
+
+  it("TP-4.9: (A-170) declared without a data schema drops the data", () => {
+    const { error } = mapError(moduleError(), NOT_COMMITTED, {
+      PAYEE_EXISTS: { message: "Already exists" },
+    });
+
+    expect([error.message, error.data]).toEqual(["Already exists", undefined]);
+  });
+
+  it("TP-4.9: (A-170) a platform key (CONFLICT) keeps §6's message even when declared differs", () => {
+    const err = new ORPCError("CONFLICT", {
+      status: 409,
+      message: "custom " + CANARIES.payee,
+      data: { reason: "taken" },
+      defined: true,
+    });
+
+    const { error } = mapError(err, NOT_COMMITTED, {
+      CONFLICT: { message: "Already exists", data: z.record(z.string(), z.string()).optional() },
+    });
+
+    expect(envelope(error)).toEqual({
+      defined: true,
+      code: "CONFLICT",
+      status: 409,
+      message: "Conflict",
+      data: { reason: "taken" },
+    });
   });
 });

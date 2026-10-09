@@ -1,4 +1,4 @@
-// F-57 health routes and checkReadiness. TP-4.13, plus extra cases TP-4.39x.
+// F-57 health routes and checkReadiness. TP-4.13, plus extra cases TP-4.40x.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 //
 // (c) runs over HTTP with the journal injected through createApiServer's opts.journal (A-125) and
@@ -137,7 +137,7 @@ describe("TP-4.13 (c): production with the journal one entry ahead of the databa
     expect([live.status, live.json()]).toEqual([200, { status: "ok" }]);
   });
 
-  it("TP-4.39x: the same database with the journal equal to it is ready", async () => {
+  it("TP-4.40x: the same database with the journal equal to it is ready", async () => {
     const built = await migratedProductionContainer();
 
     const result = await checkReadiness({
@@ -175,7 +175,7 @@ describe("TP-4.13: the auth hook doesn't run for /health/* (A-154)", () => {
     expect(authenticate).not.toHaveBeenCalled();
   });
 
-  it("TP-4.39x: the same hook still runs for /api/v1/* (A-154)", async () => {
+  it("TP-4.40x: the same hook still runs for /api/v1/* (A-154)", async () => {
     const authenticate = vi.fn(() => Promise.reject(new Error("hook failed")));
     const app = await serve(await buildApiContainer({ authHook: { authenticate } }));
 
@@ -186,8 +186,31 @@ describe("TP-4.13: the auth hook doesn't run for /health/* (A-154)", () => {
   });
 });
 
-describe("TP-4.39x: checkReadiness, further cases (F-57)", () => {
-  it("TP-4.39x: in development a journal ahead of the database is still ready", async () => {
+describe("TP-4.13: authentication and the version header key on the matched route (A-168)", () => {
+  it("TP-4.13: GET /%61pi/v1/meta/client-config is authenticated and gets X-Budmon-API-Version", async () => {
+    const authenticate = vi.fn(() => Promise.resolve(null));
+    const app = await serve(await buildApiContainer({ authHook: { authenticate } }));
+
+    const res = await injectJson(app, "GET", "/%61pi/v1/meta/client-config");
+
+    expect(authenticate).toHaveBeenCalledTimes(1);
+    expect(res.headers["x-budmon-api-version"]).toMatch(/^1\.\d+$/);
+  });
+
+  it("TP-4.13: GET /nope is neither authenticated nor versioned", async () => {
+    const authenticate = vi.fn(() => Promise.resolve(null));
+    const app = await serve(await buildApiContainer({ authHook: { authenticate } }));
+
+    const res = await injectJson(app, "GET", "/nope");
+
+    expect(res.status).toBe(404);
+    expect(authenticate).not.toHaveBeenCalled();
+    expect(res.headers["x-budmon-api-version"]).toBeUndefined();
+  });
+});
+
+describe("TP-4.40x: checkReadiness, further cases (F-57)", () => {
+  it("TP-4.40x: in development a journal ahead of the database is still ready", async () => {
     const built = await buildApiContainer();
     cleanups.push(() => built.close());
 
@@ -200,7 +223,7 @@ describe("TP-4.39x: checkReadiness, further cases (F-57)", () => {
     expect(result).toEqual({ ready: true });
   });
 
-  it("TP-4.39x: in production with no migrations table and an empty journal, ready", async () => {
+  it("TP-4.40x: in production with no migrations table and an empty journal, ready", async () => {
     const built = await buildApiContainer();
     cleanups.push(() => built.close());
 
