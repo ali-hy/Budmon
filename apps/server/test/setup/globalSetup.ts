@@ -13,6 +13,7 @@ import type { TestProject } from "vitest/node";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { bootstrapCluster } from "../../src/platform/db/clusterBootstrap.js";
 import { runSchemaStep } from "../../src/platform/db/schemaStep.js";
+import { templateJobRegistry } from "../support/jobs.js";
 import { connectDatabase, schemaStepInput } from "../support/platform.js";
 import { POSTGRES_IMAGE } from "./postgresImage.js";
 import {
@@ -106,7 +107,9 @@ export default async function setup(project: TestProject): Promise<() => Promise
   );
   try {
     const mode = process.env["BUDMON_SCHEMA_MODE"] === "migrate" ? "migrate" : "push";
-    await runSchemaStep(schemaStepInput(migrator, mode));
+    // A-202: every production queue plus the test.* ones.
+    const registry = await templateJobRegistry();
+    await runSchemaStep(schemaStepInput(migrator, mode, undefined, undefined, registry));
   } finally {
     await migrator.close();
   }

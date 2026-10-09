@@ -6,6 +6,7 @@
 import { CANARIES, scanForCanaries } from "@budmon/test-support";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
+import { recordingLogger } from "../../support/platform.js";
 import { query } from "../../support/postgres.js";
 import {
   TEST_JOBS,
@@ -106,6 +107,48 @@ describe("TP-6.7: handler success and failure through a running worker (F-76)", 
       ),
     ).toEqual([]);
   }, 90_000);
+});
+
+describe("TP-6.7: attempts with retryLimit 2 (F-76, A-207)", () => {
+  let built: BuiltWorker;
+  let stop: (() => Promise<void>) | undefined;
+  const attempts: number[] = [];
+
+  beforeAll(async () => {
+    built = await buildWorkerContainer("general", { registry: registryOf([TEST_JOBS.fail3]) });
+    const { startWorkers } = await s6.workers();
+    ({ stop } = await startWorkers(
+      built.container,
+      new Map<string, JobHandler>([
+        [
+          TEST_JOBS.fail3.name,
+          (_payload, ctx) => {
+            attempts.push(ctx.attempt);
+            return Promise.reject(new Error("x"));
+          },
+        ],
+      ]),
+    ));
+  }, 60_000);
+
+  afterAll(async () => {
+    await stop?.();
+    await built.close();
+  });
+
+  it("TP-6.7: the handler sees attempts 1, 2 and 3; the job is dead-lettered after attempt 3 and the counter goes up once", async () => {
+    const c = built.container;
+    await c.queue.enqueue(c.database.handle, TEST_JOBS.fail3, { n: 4 });
+
+    await waitFor(
+      async () => (await jobRows(c.database, "dead-letter.general")).length > 0,
+      90_000,
+      "a dead-lettered job",
+    );
+
+    expect(attempts).toEqual([1, 2, 3]);
+    expect(await counter(built, "jobs_dead_lettered_total")).toBe(1);
+  }, 120_000);
 });
 
 describe("TP-6.8: worker-capture as budmon_capture (F-77)", () => {
@@ -220,7 +263,7 @@ describe("TP-6.9: start-up checks and schedules (F-78)", () => {
       ]),
     );
     try {
-      await syncQueues(queueBoss(general.container), registry);
+      await syncQueues(queueBoss(general.container), registry, recordingLogger());
       const w = await startWorkers(general.container, handlers);
       const { rows } = await general.testDb.database.handle.executeSql(
         "SELECT name, cron, timezone FROM pgboss.schedule",
@@ -246,6 +289,25 @@ describe("TP-6.9: start-up checks and schedules (F-78)", () => {
       await capture.close();
     }
   }, 120_000);
+});
+
+describe("TP-6.9: platform.fx-gap-check only when registered (F-78, A-203)", () => {
+  it("TP-6.9: a general worker whose registry has no platform.fx-gap-check starts, and nothing is enqueued under that name", async () => {
+    const built = await buildWorkerContainer("general", { registry: registryOf([TEST_JOBS.ok]) });
+    try {
+      const { startWorkers } = await s6.workers();
+
+      const w = await startWorkers(
+        built.container,
+        new Map<string, JobHandler>([[TEST_JOBS.ok.name, () => Promise.resolve(undefined)]]),
+      );
+      await w.stop();
+
+      expect(await jobRows(built.container.database, "platform.fx-gap-check")).toEqual([]);
+    } finally {
+      await built.close();
+    }
+  }, 60_000);
 });
 
 describe("TP-6.11: dead-letter list and redrive (F-81)", () => {

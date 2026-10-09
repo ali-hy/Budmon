@@ -234,8 +234,8 @@ describe("TP-6.6: syncQueues (F-75)", () => {
     const { syncQueues } = await s6.queueSync();
     const registry = registryOf([a, b]);
 
-    const first = await syncQueues(started(), registry);
-    const second = await syncQueues(started(), registry);
+    const first = await syncQueues(started(), registry, recordingLogger());
+    const second = await syncQueues(started(), registry, recordingLogger());
 
     expect(first.created).toBe(4);
     expect(second.created).toBe(0);
@@ -266,10 +266,14 @@ describe("TP-6.6: syncQueues (F-75)", () => {
   it("TP-6.6: a changed option is updated; a changed policy throws SchemaStepError queue_policy_changed", async () => {
     const { syncQueues } = await s6.queueSync();
 
-    await syncQueues(started(), registryOf([{ ...a, retryLimit: 4 }, b]));
+    await syncQueues(started(), registryOf([{ ...a, retryLimit: 4 }, b]), recordingLogger());
     expect(await started().getQueue("sync.a")).toMatchObject({ retryLimit: 4 });
 
-    const error = await syncQueues(started(), registryOf([{ ...a, policy: "stately" }, b])).then(
+    const error = await syncQueues(
+      started(),
+      registryOf([{ ...a, policy: "stately" }, b]),
+      recordingLogger(),
+    ).then(
       () => undefined,
       (e: unknown) => e,
     );
@@ -277,12 +281,17 @@ describe("TP-6.6: syncQueues (F-75)", () => {
     expect(error).toMatchObject({ code: "queue_policy_changed", subject: "sync.a" });
   });
 
-  it("TP-6.6: a queue other.x created by hand is left alone", async () => {
+  it("TP-6.6: a queue other.x created by hand is left alone, and queue_unregistered is logged through the passed logger (A-205)", async () => {
     const { syncQueues } = await s6.queueSync();
     await started().createQueue("other.x", { policy: "standard", retryLimit: 9 });
+    const logger = recordingLogger();
 
-    await syncQueues(started(), registryOf([a, b]));
+    await syncQueues(started(), registryOf([a, b]), logger);
 
     expect(await started().getQueue("other.x")).toMatchObject({ retryLimit: 9 });
+    // A-205: the warning goes through the logger passed in.
+    const warned = logger.lines.filter((l) => l.event === "queue_unregistered");
+    expect(warned).toHaveLength(1);
+    expect(warned[0]).toMatchObject({ level: "warn", fields: { fields: { queue: "other.x" } } });
   });
 });

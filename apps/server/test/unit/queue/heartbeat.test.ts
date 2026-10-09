@@ -9,7 +9,10 @@ import {
 } from "@opentelemetry/sdk-metrics";
 import { describe, expect, it, vi } from "vitest";
 import { createLogger } from "../../../src/platform/observability/logger.js";
-import { createMetrics } from "../../../src/platform/observability/metrics.js";
+import {
+  createMetrics,
+  registerPlatformMetrics,
+} from "../../../src/platform/observability/metrics.js";
 import { s6 } from "../../support/jobs.js";
 import { logCapture } from "../../support/telemetry.js";
 
@@ -17,7 +20,17 @@ function harness() {
   const exporter = new InMemoryMetricExporter(AggregationTemporality.CUMULATIVE);
   const reader = new PeriodicExportingMetricReader({ exporter, exportIntervalMillis: 3_600_000 });
   const provider = new MeterProvider({ readers: [reader] });
-  const metrics = createMetrics(provider.getMeter("test"), () => undefined);
+  // A-206: F-79 observes PlatformMetrics' worker_heartbeat_timestamp_seconds.
+  const metrics = registerPlatformMetrics(
+    createMetrics(provider.getMeter("test"), () => undefined),
+  );
+  const capture = logCapture();
+  const logger = createLogger({
+    service: "worker-general",
+    release: "dev",
+    level: "debug",
+    destination: capture,
+  });
   let tick: (() => void) | undefined;
   const setIntervalFake = vi.fn((fn: () => void, ms: number) => {
     tick = fn;
@@ -40,6 +53,8 @@ function harness() {
   };
   return {
     metrics,
+    logger,
+    capture,
     clock,
     setIntervalFake,
     writeFile,
@@ -57,6 +72,7 @@ describe("TP-6.10: startHeartbeat (F-79)", () => {
 
     const heartbeat = startHeartbeat({
       metrics: h.metrics,
+      logger: h.logger,
       clock: h.clock,
       service: "worker-general",
       setInterval: h.setIntervalFake,
@@ -80,6 +96,7 @@ describe("TP-6.10: startHeartbeat (F-79)", () => {
 
     const heartbeat = startHeartbeat({
       metrics: h.metrics,
+      logger: h.logger,
       clock: h.clock,
       service: "worker-general",
       setInterval: h.setIntervalFake,
@@ -92,36 +109,28 @@ describe("TP-6.10: startHeartbeat (F-79)", () => {
     heartbeat.stop();
   });
 
-  it("TP-6.10: a write that throws once logs one warn and the timer continues", async () => {
+  it("TP-6.10: a write that throws once logs one heartbeat_write_failed through the passed logger (A-206), and the timer continues", async () => {
     const { startHeartbeat } = await s6.heartbeat();
     const h = harness();
-    const capture = logCapture();
     h.writeFile.mockImplementationOnce(() => {
       throw new Error("EROFS");
     });
 
     const heartbeat = startHeartbeat({
       metrics: h.metrics,
+      logger: h.logger,
       clock: h.clock,
       service: "worker-general",
       setInterval: h.setIntervalFake,
       writeFile: h.writeFile,
-      ...({
-        logger: createLogger({
-          service: "worker",
-          release: "dev",
-          level: "debug",
-          destination: capture,
-        }),
-      } as object),
     });
     h.clock.advance({ seconds: 15 });
     h.tick();
 
     expect(h.writeFile).toHaveBeenCalledTimes(2);
     expect(heartbeat.last()).toBe(1791547215.75);
-    // F-79 lists no logger dependency; this assumes one named `logger` (open question).
-    expect(capture.records().filter((l) => l["event"] === "heartbeat_write_failed")).toHaveLength(
+    // A-206: through the logger passed in.
+    expect(h.capture.records().filter((l) => l["event"] === "heartbeat_write_failed")).toHaveLength(
       1,
     );
     heartbeat.stop();
@@ -133,6 +142,7 @@ describe("TP-6.10: startHeartbeat (F-79)", () => {
 
     const heartbeat = startHeartbeat({
       metrics: h.metrics,
+      logger: h.logger,
       clock: h.clock,
       service: "worker-capture",
       intervalMs: 1000,

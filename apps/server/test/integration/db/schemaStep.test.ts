@@ -23,6 +23,7 @@ import {
 
 const DATABASE = "budmon";
 const EMPTY_MIGRATIONS = path.join(SERVER_DIR, "test/fixtures/migrations-empty");
+const NO_JOURNAL = path.join(SERVER_DIR, "test/fixtures/migrations-no-journal");
 
 let pg: FreshPostgres;
 let migrator: Database;
@@ -90,6 +91,26 @@ describe("TP-2.15: runSchemaStep (S-2)", () => {
     expect(second).toMatchObject({ migrationsApplied: 0, currenciesUpserted: 0 });
     // S-6 (A-49): the queue schema is current and every queue exists already.
     expect(second).toMatchObject({ queueSchema: "current", queuesCreated: 0 });
+  });
+});
+
+describe("TP-2.15 (f): an empty journal on a pushed database runs every step (A-204)", () => {
+  it("TP-2.15 (f): migrate mode with no journal at all on the pushed database reports as (c)", async () => {
+    const lines: LoggedLine[] = [];
+
+    const third = await runSchemaStep(
+      schemaStepInput(migrator, "migrate", recordingLogger(lines), NO_JOURNAL),
+    );
+
+    expect(third).toMatchObject({
+      migrationsApplied: 0,
+      currenciesUpserted: 0,
+      queueSchema: "current",
+      queuesCreated: 0,
+    });
+    // Every step ran: the tables exist, so the fresh-database path (A-179, A-204) doesn't apply.
+    const steps = new Set(stepFields(lines).map((f) => f.step));
+    expect(steps.size).toBeGreaterThanOrEqual(6);
   });
 });
 

@@ -1,6 +1,6 @@
-// F-80 platform maintenance jobs, through F-91's handler map (platform/queue/handlers.ts
-// buildHandlerMap). TP-6.12 with A-193's rate-limit purge, plus extra cases TP-6.20x. IDs ending
-// in "x" are test-architect additions, not LLD test-plan IDs.
+// F-80 platform maintenance jobs, through maintenanceHandlers(c) (A-210). TP-6.12 with A-193's
+// rate-limit purge, plus extra cases TP-6.20x. IDs ending in "x" are test-architect additions, not
+// LLD test-plan IDs.
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { s6, type JobContext, type JobHandler } from "../../support/jobs.js";
 import { resetBetweenTests } from "../../support/testDatabase.js";
@@ -11,8 +11,8 @@ let handlers: ReadonlyMap<string, JobHandler>;
 
 beforeAll(async () => {
   built = await buildWorkerContainer("general");
-  const { buildHandlerMap } = await s6.handlers();
-  handlers = buildHandlerMap(built.container);
+  const { maintenanceHandlers } = await s6.maintenance();
+  handlers = maintenanceHandlers(built.container);
 });
 
 afterAll(async () => {
@@ -68,7 +68,7 @@ describe("TP-6.12: maintenance purges (F-80)", () => {
       .records()
       .slice(linesBefore)
       .filter((l) => l["event"] === "idempotency_purged");
-    // One line for the run, with the total (F-80 repeats batches of 5000 until fewer are deleted).
+    // A-210: one line per run, with the total (F-80 deletes in batches of 5000).
     expect(purged.map((l) => l["count"])).toEqual([6000]);
   }, 60_000);
 
@@ -85,8 +85,16 @@ describe("TP-6.12: maintenance purges (F-80)", () => {
        FROM generate_series(1, 2) AS i`,
     );
 
+    const linesBefore = built.obs.capture.records().length;
+
     await run("platform.rate-limit-purge");
 
+    // A-210: one rate_limits_purged line for the run.
+    const purged = built.obs.capture
+      .records()
+      .slice(linesBefore)
+      .filter((l) => l["event"] === "rate_limits_purged");
+    expect(purged.map((l) => l["count"])).toEqual([3]);
     const { rows } = await h.executeSql(
       "SELECT bucket_key FROM rate_limit_counters ORDER BY bucket_key",
     );
@@ -95,6 +103,19 @@ describe("TP-6.12: maintenance purges (F-80)", () => {
 });
 
 describe("TP-6.20x: the maintenance definitions (F-80)", () => {
+  it("TP-6.20x: platformMaintenanceJobs has the three definitions (A-210); buildHandlerMap includes the maintenance handlers", async () => {
+    const { platformMaintenanceJobs } = await s6.maintenance();
+    const { buildHandlerMap } = await s6.handlers();
+
+    expect(platformMaintenanceJobs.map((d) => d.name).sort()).toEqual([
+      "platform.exports-purge",
+      "platform.idempotency-purge",
+      "platform.rate-limit-purge",
+    ]);
+    const all = buildHandlerMap(built.container);
+    for (const name of handlers.keys()) expect(all.has(name)).toBe(true);
+  });
+
   it("TP-6.20x: idempotency-purge (0 3 * * *) and rate-limit-purge (*/10 * * * *) are general cron jobs with an empty payload, in the container's registry and the handler map", () => {
     const registry = built.container.registry;
 

@@ -24,6 +24,8 @@ import {
   startFreshPostgres,
   type FreshPostgres,
 } from "../../support/postgres.js";
+import { testApiConfigFor } from "../../support/api.js";
+import { jobRows, s6, waitFor, type PgBossLike } from "../../support/jobs.js";
 import { createTestDatabase, type TestDatabase } from "../../support/testDatabase.js";
 
 const SERVER_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -380,7 +382,7 @@ describe("TP-2.13: node dist/main/migrate.js with an invalid journal (A-150, A-1
   );
 });
 
-// ---- TP-2.15 (d), (e): migrate on a fresh database (A-179) ----
+// ---- TP-2.15 (d), (e): migrate on a fresh database (A-179, A-204) ----
 
 describe("TP-2.15: node dist/main/migrate.js on a fresh database (A-179)", () => {
   const PASSWORD = "fresh-migrator-Qp7pass";
@@ -465,7 +467,7 @@ describe("TP-2.15: node dist/main/migrate.js on a fresh database (A-179)", () =>
     ["no journal file", {}],
     ["a journal with entries: []", { "meta/_journal.json": JSON.stringify({ entries: [] }) }],
   ])(
-    "TP-2.15 (d): %s exits 0, reports zeros after step 2, and schema drizzle exists",
+    "TP-2.15 (d): %s exits 0; queue schema installed and queues created, no currencies; schema drizzle granted to budmon_app (A-204)",
     async (_label, files: Record<string, string>) => {
       const pg = await freshCluster();
 
@@ -473,12 +475,17 @@ describe("TP-2.15: node dist/main/migrate.js on a fresh database (A-179)", () =>
 
       expect(result.status, `${result.stdout}${result.stderr}`).toBe(0);
       const [reportLine] = jsonLines(result.stdout);
-      expect(reportLine).toMatchObject({ migrationsApplied: 0, currenciesUpserted: 0 });
-      const [drizzle] = await query<{ n: number }>(
+      expect(reportLine).toMatchObject({
+        migrationsApplied: 0,
+        currenciesUpserted: 0,
+        queueSchema: "installed",
+      });
+      expect(Number(reportLine?.["queuesCreated"])).toBeGreaterThan(0);
+      const [drizzle] = await query<{ n: number; usage: boolean }>(
         pg.superuserUrl(FRESH_DATABASE),
-        "SELECT count(*)::int AS n FROM pg_namespace WHERE nspname = 'drizzle'",
+        "SELECT count(*)::int AS n, bool_and(has_schema_privilege('budmon_app', oid, 'USAGE')) AS usage FROM pg_namespace WHERE nspname = 'drizzle'",
       );
-      expect(drizzle).toEqual({ n: 1 });
+      expect(drizzle).toEqual({ n: 1, usage: true });
     },
     180_000,
   );
@@ -689,17 +696,182 @@ describe("A-157: the worker's service name follows its roles (F-91)", () => {
   );
 });
 
-describe("TP-6.13, TP-6.15: the built worker with a test job", () => {
-  // Both need a job the test registers in the bundled worker (a 2 s job, a job that never
-  // finishes, a handler running SELECT 1). F-91's worker.ts has no injectable entry for that
-  // (unlike runMigrate); the question is with the planner.
-  it.todo(
-    "TP-6.13: SIGTERM during a 2 s job: the job completes and the process exits 0 within 30 s",
-  );
-  it.todo("TP-6.13: (A-180) a job that never finishes: the process exits within 35 s of SIGTERM");
-  it.todo(
-    "TP-6.15: node --import ./dist/main/instrument.js dist/main/worker.js (general): a pg span whose parent is the job's span",
-  );
+describe("TP-6.13, TP-6.15: the built worker with test jobs (fixture worker.mjs, A-201)", () => {
+  const FIXTURE = ["--import", "./dist/main/instrument.js", "test/fixtures/bundle/worker.mjs"];
+  let testDb: TestDatabase;
+  let dir: string;
+  let boss: PgBossLike | undefined;
+
+  beforeAll(async () => {
+    testDb = await createTestDatabase("budmon_app");
+    dir = mkdtempSync(path.join(tmpdir(), "budmon-worker-fixture-"));
+    const { createPgBoss } = await s6.workers();
+    const b = createPgBoss(testApiConfigFor(testDb), "send-only");
+    await b.start();
+    boss = b;
+  }, 60_000);
+
+  afterAll(async () => {
+    await boss?.stop({ graceful: false });
+    await testDb.drop();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  function fixtureEnv(extra: Record<string, string> = {}): Record<string, string> {
+    const passwordFile = path.join(dir, "app_password");
+    const queuePasswordFile = path.join(dir, "queue_password");
+    writeFileSync(passwordFile, `${TEST_ROLE_PASSWORDS.budmon_app}\n`);
+    writeFileSync(queuePasswordFile, `${TEST_ROLE_PASSWORDS.budmon_queue}\n`);
+    return {
+      ...devWorkerEnvironment(dir, "general", {
+        host: testDb.endpoint.host,
+        port: testDb.endpoint.port,
+        name: testDb.name,
+      }),
+      DB_USER: "budmon_app",
+      DB_PASSWORD_FILE: passwordFile,
+      QUEUE_DB_USER: "budmon_queue",
+      QUEUE_DB_PASSWORD_FILE: queuePasswordFile,
+      ...extra,
+    };
+  }
+
+  /** Spawns the fixture and resolves once it has logged worker_started (A-161). */
+  async function startFixture(extra: Record<string, string> = {}) {
+    const child = spawn(process.execPath, FIXTURE, {
+      cwd: SERVER_DIR,
+      env: fixtureEnv(extra),
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let output = "";
+    child.stdout.on("data", (c: Buffer) => (output += c.toString()));
+    child.stderr.on("data", (c: Buffer) => (output += c.toString()));
+    const exited = new Promise<{ code: number | null; at: number }>((resolve) => {
+      child.on("exit", (code) => {
+        resolve({ code, at: Date.now() });
+      });
+    });
+    const deadline = Date.now() + 60_000;
+    while (!output.includes('"worker_started"')) {
+      if (Date.now() > deadline || child.exitCode !== null) {
+        child.kill("SIGKILL");
+        throw new Error(`the worker didn't start:\n${output}`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    return { child, exited, output: () => output };
+  }
+
+  async function send(name: string): Promise<string> {
+    if (boss === undefined) throw new Error("pg-boss didn't start");
+    const id = await boss.send(name, { n: 1 });
+    if (id === null) throw new Error("not enqueued");
+    return id;
+  }
+
+  async function state(name: string, id: string): Promise<string | undefined> {
+    return (await jobRows(testDb.database, name)).find((r) => r.id === id)?.state;
+  }
+
+  it("TP-6.13: SIGTERM during a 2 s job: the job completes and the process exits 0 within 30 s", async () => {
+    const run = await startFixture();
+    try {
+      const id = await send("test.slow");
+      await waitFor(
+        async () => (await state("test.slow", id)) === "active",
+        30_000,
+        "the job to start",
+      );
+
+      const sentAt = Date.now();
+      run.child.kill("SIGTERM");
+      const { code, at } = await run.exited;
+
+      expect(code, run.output()).toBe(0);
+      expect(at - sentAt, run.output()).toBeLessThan(30_000);
+      expect(await state("test.slow", id)).toBe("completed");
+    } finally {
+      if (run.child.exitCode === null) run.child.kill("SIGKILL");
+    }
+  }, 120_000);
+
+  it("TP-6.13: (A-180) with a job that never finishes, the process exits within 35 s of SIGTERM", async () => {
+    const run = await startFixture();
+    try {
+      const id = await send("test.forever");
+      await waitFor(
+        async () => (await state("test.forever", id)) === "active",
+        30_000,
+        "the job to start",
+      );
+
+      const sentAt = Date.now();
+      run.child.kill("SIGTERM");
+      const { at } = await run.exited;
+
+      expect(at - sentAt, run.output()).toBeLessThan(35_500);
+    } finally {
+      if (run.child.exitCode === null) run.child.kill("SIGKILL");
+    }
+  }, 120_000);
+
+  it("TP-6.15: through the start command, the recorder gets a pg span (SELECT) whose parent is the job's span", async () => {
+    const received: OtlpRequest[] = [];
+    const recorder = createHttpServer((req, res) => {
+      const chunks: Buffer[] = [];
+      req.on("data", (c: Buffer) => chunks.push(c));
+      req.on("end", () => {
+        let body: unknown = null;
+        try {
+          body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+        } catch {
+          body = null;
+        }
+        received.push({ path: req.url ?? "", body });
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end("{}");
+      });
+    });
+    await new Promise<void>((resolve) => recorder.listen(0, "127.0.0.1", resolve));
+    const address = recorder.address();
+    const recorderPort = typeof address === "object" && address !== null ? address.port : 0;
+    const run = await startFixture({
+      OTEL_EXPORTER_OTLP_ENDPOINT: `http://localhost:${String(recorderPort)}`,
+    });
+    try {
+      const id = await send("test.select");
+      await waitFor(
+        async () => (await state("test.select", id)) === "completed",
+        30_000,
+        "the job to complete",
+      );
+      run.child.kill("SIGTERM");
+      await run.exited;
+
+      const all = exportedSpans(received);
+      const seen = JSON.stringify(all.map((s) => [s.scope, s.name, s.attributes["db.query.text"]]));
+      const selects = all.filter(
+        (s) =>
+          s.scope === "@opentelemetry/instrumentation-pg" &&
+          s.attributes["db.query.text"] === "SELECT ?",
+      );
+      expect(selects.length, seen).toBeGreaterThanOrEqual(1);
+      const byId = new Map(all.map((s) => [s.spanId, s]));
+      const parents = selects.map((s) => byId.get(s.parentSpanId));
+      // The job's span: the parent is exported, and it names the job.
+      expect(
+        parents.some((p) => p !== undefined && p.name.includes("test.select")),
+        seen,
+      ).toBe(true);
+    } finally {
+      if (run.child.exitCode === null) run.child.kill("SIGKILL");
+      await new Promise<void>((resolve) => {
+        recorder.close(() => {
+          resolve();
+        });
+      });
+    }
+  }, 120_000);
 });
 
 // ---- TP-4.24 ----

@@ -15,7 +15,7 @@ import type { BaseContainer } from "../../src/platform/container.js";
 import type { Database, DbHandle } from "../../src/platform/db/types.js";
 import type { ErrorReporter } from "../../src/platform/observability/errorReporter.js";
 import type { Logger } from "../../src/platform/observability/logger.js";
-import type { Metrics, PlatformMetrics } from "../../src/platform/observability/metrics.js";
+import type { PlatformMetrics } from "../../src/platform/observability/metrics.js";
 
 // ---- F-70, F-71: definitions and the registry ----
 
@@ -82,9 +82,24 @@ export const TEST_JOBS = {
   }),
   /** TP-6.8: a capture job. */
   capture: job("test.capture", "capture", z.object({ n: z.number().int() }), { retryLimit: 0 }),
+  /** TP-6.7 (A-207): fails every attempt; two retries, no delay. */
+  fail3: job("test.fail3", "general", z.object({ n: z.number().int() }), {
+    retryLimit: 2,
+    retryDelaySeconds: 0,
+    retryBackoff: false,
+  }),
+  /** TP-6.13: the fixture's handler takes 2 s. */
+  slow: job("test.slow", "general", z.object({ n: z.number().int() }), { retryLimit: 0 }),
+  /** TP-6.13 (A-180): the fixture's handler never finishes. */
+  forever: job("test.forever", "general", z.object({ n: z.number().int() }), { retryLimit: 0 }),
+  /** TP-6.15: the fixture's handler runs SELECT 1. */
+  select: job("test.select", "general", z.object({ n: z.number().int() }), { retryLimit: 0 }),
 } satisfies Record<string, JobDefinition<{ n: number }>>;
 
-export const TEST_JOB_REGISTRY: JobRegistry = registryOf(Object.values(TEST_JOBS));
+/** The test definitions the template's registry adds to the production ones (A-202). */
+export const TEST_JOB_DEFINITIONS: readonly JobDefinition[] = Object.values(TEST_JOBS);
+
+export const TEST_JOB_REGISTRY: JobRegistry = registryOf(TEST_JOB_DEFINITIONS);
 
 // ---- pg-boss (12.36.0), only what the tests touch ----
 
@@ -118,7 +133,15 @@ export interface JobQueue {
   ) => Promise<string | null>;
 }
 
-export interface WorkerContainer extends BaseContainer {
+/** The worker container as the tests use it (F-96), independent of the code's declared type. */
+export interface WorkerContainer {
+  config: BaseContainer["config"];
+  logger: Logger;
+  clock: Clock;
+  database: Database;
+  metrics: PlatformMetrics;
+  reporter: ErrorReporter;
+  close: () => Promise<void>;
   roles: ReadonlySet<WorkerRole>;
   registry: JobRegistry;
   queue: JobQueue;
@@ -157,6 +180,7 @@ export interface QueueSyncModule {
   syncQueues: (
     boss: PgBossLike,
     registry: JobRegistry,
+    logger: Logger,
   ) => Promise<{ created: number; updated: number }>;
 }
 export interface WrapperModule {
@@ -180,7 +204,8 @@ export interface WorkersModule {
 }
 export interface HeartbeatModule {
   startHeartbeat: (deps: {
-    metrics: Metrics;
+    metrics: PlatformMetrics;
+    logger: Logger;
     clock: Clock;
     service: string;
     intervalMs?: number;
@@ -188,6 +213,13 @@ export interface HeartbeatModule {
     writeFile?: (path: string, data: string) => void;
     path?: string;
   }) => { stop: () => void; last: () => number };
+}
+export interface AppRegistryModule {
+  buildJobRegistry: () => JobRegistry;
+}
+export interface MaintenanceModule {
+  platformMaintenanceJobs: readonly JobDefinition[];
+  maintenanceHandlers: (c: WorkerContainer) => ReadonlyMap<string, JobHandler>;
 }
 export interface HandlersModule {
   buildHandlerMap: (c: WorkerContainer) => ReadonlyMap<string, JobHandler>;
@@ -222,6 +254,8 @@ const SPECIFIERS = {
   heartbeat: "../../src/platform/queue/heartbeat.js",
   deadLetter: "../../src/platform/queue/deadLetter.js",
   handlers: "../../src/platform/queue/handlers.js",
+  appRegistry: "../../src/platform/queue/appRegistry.js",
+  maintenance: "../../src/platform/maintenance/maintenanceJobs.js",
 } as const;
 
 async function load<T>(specifier: string): Promise<T> {
@@ -240,6 +274,8 @@ export const s6 = {
   heartbeat: () => load<HeartbeatModule>(SPECIFIERS.heartbeat),
   deadLetter: () => load<DeadLetterModule>(SPECIFIERS.deadLetter),
   handlers: () => load<HandlersModule>(SPECIFIERS.handlers),
+  appRegistry: () => load<AppRegistryModule>(SPECIFIERS.appRegistry),
+  maintenance: () => load<MaintenanceModule>(SPECIFIERS.maintenance),
 };
 
 /** Rows of pgboss.job for `name`, read through `database` (budmon_app has SELECT, F-74). */
@@ -269,5 +305,26 @@ export async function waitFor(
   while (!(await check())) {
     if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
     await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+}
+
+/**
+ * The template's registry (A-202): every production definition plus the test ones, through
+ * `createJobRegistry([...buildJobRegistry().all(), ...TEST_JOB_DEFINITIONS])`. Until S-6's
+ * modules exist it falls back to the test definitions alone (only for a missing module; any
+ * other error is thrown), so the rest of the integration suite keeps running meanwhile.
+ */
+export async function templateJobRegistry(): Promise<JobRegistry> {
+  try {
+    const { buildJobRegistry } = await s6.appRegistry();
+    const { createJobRegistry } = await s6.registry();
+    return createJobRegistry([...buildJobRegistry().all(), ...TEST_JOB_DEFINITIONS]);
+  } catch (error) {
+    const code = (error as { code?: unknown }).code;
+    const message = error instanceof Error ? error.message : "";
+    if (code === "ERR_MODULE_NOT_FOUND" || message.includes("Cannot find module")) {
+      return TEST_JOB_REGISTRY;
+    }
+    throw error;
   }
 }
