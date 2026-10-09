@@ -1,6 +1,6 @@
-// F-66 hashing utilities. TP-5.9, plus extra cases TP-5.11x (sha256, randomToken's bounds,
-// timingSafeEqualBytes on equal input). IDs ending in "x" are test-architect additions, not LLD
-// test-plan IDs.
+// F-66 hashing utilities. TP-5.9 (with A-200's randomToken bounds), plus extra cases TP-5.11x
+// (salt, sha256, timingSafeEqualBytes on equal input). IDs ending in "x" are test-architect
+// additions, not LLD test-plan IDs.
 import { describe, expect, it } from "vitest";
 import {
   hashSecret,
@@ -38,6 +38,17 @@ describe("TP-5.9: F-66 hashing utilities", () => {
     expect(() => randomToken(8)).toThrow(RangeError);
   });
 
+  it.each([
+    [16, 22],
+    [64, 86],
+  ])("TP-5.9: (A-200) randomToken(%i) is %i base64url characters, no padding", (bytes, length) => {
+    expect(randomToken(bytes)).toMatch(new RegExp(`^[A-Za-z0-9_-]{${String(length)}}$`));
+  });
+
+  it.each([[15], [65], [96]])("TP-5.9: (A-200) randomToken(%i) throws RangeError", (bytes) => {
+    expect(() => randomToken(bytes)).toThrow(RangeError);
+  });
+
   it("TP-5.9: hmacSha256('key', the quick brown fox) is the known value", () => {
     expect(
       hmacSha256(Buffer.from("key"), "The quick brown fox jumps over the lazy dog").toString("hex"),
@@ -53,17 +64,6 @@ describe("TP-5.11x: F-66, further cases", () => {
   it("TP-5.11x: timingSafeEqualBytes is true for equal bytes and false for one differing byte", () => {
     expect(timingSafeEqualBytes(new Uint8Array([1, 2, 3]), new Uint8Array([1, 2, 3]))).toBe(true);
     expect(timingSafeEqualBytes(new Uint8Array([1, 2, 3]), new Uint8Array([1, 2, 4]))).toBe(false);
-  });
-
-  it.each([
-    [16, 22],
-    [64, 86],
-  ])("TP-5.11x: randomToken(%i) is %i base64url characters, no padding", (bytes, length) => {
-    expect(randomToken(bytes)).toMatch(new RegExp(`^[A-Za-z0-9_-]{${String(length)}}$`));
-  });
-
-  it.each([[15], [65]])("TP-5.11x: randomToken(%i) throws RangeError", (bytes) => {
-    expect(() => randomToken(bytes)).toThrow(RangeError);
   });
 
   it("TP-5.11x: two random tokens differ", () => {

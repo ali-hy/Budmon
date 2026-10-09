@@ -150,6 +150,9 @@ describe("TP-5.12x: F-63 and F-64, further cases", () => {
   it.each([
     ["a limiter that isn't a token", { ...SPEC, limiter: "Bad Limiter!" }],
     ["limit 0", { ...SPEC, limit: 0 }],
+    // A-196: windowSeconds must be an integer ≥ 1.
+    ["windowSeconds 0", { ...SPEC, windowSeconds: 0 }],
+    ["windowSeconds 1.5", { ...SPEC, windowSeconds: 1.5 }],
   ])("TP-5.12x: %s throws RangeError", async (_label, spec) => {
     const limiter = createRateLimiter({
       db: testDb.database,

@@ -124,9 +124,11 @@ describe("TP-5.7: the coarse per-IP limit (F-65)", () => {
 
   it("TP-5.7: 301 × GET /api/v1/meta/client-config from one IP: 300 are 200, the 301st is the 429 envelope with Retry-After; 301 × /health/live never 429", async () => {
     const statuses: number[] = [];
+    let first: Awaited<ReturnType<typeof injectJson>> | undefined;
     let last: Awaited<ReturnType<typeof injectJson>> | undefined;
     for (let i = 0; i < 301; i++) {
       last = await injectJson(app, "GET", "/api/v1/meta/client-config");
+      first ??= last;
       statuses.push(last.status);
     }
 
@@ -136,6 +138,12 @@ describe("TP-5.7: the coarse per-IP limit (F-65)", () => {
     expect(body).toMatchObject(RATE_LIMITED_ENVELOPE);
     expect(Number(body.data?.retryAfterSeconds)).toBeGreaterThanOrEqual(1);
     expect(Number(last?.headers["retry-after"])).toBeGreaterThanOrEqual(1);
+    // A-195: the plugin's limiter-state headers are off, on the 429 and on a 200.
+    const rateLimitHeaders = (headers: Record<string, unknown> | undefined) =>
+      Object.keys(headers ?? {}).filter((name) => name.toLowerCase().startsWith("x-ratelimit"));
+    expect(first?.status).toBe(200);
+    expect(rateLimitHeaders(first?.headers)).toEqual([]);
+    expect(rateLimitHeaders(last?.headers)).toEqual([]);
 
     const health: number[] = [];
     for (let i = 0; i < 301; i++) {
