@@ -83,8 +83,26 @@ export const TEST_JOBS = {
   } as JobDefinition<{ n: number }>,
 } satisfies Record<string, JobDefinition<{ n: number }>>;
 
+/**
+ * TP-9.9: a rates-added subscriber (F-132). Its payload here only creates the template's queue;
+ * tests register it with F-132's RatesAddedPayload.
+ */
+export const TEST_FX_RATES_ADDED: JobDefinition<{
+  rateDate: string;
+  affectedFrom: string;
+  affectedTo: string | null;
+}> = job(
+  "test.fx-rates-added",
+  "general",
+  z.object({ rateDate: z.string(), affectedFrom: z.string(), affectedTo: z.string().nullable() }),
+  { retryLimit: 0 },
+);
+
 /** The test definitions the template's registry adds to the production ones (A-202). */
-export const TEST_JOB_DEFINITIONS: readonly JobDefinition<unknown>[] = Object.values(TEST_JOBS);
+export const TEST_JOB_DEFINITIONS: readonly JobDefinition<unknown>[] = [
+  ...Object.values(TEST_JOBS),
+  TEST_FX_RATES_ADDED,
+];
 
 export const TEST_JOB_REGISTRY: JobRegistry = registryOf(TEST_JOB_DEFINITIONS);
 
