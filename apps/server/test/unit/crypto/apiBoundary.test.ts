@@ -1,13 +1,24 @@
-// The API can't unseal capture secrets (F-96, F-10). TP-8.15.
-//
-// configSchemaFor exposes no key list, so "has no KMS_PROVIDER, GCP_CREDENTIALS_FILE or
-// CAPTURE_PRIVATE_KEY_FILE keys" is checked by behaviour: an api configuration given those
-// variables never reads their files and holds nothing from them.
+// The API can't unseal capture secrets (F-96, F-10, A-248). TP-8.15, plus extra cases TP-8.17x.
+// IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { describe, expect, it } from "vitest";
 import { loadConfig } from "../../../src/platform/config/loadConfig.js";
 import { createApiContainer } from "../../../src/platform/container.js";
 import { observed } from "../../support/api.js";
-import { devApi, readFileFrom, rsaKeyPair, withFile } from "../../support/configEnv.js";
+import {
+  base64Bytes,
+  devApi,
+  readFileFrom,
+  rsaKeyPair,
+  withFile,
+} from "../../support/configEnv.js";
+import { s8 } from "../../support/s8.js";
+
+const CAPTURE_ONLY = [
+  "CAPTURE_PRIVATE_KEY_FILE",
+  "GCP_CREDENTIALS_FILE",
+  "KMS_PROVIDER",
+  "MAILBOX_HMAC_KEY_FILE",
+];
 
 describe("TP-8.15: no capture unsealer on the API side (F-96, F-10)", () => {
   function apiFixtureWithCaptureSecrets() {
@@ -19,10 +30,32 @@ describe("TP-8.15: no capture unsealer on the API side (F-96, F-10)", () => {
       "GCP_CREDENTIALS_FILE",
       JSON.stringify({ type: "service_account", project_id: "p" }),
     );
+    withFile(f, "MAILBOX_HMAC_KEY_FILE", base64Bytes(32));
     return f;
   }
 
-  it("TP-8.15: the api configuration never reads CAPTURE_PRIVATE_KEY_FILE or GCP_CREDENTIALS_FILE and holds no private key or KMS settings", () => {
+  it("TP-8.15 (A-248): configKeysFor('api') has none of the capture-only variables", async () => {
+    const { configKeysFor } = await s8.configKeys();
+
+    const keys = configKeysFor("api");
+
+    for (const key of CAPTURE_ONLY) expect(keys).not.toContain(key);
+  });
+
+  it("TP-8.17x (A-248): configKeysFor is sorted, and a capture worker's list has the capture-only variables", async () => {
+    const { configKeysFor } = await s8.configKeys();
+
+    const api = configKeysFor("api");
+    const capture = configKeysFor("worker", ["capture"]);
+
+    expect([...api]).toEqual([...api].sort());
+    expect([...capture]).toEqual([...capture].sort());
+    for (const key of ["CAPTURE_PRIVATE_KEY_FILE", "MAILBOX_HMAC_KEY_FILE"]) {
+      expect(capture).toContain(key);
+    }
+  });
+
+  it("TP-8.15 (A-248): with every capture variable set, loadConfig('api') never reads their files and holds no private key or KMS settings", () => {
     const f = apiFixtureWithCaptureSecrets();
     const read: string[] = [];
     const inner = readFileFrom(f.files);
@@ -32,8 +65,13 @@ describe("TP-8.15: no capture unsealer on the API side (F-96, F-10)", () => {
       return inner(path);
     });
 
-    expect(read).not.toContain(f.env["CAPTURE_PRIVATE_KEY_FILE"]);
-    expect(read).not.toContain(f.env["GCP_CREDENTIALS_FILE"]);
+    for (const variable of [
+      "CAPTURE_PRIVATE_KEY_FILE",
+      "GCP_CREDENTIALS_FILE",
+      "MAILBOX_HMAC_KEY_FILE",
+    ]) {
+      expect(read).not.toContain(f.env[variable]);
+    }
     const text = JSON.stringify(config);
     expect(text).not.toContain("PRIVATE KEY");
     expect(text).not.toContain("service_account");

@@ -281,8 +281,9 @@ describe("TP-8.16: the container's sealed-column registry feeds secrets:rewrap-a
       for (const id of IDS.slice(0, 2))
         await insert(built.testDb, id, k1Only.seal(Buffer.from(id), ctx(id)));
 
+      const container: unknown = built.container;
       const result = await rewrapApiSecretsCommand(
-        built.container as unknown as Parameters<typeof rewrapApiSecretsCommand>[0],
+        container as Parameters<typeof rewrapApiSecretsCommand>[0],
       );
 
       expect(result).toEqual({ rewrapped: 2, skipped: 0 });
@@ -306,12 +307,14 @@ describe("TP-8.16: the container's sealed-column registry feeds secrets:rewrap-a
     }
   });
 
-  it("TP-8.16: CLI secrets:rewrap-api on that database (nothing registered) prints {rewrapped:0, skipped:0} and exits 0", async () => {
+  it("TP-8.16 (A-250): CLI secrets:rewrap-api (kind api) on that database (nothing registered) prints {rewrapped:0, skipped:0} and exits 0", async () => {
     const testDb = await createTestDatabase();
     const dir = mkdtempSync(path.join(tmpdir(), "budmon-rewrap-cli-"));
     try {
       await sealedTable(testDb, "budmon_app");
-      // The api configuration as an environment, with its files written into dir.
+      // A-250: kind api; the helpers' minimal api environment (devApi) with its files written
+      // into dir, DB_* for this file's database as budmon_app, and the {current k2, keys k1, k2}
+      // API_SECRETS_KEYS_FILE.
       const f = fixture();
       const env: Record<string, string> = {};
       for (const [key, value] of Object.entries(f.env)) {
@@ -330,7 +333,6 @@ describe("TP-8.16: the container's sealed-column registry feeds secrets:rewrap-a
         `${(await import("../../support/postgres.js")).TEST_ROLE_PASSWORDS.budmon_app}\n`,
       );
       Object.assign(env, {
-        APP_ENV: "test",
         DB_HOST: testDb.endpoint.host,
         DB_PORT: String(testDb.endpoint.port),
         DB_NAME: testDb.name,

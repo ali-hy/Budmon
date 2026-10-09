@@ -2,9 +2,9 @@
 //
 // The S-8 modules arrive with S-8's code. Until then this file declares their shapes from the LLD
 // (F-110 to F-122) and loads them through variable specifiers, so typecheck passes before the code
-// exists; once it lands the loaders become static imports. Error classes are checked by name
-// (`errorName`), since the LLD doesn't say which module exports EnvelopeAuthError,
-// KmsUnavailableError or UnknownKeyVersionError.
+// exists; once it lands the loaders become static imports. The crypto errors come from
+// platform/crypto/cryptoErrors.ts (A-246) and are checked with `expectCryptoError`.
+import { expect } from "vitest";
 import type { Clock, Temporal } from "@budmon/shared";
 import type { Database } from "../../src/platform/db/types.js";
 import type { Logger } from "../../src/platform/observability/logger.js";
@@ -27,8 +27,16 @@ export interface EnvelopeParts {
   tag: Buffer;
 }
 
-export interface EnvelopeModule {
+/** A-246: plain Error subclasses, name = class name, retryable only for KmsUnavailableError. */
+export interface CryptoErrorsModule {
   EnvelopeFormatError: new (...args: never[]) => Error;
+  EnvelopeAuthError: new (...args: never[]) => Error;
+  UnknownKeyVersionError: new (...args: never[]) => Error;
+  KmsUnavailableError: new (...args: never[]) => Error;
+}
+export type CryptoErrorName = keyof CryptoErrorsModule;
+
+export interface EnvelopeModule {
   encodeEnvelope: (p: EnvelopeParts) => Buffer;
   decodeEnvelope: (b: Buffer) => EnvelopeParts;
   aadFor: (ctx: SealContext) => Buffer;
@@ -132,7 +140,17 @@ export interface ProxyModule {
   };
 }
 
+/** A-248: F-10's configKeysFor, added to config/schema.ts with S-8. */
+export interface ConfigKeysModule {
+  configKeysFor: (
+    kind: "api" | "worker" | "migrate",
+    roles?: readonly ("capture" | "general")[],
+  ) => readonly string[];
+}
+
 const SPECIFIERS = {
+  configKeys: "../../src/platform/config/schema.js",
+  cryptoErrors: "../../src/platform/crypto/cryptoErrors.js",
   envelope: "../../src/platform/crypto/envelope.js",
   captureSealer: "../../src/platform/crypto/captureSealer.js",
   captureUnsealer: "../../src/platform/crypto/captureUnsealer.js",
@@ -148,6 +166,8 @@ async function load<T>(specifier: string): Promise<T> {
 }
 
 export const s8 = {
+  cryptoErrors: () => load<CryptoErrorsModule>(SPECIFIERS.cryptoErrors),
+  configKeys: () => load<ConfigKeysModule>(SPECIFIERS.configKeys),
   envelope: () => load<EnvelopeModule>(SPECIFIERS.envelope),
   captureSealer: () => load<CaptureSealerModule>(SPECIFIERS.captureSealer),
   captureUnsealer: () => load<CaptureUnsealerModule>(SPECIFIERS.captureUnsealer),
@@ -158,12 +178,22 @@ export const s8 = {
   proxy: () => load<ProxyModule>(SPECIFIERS.proxy),
 };
 
-/** The constructor name of what `fn` throws or rejects with ("none" if it doesn't). */
-export async function errorName(fn: () => unknown): Promise<string> {
+/**
+ * `fn` throws or rejects with the A-246 error `name`: an instance of that class from
+ * cryptoErrors.ts, `error.name` equal to the class name, and `retryable` true only for
+ * KmsUnavailableError.
+ */
+export async function expectCryptoError(fn: () => unknown, name: CryptoErrorName): Promise<Error> {
+  const errors = await s8.cryptoErrors();
+  let caught: unknown;
   try {
     await fn();
   } catch (error) {
-    return error instanceof Error ? error.constructor.name : typeof error;
+    caught = error;
   }
-  return "none";
+  expect(caught).toBeInstanceOf(errors[name]);
+  const error = caught as Error & { retryable?: unknown };
+  expect(error.name).toBe(name);
+  expect(error.retryable).toBe(name === "KmsUnavailableError");
+  return error;
 }

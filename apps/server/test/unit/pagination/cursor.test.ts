@@ -82,21 +82,24 @@ describe("TP-7.10: createCursorCodec (F-103)", () => {
     invalidCursor(codec, "not base64!*");
   });
 
-  it("TP-7.10 (A-243): a token encoded with a clock 25 h ahead, decoded at the real time, is invalid_cursor", () => {
-    const { codec: ahead } = codecAt("2026-10-10T13:00:00Z");
-    const token = ahead.encode({ sortKey: ["a"], id: ID, filterHash: FILTER });
-
-    invalidCursor(codecAt().codec, token);
-  });
-
-  // The LLD row says "one 24 h + 4 min ahead … accepted". exp is issue + 24 h, so read as a token
-  // whose exp is 24 h + 4 min ahead (encoded 4 min ahead); encoded a full 24 h + 4 min ahead its exp
-  // would be 48 h 4 min ahead, past the bound. Raised with the planner.
-  it("TP-7.10 (A-243): a token whose exp is 24 h + 4 min ahead (encoded 4 min ahead) is accepted", () => {
-    const { codec: ahead } = codecAt("2026-10-09T12:04:00Z");
-    const token = ahead.encode({ sortKey: ["a"], id: ID, filterHash: FILTER });
+  // A-244: tokens encoded with a clock 4 min, 6 min and 25 h ahead, decoded at the real time.
+  it("TP-7.10 (A-244): encoded 4 min ahead (exp = now + 24 h 4 min) is accepted", () => {
+    const token = codecAt("2026-10-09T12:04:00Z").codec.encode({
+      sortKey: ["a"],
+      id: ID,
+      filterHash: FILTER,
+    });
 
     expect(codecAt().codec.decode(token, FILTER).id).toBe(ID);
+  });
+
+  it.each([
+    ["6 min", "2026-10-09T12:06:00Z"],
+    ["25 h", "2026-10-10T13:00:00Z"],
+  ])("TP-7.10 (A-244): encoded %s ahead is invalid_cursor", (_label, at) => {
+    const token = codecAt(at).codec.encode({ sortKey: ["a"], id: ID, filterHash: FILTER });
+
+    invalidCursor(codecAt().codec, token);
   });
 
   it("TP-7.16x (A-243): exp exactly 24 h + 5 min ahead is accepted; 1 s more is invalid_cursor", () => {

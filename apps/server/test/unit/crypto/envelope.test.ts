@@ -5,7 +5,7 @@ import { generateKeyPairSync, privateDecrypt, constants, randomBytes } from "nod
 import { describe, expect, it, vi } from "vitest";
 import { observed } from "../../support/api.js";
 import { rsaKeyPair } from "../../support/configEnv.js";
-import { errorName, s8, type EnvelopeParts, type SealContext } from "../../support/s8.js";
+import { expectCryptoError, s8, type EnvelopeParts, type SealContext } from "../../support/s8.js";
 
 const CTX: SealContext = { table: "sealed_test", rowId: "r1", purpose: "gmail.refresh" };
 const KMS_VERSION =
@@ -45,7 +45,8 @@ describe("TP-8.1: the envelope byte layout (F-110)", () => {
   it.each([[0], [1], [2], [5], [10], [12], [200], [395], [423]])(
     "TP-8.1: a buffer truncated to %i bytes is EnvelopeFormatError",
     async (length) => {
-      const { encodeEnvelope, decodeEnvelope, EnvelopeFormatError } = await s8.envelope();
+      const { encodeEnvelope, decodeEnvelope } = await s8.envelope();
+      const { EnvelopeFormatError } = await s8.cryptoErrors();
       const b = encodeEnvelope(parts()).subarray(0, length);
 
       expect(() => decodeEnvelope(b)).toThrow(EnvelopeFormatError);
@@ -57,7 +58,8 @@ describe("TP-8.1: the envelope byte layout (F-110)", () => {
     ["provider 9", 1, 9],
     ["L = 0", 2, 0],
   ])("TP-8.1: %s is EnvelopeFormatError", async (_label, offset, value) => {
-    const { encodeEnvelope, decodeEnvelope, EnvelopeFormatError } = await s8.envelope();
+    const { encodeEnvelope, decodeEnvelope } = await s8.envelope();
+    const { EnvelopeFormatError } = await s8.cryptoErrors();
     const b = Buffer.from(encodeEnvelope(parts()));
     b[offset] = value;
 
@@ -87,7 +89,8 @@ describe("TP-8.1: the envelope byte layout (F-110)", () => {
   });
 
   it("TP-8.17x: a wrapped DEK of 1025 bytes is refused (W is 1..1024)", async () => {
-    const { encodeEnvelope, decodeEnvelope, EnvelopeFormatError } = await s8.envelope();
+    const { encodeEnvelope, decodeEnvelope } = await s8.envelope();
+    const { EnvelopeFormatError } = await s8.cryptoErrors();
     const b = Buffer.from(encodeEnvelope(parts()));
     // Rewrite W to 1025 (its bytes follow the 7-byte key version).
     b.writeUInt16BE(1025, 3 + 7);
@@ -135,9 +138,7 @@ describe("TP-8.3: seal and unseal with a local key (F-111, F-113)", () => {
     const { sealer: s, unsealer: u } = await sealer();
     const envelope = s.seal(Buffer.from("x"), CTX);
 
-    expect(await errorName(() => u.unseal(envelope, { ...CTX, rowId: "r2" }))).toBe(
-      "EnvelopeAuthError",
-    );
+    await expectCryptoError(() => u.unseal(envelope, { ...CTX, rowId: "r2" }), "EnvelopeAuthError");
   });
 
   it("TP-8.3: one flipped ciphertext byte is EnvelopeAuthError", async () => {
@@ -147,7 +148,7 @@ describe("TP-8.3: seal and unseal with a local key (F-111, F-113)", () => {
     const at = envelope.length - 17;
     envelope[at] = (envelope[at] ?? 0) ^ 0x01;
 
-    expect(await errorName(() => u.unseal(envelope, CTX))).toBe("EnvelopeAuthError");
+    await expectCryptoError(() => u.unseal(envelope, CTX), "EnvelopeAuthError");
   });
 
   it("TP-8.17x: two seals of the same plaintext differ (fresh DEK and nonce)", async () => {
@@ -165,11 +166,10 @@ describe("TP-8.3: seal and unseal with a local key (F-111, F-113)", () => {
       keyVersion: KMS_VERSION,
     }).seal(Buffer.from("x"), CTX);
 
-    expect(
-      await errorName(() =>
-        createLocalCaptureUnsealer({ privateKeyPem: keys.privatePem }).unseal(kmsEnvelope, CTX),
-      ),
-    ).toBe("EnvelopeFormatError");
+    await expectCryptoError(
+      () => createLocalCaptureUnsealer({ privateKeyPem: keys.privatePem }).unseal(kmsEnvelope, CTX),
+      "EnvelopeFormatError",
+    );
   });
 });
 
@@ -203,22 +203,28 @@ describe("TP-8.5: the KMS unsealer (F-112)", () => {
   const keys = rsaKeyPair();
 
   /** A fake KMS client that decrypts with the local private key, like asymmetricDecrypt. */
-  function fakeKms() {
+  function fakeKms(shape: "buffer" | "uint8array" | "string" | "missing" = "buffer") {
     return {
-      asymmetricDecrypt: vi.fn((request: { name: string; ciphertext: Buffer | Uint8Array }) =>
-        Promise.resolve([
+      asymmetricDecrypt: vi.fn((request: { name: string; ciphertext: Buffer | Uint8Array }) => {
+        const dek = privateDecrypt(
           {
-            plaintext: privateDecrypt(
-              {
-                key: keys.privatePem,
-                padding: constants.RSA_PKCS1_OAEP_PADDING,
-                oaepHash: "sha256",
-              },
-              Buffer.from(request.ciphertext),
-            ),
+            key: keys.privatePem,
+            padding: constants.RSA_PKCS1_OAEP_PADDING,
+            oaepHash: "sha256",
           },
-        ]),
-      ),
+          Buffer.from(request.ciphertext),
+        );
+        // A-247: @google-cloud/kms resolves to a tuple whose first element has `plaintext`.
+        const plaintext =
+          shape === "buffer"
+            ? dek
+            : shape === "uint8array"
+              ? new Uint8Array(dek)
+              : shape === "string"
+                ? "str"
+                : undefined;
+        return Promise.resolve([{ plaintext }]);
+      }),
     };
   }
 
@@ -260,9 +266,43 @@ describe("TP-8.5: the KMS unsealer (F-112)", () => {
 
     const envelope = await kmsEnvelope(Buffer.from("x"));
 
-    expect(await errorName(() => unsealer.unseal(envelope, CTX))).toBe("KmsUnavailableError");
+    await expectCryptoError(() => unsealer.unseal(envelope, CTX), "KmsUnavailableError");
     const metric = (await obs.collect()).get("kms_errors_total");
     expect(metric?.dataPoints.reduce((sum, p) => sum + Number(p.value), 0)).toBe(1);
+  });
+
+  it("TP-8.5 (A-247): a [{ plaintext: Uint8Array }] response unseals to the plaintext", async () => {
+    const { createKmsCaptureUnsealer } = await s8.captureUnsealer();
+    const envelope = await kmsEnvelope(Buffer.from("uint8 plaintext"));
+
+    const plaintext = await createKmsCaptureUnsealer({
+      client: fakeKms("uint8array"),
+      metrics: observed().metrics,
+    }).unseal(envelope, CTX);
+
+    expect(Buffer.from(plaintext)).toEqual(Buffer.from("uint8 plaintext"));
+  });
+
+  it('TP-8.5 (A-247): a [{ plaintext: "str" }] response is KmsUnavailableError', async () => {
+    const { createKmsCaptureUnsealer } = await s8.captureUnsealer();
+    const envelope = await kmsEnvelope(Buffer.from("x"));
+    const unsealer = createKmsCaptureUnsealer({
+      client: fakeKms("string"),
+      metrics: observed().metrics,
+    });
+
+    await expectCryptoError(() => unsealer.unseal(envelope, CTX), "KmsUnavailableError");
+  });
+
+  it("TP-8.17x (A-247): a response with no plaintext is KmsUnavailableError", async () => {
+    const { createKmsCaptureUnsealer } = await s8.captureUnsealer();
+    const envelope = await kmsEnvelope(Buffer.from("x"));
+    const unsealer = createKmsCaptureUnsealer({
+      client: fakeKms("missing"),
+      metrics: observed().metrics,
+    });
+
+    await expectCryptoError(() => unsealer.unseal(envelope, CTX), "KmsUnavailableError");
   });
 
   it("TP-8.5: an envelope with provider local-capture is EnvelopeFormatError", async () => {
@@ -274,11 +314,10 @@ describe("TP-8.5: the KMS unsealer (F-112)", () => {
     );
     const client = fakeKms();
 
-    expect(
-      await errorName(() =>
-        createKmsCaptureUnsealer({ client, metrics: observed().metrics }).unseal(local, CTX),
-      ),
-    ).toBe("EnvelopeFormatError");
+    await expectCryptoError(
+      () => createKmsCaptureUnsealer({ client, metrics: observed().metrics }).unseal(local, CTX),
+      "EnvelopeFormatError",
+    );
     expect(client.asymmetricDecrypt).not.toHaveBeenCalled();
   });
 
@@ -288,14 +327,14 @@ describe("TP-8.5: the KMS unsealer (F-112)", () => {
     const at = envelope.length - 17;
     envelope[at] = (envelope[at] ?? 0) ^ 0x01;
 
-    expect(
-      await errorName(() =>
+    await expectCryptoError(
+      () =>
         createKmsCaptureUnsealer({ client: fakeKms(), metrics: observed().metrics }).unseal(
           envelope,
           CTX,
         ),
-      ),
-    ).toBe("EnvelopeAuthError");
+      "EnvelopeAuthError",
+    );
   });
 });
 
@@ -320,7 +359,7 @@ describe("TP-8.6: the api-secrets cipher and key rotation (F-114)", () => {
 
     expect(one.unseal(envelope, CTX)).toEqual(plaintext);
     expect(both.unseal(envelope, CTX)).toEqual(plaintext);
-    expect(await errorName(() => onlyK2.unseal(envelope, CTX))).toBe("UnknownKeyVersionError");
+    await expectCryptoError(() => onlyK2.unseal(envelope, CTX), "UnknownKeyVersionError");
   });
 
   it("TP-8.17x: the envelope is api-local (0x03) with the key id as key version; currentKeyId is the current id; another context is EnvelopeAuthError", async () => {
@@ -339,7 +378,8 @@ describe("TP-8.6: the api-secrets cipher and key rotation (F-114)", () => {
     expect(envelope[1]).toBe(0x03);
     expect(keyVersionOf(envelope)).toBe("k2");
     expect(cipher.currentKeyId()).toBe("k2");
-    expect(await errorName(() => cipher.unseal(envelope, { ...CTX, purpose: "other" }))).toBe(
+    await expectCryptoError(
+      () => cipher.unseal(envelope, { ...CTX, purpose: "other" }),
       "EnvelopeAuthError",
     );
   });
@@ -353,10 +393,10 @@ describe("TP-8.6: the api-secrets cipher and key rotation (F-114)", () => {
       keyVersion: "local:1",
     }).seal(Buffer.from("x"), CTX);
 
-    expect(
-      await errorName(() =>
+    await expectCryptoError(
+      () =>
         createApiSecretsCipher({ current: "k1", keys: new Map([["k1", k1]]) }).unseal(capture, CTX),
-      ),
-    ).toBe("EnvelopeFormatError");
+      "EnvelopeFormatError",
+    );
   });
 });
