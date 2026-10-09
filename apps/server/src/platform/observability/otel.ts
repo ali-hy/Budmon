@@ -67,6 +67,8 @@ export const EXPECTED_DROPPED_SPAN_ATTRIBUTES: readonly string[] = [
   "db.statement",
   "db.postgresql.",
   "messaging.",
+  // A-238: pg-boss's own span attributes.
+  "pgboss.",
   "fastify.",
   "hook.",
   "service.name",
