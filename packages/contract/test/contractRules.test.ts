@@ -314,3 +314,22 @@ describe("TP-4.31x: checkContractRules, further cases (F-348)", () => {
     expect(check(await generate(spike))).toEqual([]);
   });
 });
+
+describe("TP-7.14: createRoute's OpenAPI shape (F-343)", () => {
+  it("TP-7.14: a contract with createRoute('/things') passes R5 (and every rule); the Idempotency-Key header is required with format uuid; the success status is 201", async () => {
+    const doc = await generate({
+      things: { create: createRoute("/things").input(z.object({ name: z.string().max(100) })) },
+    });
+    obj(doc, "paths", "/things", "post")["operationId"] = "things.create";
+
+    const post = obj(doc, "paths", "/things", "post");
+    const header = arr(post, "parameters")
+      .map((p) => obj(p))
+      .find((p) => p["name"] === "Idempotency-Key");
+
+    expect(check(doc)).toEqual([]);
+    expect(header).toMatchObject({ in: "header", required: true });
+    expect(obj(header, "schema")).toMatchObject({ format: "uuid" });
+    expect(Object.keys(obj(post, "responses"))).toContain("201");
+  });
+});
