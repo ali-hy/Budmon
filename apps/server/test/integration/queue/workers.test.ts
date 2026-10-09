@@ -7,7 +7,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { CANARIES, scanForCanaries } from "@budmon/test-support";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { recordingLogger } from "../../support/platform.js";
 import { query } from "../../support/postgres.js";
@@ -23,6 +23,7 @@ import {
 } from "../../support/jobs.js";
 import { testApiConfigFor } from "../../support/api.js";
 import { createTestDatabase, type TestDatabase } from "../../support/testDatabase.js";
+import { runCli } from "../../../src/main/cli.js";
 import { createWorkerContainer } from "../../../src/platform/container.js";
 import {
   buildWorkerContainer,
@@ -353,6 +354,82 @@ describe("TP-6.8: budmon_capture under row-level security (A-227)", () => {
     }
     expect(updated).toEqual([]);
   });
+
+  // ---- A-230: capture can't route jobs into other queues through dead_letter / source_name ----
+
+  const RLS = "new row violates row-level security policy";
+
+  async function refusal(p: Promise<unknown>): Promise<string> {
+    return p.then(
+      () => "allowed",
+      (e: unknown) => (e as Error).message,
+    );
+  }
+
+  /** test.ok jobs carrying one of the A-230 markers, read as the owner. */
+  async function plantedInTestOk(): Promise<number> {
+    const [row] = await query<{ n: number }>(
+      testDb.urlAs("budmon_queue"),
+      "SELECT count(*)::int AS n FROM pgboss.job WHERE name = 'test.ok' AND data->>'n' IN ('230001', '230002', '230003', '230004')",
+    );
+    return row?.n ?? -1;
+  }
+
+  it("TP-6.8: (A-230) (a)-(d): a planted dead_letter, send with deadLetter, an UPDATE of dead_letter and a planted source_name are each refused by RLS", async () => {
+    const { capture: boss } = bosses();
+    const ownId = await boss.send(TEST_JOBS.capture.name, { n: 230003 });
+
+    const results = {
+      a: await refusal(
+        asCapture(
+          `INSERT INTO pgboss.job_common (name, data, dead_letter, retry_limit, expire_seconds, state, started_on)
+           VALUES ('test.capture', '{"n":230001}', 'test.ok', 0, 1, 'active', now() - interval '1 hour')`,
+        ),
+      ),
+      b: await refusal(boss.send(TEST_JOBS.capture.name, { n: 230002 }, { deadLetter: "test.ok" })),
+      c: await refusal(
+        asCapture("UPDATE pgboss.job_common SET dead_letter = 'test.ok' WHERE id = $1", [ownId]),
+      ),
+      d: await refusal(
+        asCapture(
+          `INSERT INTO pgboss.job_common (name, data, source_name, state)
+           VALUES ('dead-letter.capture', '{"n":230004}', 'test.ok', 'failed')`,
+        ),
+      ),
+    };
+
+    for (const [label, message] of Object.entries(results)) {
+      expect(message, label).toContain(RLS);
+    }
+  });
+
+  it("TP-6.8: (A-230) after the general pg-boss supervises test.capture, test.ok holds no planted job; (e) an expired normal capture job lands in dead-letter.capture", async () => {
+    const { capture: boss } = bosses();
+    const expiring = await boss.send(TEST_JOBS.capture.name, { n: 230005 }, { expireInSeconds: 1 });
+    const [fetched] = await boss
+      .fetch(TEST_JOBS.capture.name, { batchSize: 50 })
+      .then((jobs) => jobs.filter((j) => j.id === expiring));
+    expect(fetched?.id).toBe(expiring);
+    await new Promise((resolve) => setTimeout(resolve, 2500));
+
+    const general = createPgBoss(
+      testWorkerConfig(testDb.endpoint, testDb.name, "general"),
+      "general",
+    );
+    await general.start();
+    try {
+      await general.supervise(TEST_JOBS.capture.name);
+    } finally {
+      await general.stop({ graceful: false });
+    }
+
+    expect(await plantedInTestOk()).toBe(0);
+    const [dead] = await query<{ n: number }>(
+      testDb.urlAs("budmon_queue"),
+      "SELECT count(*)::int AS n FROM pgboss.job WHERE name = 'dead-letter.capture' AND data->>'n' = '230005'",
+    );
+    expect(dead?.n).toBe(1);
+  }, 60_000);
 });
 
 describe("TP-6.9: start-up checks and schedules (F-78)", () => {
@@ -507,16 +584,31 @@ describe("TP-6.11: dead-letter list and redrive (F-81)", () => {
       failure: "Error",
     });
 
-    const moved = await redriveDeadLetter(boss, "general", dead[0]?.id ?? "");
+    const logger = recordingLogger();
+    const moved = await redriveDeadLetter(
+      boss,
+      "general",
+      dead[0]?.id ?? "",
+      registryOf([TEST_JOBS.fail]),
+      logger,
+    );
     expect(moved).toBe(1);
     const queued = (await jobRows(built.container.database, TEST_JOBS.fail.name)).filter((r) =>
       ["created", "retry"].includes(r.state),
     );
     expect(queued).toHaveLength(1);
 
-    expect(await redriveDeadLetter(boss, "general", "0190a0b0-1c2d-7e3f-8a4b-5c6d7e8f9a0b")).toBe(
-      0,
-    );
+    expect(
+      await redriveDeadLetter(
+        boss,
+        "general",
+        "0190a0b0-1c2d-7e3f-8a4b-5c6d7e8f9a0b",
+        registryOf([TEST_JOBS.fail]),
+        logger,
+      ),
+    ).toBe(0);
+    // A real dead letter of a registered queue, and an unknown id: neither is a refusal.
+    expect(logger.lines.filter((l) => l.event === "redrive_refused")).toEqual([]);
   });
 
   it("TP-6.19x: listDeadLetters without a role covers both roles; the capture list is empty", async () => {
@@ -540,7 +632,6 @@ describe("TP-6.11: jobs:dead runs a cli-mode pg-boss (F-93, A-218)", () => {
   });
 
   it("TP-6.11: (A-218) jobs:dead list through runCli prints the entry; no schedule row or pg-boss maintenance happens during the command", async () => {
-    const { runCli } = await import("../../../src/main/cli.js");
     const { testDb } = built;
     const dir = mkdtempSync(path.join(tmpdir(), "budmon-cli-"));
     const read = async (sql: string) =>
@@ -565,6 +656,79 @@ describe("TP-6.11: jobs:dead runs a cli-mode pg-boss (F-93, A-218)", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   }, 60_000);
+
+  it("TP-6.11: (A-230) a dead-letter.capture job planted with source_name test.ok: jobs:dead redrive moves nothing, exit 2, one redrive_refused line, test.ok holds no job", async () => {
+    const { testDb } = built;
+    const [planted] = await query<{ id: string }>(
+      testDb.urlAs("budmon_queue"),
+      `INSERT INTO pgboss.job (name, data, source_name, state)
+       VALUES ('dead-letter.capture', '{"n":230011}', 'test.ok', 'failed') RETURNING id::text AS id`,
+    );
+    const dir = mkdtempSync(path.join(tmpdir(), "budmon-cli-redrive-"));
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+    const written: string[] = [];
+    const spy = vi
+      .spyOn(process.stderr, "write")
+      .mockImplementation((chunk: string | Uint8Array) => {
+        written.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString());
+        return true;
+      });
+    try {
+      const code = await runCli(
+        ["jobs:dead", "redrive", "--role", "capture", "--id", planted?.id ?? ""],
+        testWorkerEnv(dir, testDb.endpoint, testDb.name, "general"),
+        { stdout: (l) => stdout.push(l), stderr: (l) => stderr.push(l) },
+      );
+      spy.mockRestore();
+
+      expect(code, [...stderr, ...written].join("\n")).toBe(2);
+      expect(stdout.map((l) => JSON.parse(l) as unknown)).toEqual([{ moved: 0 }]);
+      const refused = [...stderr, ...written.join("").split("\n")].filter((l) =>
+        l.includes('"redrive_refused"'),
+      );
+      expect(refused).toHaveLength(1);
+      const [inTestOk] = await query<{ n: number }>(
+        testDb.urlAs("budmon_queue"),
+        "SELECT count(*)::int AS n FROM pgboss.job WHERE name = 'test.ok' AND data->>'n' = '230011'",
+      );
+      expect(inTestOk?.n).toBe(0);
+    } finally {
+      spy.mockRestore();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  it("TP-6.11: (A-230) redriveDeadLetter refuses a source_name outside the role's queues: 0 moved, one redrive_refused through the passed logger with the job id", async () => {
+    const { testDb } = built;
+    const [planted] = await query<{ id: string }>(
+      testDb.urlAs("budmon_queue"),
+      `INSERT INTO pgboss.job (name, data, source_name, state)
+       VALUES ('dead-letter.capture', '{"n":230012}', 'test.ok', 'failed') RETURNING id::text AS id`,
+    );
+    const boss = createPgBoss(testWorkerConfig(testDb.endpoint, testDb.name, "general"), "cli");
+    await boss.start();
+    const logger = recordingLogger();
+    try {
+      const moved = await redriveDeadLetter(
+        boss,
+        "capture",
+        planted?.id ?? "",
+        registryOf([TEST_JOBS.capture, TEST_JOBS.ok]),
+        logger,
+      );
+
+      expect(moved).toBe(0);
+      const refused = logger.lines.filter((l) => l.event === "redrive_refused");
+      expect(refused).toHaveLength(1);
+      expect(refused[0]).toMatchObject({
+        level: "warn",
+        fields: { fields: { jobId: planted?.id } },
+      });
+    } finally {
+      await boss.stop({ graceful: false });
+    }
+  });
 
   it("TP-6.11: (A-218) createPgBoss mode cli connects with the queue login as budmon-cli", async () => {
     const cfg = testWorkerConfig(built.testDb.endpoint, built.testDb.name, "general");
