@@ -6,7 +6,11 @@ import { EXIT_CONFIG, loadConfigOrReport } from "../platform/config/startup.js";
 import type { Config, DbLoginRole } from "../platform/config/schema.js";
 import { serverRoot } from "../platform/config/serverRoot.js";
 import { createDatabase } from "../platform/db/client.js";
-import { MigrationFailedError, UnknownMigrationError } from "../platform/db/migrations.js";
+import {
+  JournalInvalidError,
+  MigrationFailedError,
+  UnknownMigrationError,
+} from "../platform/db/migrations.js";
 import { runSchemaStep, SchemaStepError } from "../platform/db/schemaStep.js";
 import iso4217 from "../platform/fx/iso4217.json" with { type: "json" };
 import { describeFailure } from "../platform/observability/describeFailure.js";
@@ -90,7 +94,7 @@ export async function runMigrate(
     logger.error("startup_failed", describeFailure(error));
     if (error instanceof SchemaStepError) return 3;
     if (error instanceof UnknownMigrationError) return 4;
-    if (error instanceof MigrationFailedError) return 5;
+    if (error instanceof MigrationFailedError || error instanceof JournalInvalidError) return 5;
     return 1;
   } finally {
     await database.close();

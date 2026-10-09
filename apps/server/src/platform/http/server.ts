@@ -3,9 +3,11 @@ import path from "node:path";
 import cookie from "@fastify/cookie";
 import { API_VERSION } from "@budmon/contract";
 import type { AnyContractRouter } from "@orpc/contract";
+import { SmartCoercionPlugin } from "@orpc/json-schema";
 import { OpenAPIHandler } from "@orpc/openapi/fastify";
 import type { Router } from "@orpc/server";
 import { RequestHeadersPlugin, ResponseHeadersPlugin } from "@orpc/server/plugins";
+import { ZodToJsonSchemaConverter } from "@orpc/zod/zod4";
 import { trace } from "@opentelemetry/api";
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import { serverRoot } from "../config/serverRoot.js";
@@ -79,10 +81,13 @@ export async function createApiServer(
   app.addHook("onRequest", async (request) => {
     const headers = lowerCaseHeaders(request);
     const client = parseClientHeader(headers["x-budmon-client"]);
-    const principal = await c.authHook.authenticate({
-      headers,
-      cookies: request.cookies as Record<string, string>,
-    });
+    // A-154: only the API is authenticated; /health/* and other routes get no principal.
+    const principal = request.url.startsWith(`${PREFIX}/`)
+      ? await c.authHook.authenticate({
+          headers,
+          cookies: request.cookies as Record<string, string>,
+        })
+      : null;
     const resHeaders = new Headers();
     request.budmon = {
       requestId: request.id,
@@ -118,6 +123,10 @@ export async function createApiServer(
   );
   const handler = new OpenAPIHandler<RequestContext>(opts.router ?? appRouter, {
     plugins: [
+      // A-148: query and path strings become the integer, boolean or date the schema declares.
+      new SmartCoercionPlugin<RequestContext>({
+        schemaConverters: [new ZodToJsonSchemaConverter()],
+      }),
       new ResponseHeadersPlugin<RequestContext>(),
       new RequestHeadersPlugin<RequestContext>(),
     ],

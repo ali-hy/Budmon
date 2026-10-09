@@ -1,4 +1,5 @@
-// F-90: the API process.
+// F-90: the API process. Started as `node --import ./dist/main/instrument.js dist/main/api.js`
+// (A-147).
 import { readFileSync } from "node:fs";
 import { EXIT_CONFIG, loadConfigOrReport } from "../platform/config/startup.js";
 import { createApiContainer } from "../platform/container.js";
@@ -6,7 +7,7 @@ import { createApiServer } from "../platform/http/server.js";
 import { describeFailure } from "../platform/observability/describeFailure.js";
 import { installFatalHandlers, startupState } from "../platform/observability/fatal.js";
 import { createLogger } from "../platform/observability/logger.js";
-import { startTelemetry } from "../platform/observability/otel.js";
+import { getTelemetry } from "../platform/observability/telemetryHandle.js";
 
 const state = startupState("api", process.env);
 installFatalHandlers(state);
@@ -29,21 +30,8 @@ async function main(): Promise<number | null> {
     appEnv: config.appEnv,
   });
   state.logger = logger;
-  // Telemetry first, so its instrumentations patch pg, http and Fastify as they load.
-  const telemetry = startTelemetry(
-    {
-      ...(config.otlpEndpoint === undefined ? {} : { endpoint: config.otlpEndpoint }),
-      ...(config.otlpHeaders === undefined ? {} : { headers: config.otlpHeaders }),
-      service: "api",
-      release: config.release,
-      environment: config.appEnv,
-    },
-    {
-      onDrop: (signal, kind, n) => {
-        container.metrics.telemetryAttributesDropped.add(n, { signal, drop_kind: kind });
-      },
-    },
-  );
+  // Started by the `--import` preload (F-89, A-147); a no-op handle when it didn't run.
+  const telemetry = getTelemetry();
   const container = createApiContainer(config, { logger });
   state.reporter = container.reporter;
   const app = await createApiServer(container);

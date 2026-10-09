@@ -58,6 +58,11 @@ export function mapError(
     return { error: defined(err.key, err.status, err.message, err.details), report: false };
   }
   if (err instanceof ORPCError) {
+    // Rule 1b (A-149): a contract-defined error (oRPC sets `defined` only for errors the contract
+    // declares, with their data validated) passes through with its own status and data.
+    if (err.defined) {
+      return { error: err as ORPCError<string, unknown>, report: false };
+    }
     if (err.code === "BAD_REQUEST" && err.cause instanceof ValidationError) {
       return {
         error: defined("VALIDATION_FAILED", 400, "Validation failed", {

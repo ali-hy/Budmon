@@ -20,16 +20,29 @@ export class MigrationFailedError extends Error {
   }
 }
 
+/** A-150: a journal file that exists but isn't JSON with an `entries` array. The message never
+ * carries the file's content. */
+export class JournalInvalidError extends Error {
+  constructor() {
+    super("drizzle journal is invalid");
+    this.name = "JournalInvalidError";
+  }
+}
+
 export function readJournal(
   migrationsFolder: string,
 ): { tag: string; when: number; hash: string }[] {
   const file = path.join(migrationsFolder, "meta", "_journal.json");
   // No journal means no migrations: the folder holds only .gitkeep until the first release.
   if (!existsSync(file)) return [];
-  const journal = JSON.parse(readFileSync(file, "utf8")) as {
-    entries?: { tag: string; when: number }[];
-  };
-  return (journal.entries ?? []).map((entry) => ({
+  let entries: unknown;
+  try {
+    entries = (JSON.parse(readFileSync(file, "utf8")) as { entries?: unknown } | null)?.entries;
+  } catch {
+    throw new JournalInvalidError();
+  }
+  if (!Array.isArray(entries)) throw new JournalInvalidError();
+  return (entries as { tag: string; when: number }[]).map((entry) => ({
     tag: entry.tag,
     when: entry.when,
     hash: createHash("sha256")

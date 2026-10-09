@@ -1,9 +1,13 @@
 // F-61 security headers and F-62 body handling (delivered in S-4, A-124).
 import helmet from "@fastify/helmet";
 import type { FastifyError, FastifyInstance } from "fastify";
+import secureJson from "secure-json-parse";
 import type { ErrorReporter } from "../observability/errorReporter.js";
 import type { Logger } from "../observability/logger.js";
 
+/** F-61. helmet's other defaults stay on (A-151): COOP same-origin, Origin-Agent-Cluster,
+ * X-DNS-Prefetch-Control off, X-Download-Options noopen, X-Frame-Options SAMEORIGIN,
+ * X-Permitted-Cross-Domain-Policies none, X-XSS-Protection 0. */
 export async function registerSecurityHeaders(app: FastifyInstance): Promise<void> {
   await app.register(helmet, {
     contentSecurityPolicy: {
@@ -49,7 +53,14 @@ export function registerBodyHandling(
         return;
       }
       try {
-        done(null, JSON.parse(text) as unknown);
+        // A-152: `__proto__` keys and `constructor.prototype` are removed before validation.
+        done(
+          null,
+          secureJson.parse(text, null, {
+            protoAction: "remove",
+            constructorAction: "remove",
+          }) as unknown,
+        );
       } catch {
         done(new InvalidJsonError("invalid json"), undefined);
       }

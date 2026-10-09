@@ -248,7 +248,14 @@ export async function startDev(): Promise<number> {
 
   // Run from the repository root so the relative paths in .env resolve (A-73).
   const tsx = path.join(root, "apps", "server", "node_modules", ".bin", "tsx");
-  const watch = ["watch", "--tsconfig", "apps/server/tsconfig.json"];
+  // The telemetry preload runs first (F-89, A-147).
+  const watch = [
+    "watch",
+    "--tsconfig",
+    "apps/server/tsconfig.json",
+    "--import",
+    "./apps/server/src/main/instrument.ts",
+  ];
   const children = [
     startProcess("api", tsx, [...watch, "apps/server/src/main/api.ts"], root, env),
     startProcess("worker", tsx, [...watch, "apps/server/src/main/worker.ts"], root, {
