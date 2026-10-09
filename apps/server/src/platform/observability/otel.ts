@@ -111,7 +111,15 @@ export const METRIC_ATTRIBUTE_ALLOWLIST: readonly string[] = [
 ];
 
 /** A-135: the shape a span name must have to be exported. */
-export const SPAN_NAME = /^[A-Za-z0-9_.:/{} -]{1,120}$/;
+export const SPAN_NAME = /^[A-Za-z0-9_.:/{}* -]{1,120}$/;
+
+/** A-164: `@fastify/otel` names hook spans `<hook> - <handler or plugin name>`; plugin names have
+ * no bounded alphabet, so only the hook name is kept (a deterministic rewrite, no drop). */
+function spanName(span: ReadableSpan): string {
+  if (span.instrumentationScope.name !== "@fastify/otel") return span.name;
+  const separator = span.name.indexOf(" - ");
+  return separator === -1 ? span.name : span.name.slice(0, separator);
+}
 
 const IDENT_START = /[A-Za-z_\u0080-\uffff]/;
 const IDENT_PART = /[A-Za-z0-9_$\u0080-\uffff]/;
@@ -277,7 +285,7 @@ export class AllowlistSpanExporter implements SpanExporter {
         attributes[key] =
           key === "url.path" && typeof value === "string" ? (value.split(/[?#]/)[0] ?? "") : value;
       }
-      let name = span.name;
+      let name = spanName(span);
       if (!SPAN_NAME.test(name)) {
         name = "span";
         unexpected += 1;
