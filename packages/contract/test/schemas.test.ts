@@ -71,6 +71,21 @@ describe("TP-4.33x: F-340 wire schemas", () => {
     expect(ok(InstantWire, v)).toBe(valid);
   });
 
+  // A-242: exactly three fraction digits and a real instant, for input and output alike.
+  it.each([
+    ["2026-10-05T12:00:57.040Z", true],
+    ["2026-10-05T12:00:57.04Z", false],
+    ["2026-10-05T12:00:00Z", false],
+    ["2026-10-05T12:00:00.0000Z", false],
+    ["2026-10-05T12:00:00.123456789Z", false],
+    ["2026-10-05T12:00:00.000+00:00", false],
+    ["2026-02-30T12:00:00.000Z", false],
+    ["2026-10-05T24:00:00.000Z", false],
+    ["2026-10-05T12:60:00.000Z", false],
+  ])("TP-4.33x (A-242): InstantWire %s is valid: %s", (v, valid) => {
+    expect(ok(InstantWire, v)).toBe(valid);
+  });
+
   it("TP-4.33x: UuidSchema takes lower-case UUIDs", () => {
     expect(ok(UuidSchema, "0190a0b0-1c2d-7e3f-8a4b-5c6d7e8f9a0b")).toBe(true);
     expect(ok(UuidSchema, "not-a-uuid")).toBe(false);

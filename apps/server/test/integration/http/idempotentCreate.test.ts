@@ -157,7 +157,7 @@ describe("TP-7.15: an idempotent create end to end (F-102)", () => {
     expect(first.status).toBe(201);
     const body = first.json() as { id: string; createdAt: string };
     expect(body.id).toMatch(/^[0-9a-f-]{36}$/);
-    expect(body.createdAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/);
+    expect(body.createdAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
     expect(first.headers["idempotent-replayed"]).toBeUndefined();
 
     expect(replay.status).toBe(201);

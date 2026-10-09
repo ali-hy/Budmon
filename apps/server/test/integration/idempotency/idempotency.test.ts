@@ -98,7 +98,8 @@ describe("TP-7.1 to TP-7.3: first run, replay, key reuse (F-100)", () => {
     const row = await record(USER_A, key);
     expect(row?.["procedure"]).toBe("test.create");
     expect(row?.["response_status"]).toBe(201);
-    expect(row?.["result"]).toEqual({ id: created(1).id, createdAt: "2026-10-09T12:00:00Z" });
+    // A-242: the stored wire instant always has three fraction digits.
+    expect(row?.["result"]).toEqual({ id: created(1).id, createdAt: "2026-10-09T12:00:00.000Z" });
     expect((row?.["expires_at"] as Date).toISOString()).toBe("2027-01-07T12:00:00.000Z");
   });
 

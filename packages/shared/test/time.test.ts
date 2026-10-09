@@ -1,7 +1,14 @@
 // F-310 time. TP-1.11, plus the extra cases TP-1.23x.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { describe, expect, it } from "vitest";
-import { fixedClock, isValidTimeZone, systemClock, todayIn, utcDateOf } from "../src/time/clock.js";
+import {
+  fixedClock,
+  isValidTimeZone,
+  systemClock,
+  todayIn,
+  toInstantWire,
+  utcDateOf,
+} from "../src/time/clock.js";
 import { Temporal } from "../src/time/temporal.js";
 
 describe("F-310 todayIn and utcDateOf", () => {
@@ -114,5 +121,24 @@ describe("F-310 isValidTimeZone", () => {
 
   it("TP-1.23x: a name with spaces is not valid", () => {
     expect(isValidTimeZone("Not A Zone")).toBe(false);
+  });
+});
+
+describe("F-310 toInstantWire (A-242)", () => {
+  it.each([
+    ["2026-10-05T12:00:57.04Z", "2026-10-05T12:00:57.040Z"],
+    ["2026-10-05T12:00:00Z", "2026-10-05T12:00:00.000Z"],
+    ["2026-10-05T12:00:00.123456789Z", "2026-10-05T12:00:00.123Z"],
+  ])("TP-1.11 (A-242): toInstantWire(%s) is %s", (input, wire) => {
+    expect(toInstantWire(Temporal.Instant.from(input))).toBe(wire);
+  });
+
+  it("TP-1.23x (A-242): truncates rather than rounds; an offset input renders in UTC", () => {
+    expect(toInstantWire(Temporal.Instant.from("2026-10-05T12:00:00.999999999Z"))).toBe(
+      "2026-10-05T12:00:00.999Z",
+    );
+    expect(toInstantWire(Temporal.Instant.from("2026-10-05T14:00:00+02:00"))).toBe(
+      "2026-10-05T12:00:00.000Z",
+    );
   });
 });
