@@ -13,8 +13,8 @@ import {
   createMetrics,
   registerPlatformMetrics,
 } from "../../../src/platform/observability/metrics.js";
-import { s6 } from "../../support/jobs.js";
 import { logCapture } from "../../support/telemetry.js";
+import { startHeartbeat } from "../../../src/platform/queue/heartbeat.js";
 
 function harness() {
   const exporter = new InMemoryMetricExporter(AggregationTemporality.CUMULATIVE);
@@ -66,8 +66,7 @@ function harness() {
 }
 
 describe("TP-6.10: startHeartbeat (F-79)", () => {
-  it("TP-6.10: writes the epoch seconds immediately and on each tick, every 15 s by default, to /tmp/heartbeat", async () => {
-    const { startHeartbeat } = await s6.heartbeat();
+  it("TP-6.10: writes the epoch seconds immediately and on each tick, every 15 s by default, to /tmp/heartbeat", () => {
     const h = harness();
 
     const heartbeat = startHeartbeat({
@@ -91,7 +90,6 @@ describe("TP-6.10: startHeartbeat (F-79)", () => {
   });
 
   it("TP-6.10: the gauge worker_heartbeat_timestamp_seconds{service} is the last beat", async () => {
-    const { startHeartbeat } = await s6.heartbeat();
     const h = harness();
 
     const heartbeat = startHeartbeat({
@@ -109,8 +107,7 @@ describe("TP-6.10: startHeartbeat (F-79)", () => {
     heartbeat.stop();
   });
 
-  it("TP-6.10: a write that throws once logs one heartbeat_write_failed through the passed logger (A-206), and the timer continues", async () => {
-    const { startHeartbeat } = await s6.heartbeat();
+  it("TP-6.10: a write that throws once logs one heartbeat_write_failed through the passed logger (A-206), and the timer continues", () => {
     const h = harness();
     h.writeFile.mockImplementationOnce(() => {
       throw new Error("EROFS");
@@ -136,8 +133,7 @@ describe("TP-6.10: startHeartbeat (F-79)", () => {
     heartbeat.stop();
   });
 
-  it("TP-6.10: intervalMs and path are used when given", async () => {
-    const { startHeartbeat } = await s6.heartbeat();
+  it("TP-6.10: intervalMs and path are used when given", () => {
     const h = harness();
 
     const heartbeat = startHeartbeat({

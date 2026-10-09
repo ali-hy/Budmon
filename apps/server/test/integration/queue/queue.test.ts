@@ -17,7 +17,6 @@ import {
   TEST_JOBS,
   jobRows,
   registryOf,
-  s6,
   type JobDefinition,
   type PgBossLike,
 } from "../../support/jobs.js";
@@ -31,6 +30,11 @@ import {
 } from "../../support/postgres.js";
 import { createTestDatabase, type TestDatabase } from "../../support/testDatabase.js";
 import { testWorkerConfig } from "../../support/worker.js";
+import { JobPayloadInvalidError, createJobQueue } from "../../../src/platform/queue/jobQueue.js";
+import { UnsafeJobPayloadError } from "../../../src/platform/queue/payloadSafety.js";
+import { installOrUpgradeQueueSchema } from "../../../src/platform/queue/queueSchema.js";
+import { syncQueues } from "../../../src/platform/queue/queueSync.js";
+import { createPgBoss } from "../../../src/platform/queue/workers.js";
 
 describe("TP-6.4: the queue schema (F-74)", () => {
   let testDb: TestDatabase;
@@ -58,13 +62,10 @@ describe("TP-6.4: the queue schema (F-74)", () => {
   });
 
   it("TP-6.4: running F-74 again reports current", async () => {
-    const { installOrUpgradeQueueSchema } = await s6.queueSchema();
-
     expect(await installOrUpgradeQueueSchema(migrator.handle)).toBe("current");
   });
 
   it("TP-6.4: budmon_app (the api's send-only pg-boss) sends a job", async () => {
-    const { createPgBoss } = await s6.workers();
     boss = createPgBoss(testApiConfigFor(testDb), "send-only");
     await boss.start();
 
@@ -93,7 +94,6 @@ describe("TP-6.5: createJobQueue (F-73)", () => {
 
   beforeAll(async () => {
     testDb = await createTestDatabase();
-    const { createPgBoss } = await s6.workers();
     boss = createPgBoss(testApiConfigFor(testDb), "send-only");
     await boss.start();
   });
@@ -108,13 +108,12 @@ describe("TP-6.5: createJobQueue (F-73)", () => {
     return boss;
   }
 
-  async function queue() {
-    const { createJobQueue } = await s6.jobQueue();
+  function queue() {
     return createJobQueue({ boss: started(), registry: registryOf([TEST_JOBS.ok]) });
   }
 
   it("TP-6.5: enqueued in a transaction, then committed: the job row exists", async () => {
-    const q = await queue();
+    const q = queue();
 
     const id = await withTransaction(testDb.database, (tx) =>
       q.enqueue(tx, TEST_JOBS.ok, { n: 51 }),
@@ -125,7 +124,7 @@ describe("TP-6.5: createJobQueue (F-73)", () => {
   });
 
   it("TP-6.5: enqueued in a transaction, then rolled back: no row", async () => {
-    const q = await queue();
+    const q = queue();
 
     await expect(
       withTransaction(testDb.database, async (tx) => {
@@ -139,8 +138,7 @@ describe("TP-6.5: createJobQueue (F-73)", () => {
   });
 
   it("TP-6.5: an invalid payload throws JobPayloadInvalidError whose message has paths and codes only", async () => {
-    const q = await queue();
-    const { JobPayloadInvalidError } = await s6.jobQueue();
+    const q = queue();
 
     const error = await q
       .enqueue(testDb.database.handle, TEST_JOBS.ok, { n: CANARIES.payee } as unknown as {
@@ -157,7 +155,7 @@ describe("TP-6.5: createJobQueue (F-73)", () => {
   });
 
   it("TP-6.5: an unregistered definition throws Error('job not registered: <name>')", async () => {
-    const q = await queue();
+    const q = queue();
     const other: JobDefinition<{ n: number }> = { ...TEST_JOBS.ok, name: "test.unregistered" };
 
     await expect(q.enqueue(testDb.database.handle, other, { n: 1 })).rejects.toThrow(
@@ -170,8 +168,6 @@ describe("TP-6.5: createJobQueue (F-73)", () => {
       ...TEST_JOBS.ok,
       payload: z.object({ s: z.string() }),
     };
-    const { createJobQueue } = await s6.jobQueue();
-    const { UnsafeJobPayloadError } = await s6.payloadSafety();
     const q = createJobQueue({ boss: started(), registry: registryOf([free]) });
 
     await expect(
@@ -186,7 +182,7 @@ describe("TP-6.6: syncQueues (F-75)", () => {
   let migrator: Database | undefined;
   let boss: PgBossLike | undefined;
 
-  const a: JobDefinition = {
+  const a: JobDefinition<unknown> = {
     name: "sync.a",
     role: "general",
     payload: z.object({}),
@@ -196,7 +192,7 @@ describe("TP-6.6: syncQueues (F-75)", () => {
     expireInSeconds: 600,
     policy: "standard",
   };
-  const b: JobDefinition = { ...a, name: "sync.b", role: "capture", policy: "singleton" };
+  const b: JobDefinition<unknown> = { ...a, name: "sync.b", role: "capture", policy: "singleton" };
 
   beforeAll(async () => {
     pg = await startFreshPostgres();
@@ -212,9 +208,7 @@ describe("TP-6.6: syncQueues (F-75)", () => {
     const m = connectDatabase(pg, "budmon_migrator", TEST_ROLE_PASSWORDS.budmon_migrator, DATABASE);
     migrator = m;
     await applyRolesAndPrivileges(m.handle, testRoleSecrets(), "test", recordingLogger());
-    const { installOrUpgradeQueueSchema } = await s6.queueSchema();
     expect(await installOrUpgradeQueueSchema(m.handle)).toBe("installed");
-    const { createPgBoss } = await s6.workers();
     boss = createPgBoss(testWorkerConfig(pg, DATABASE, "general"), "general");
     await boss.start();
   }, 120_000);
@@ -231,7 +225,6 @@ describe("TP-6.6: syncQueues (F-75)", () => {
   }
 
   it("TP-6.6: sync creates the 2 queues and both dead-letter queues; again creates none; the options match", async () => {
-    const { syncQueues } = await s6.queueSync();
     const registry = registryOf([a, b]);
 
     const first = await syncQueues(started(), registry, recordingLogger());
@@ -264,8 +257,6 @@ describe("TP-6.6: syncQueues (F-75)", () => {
   });
 
   it("TP-6.6: a changed option is updated; a changed policy throws SchemaStepError queue_policy_changed", async () => {
-    const { syncQueues } = await s6.queueSync();
-
     await syncQueues(started(), registryOf([{ ...a, retryLimit: 4 }, b]), recordingLogger());
     expect(await started().getQueue("sync.a")).toMatchObject({ retryLimit: 4 });
 
@@ -282,7 +273,6 @@ describe("TP-6.6: syncQueues (F-75)", () => {
   });
 
   it("TP-6.6: a queue other.x created by hand is left alone, and queue_unregistered is logged through the passed logger (A-205)", async () => {
-    const { syncQueues } = await s6.queueSync();
     await started().createQueue("other.x", { policy: "standard", retryLimit: 9 });
     const logger = recordingLogger();
 

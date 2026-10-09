@@ -60,8 +60,8 @@ export async function buildWorkerContainer(
   const config = testWorkerConfig(testDb.endpoint, testDb.name, roles);
   const container = createWorkerContainer(config, {
     ...obs.overrides,
-    ...(overrides as unknown as Parameters<typeof createWorkerContainer>[1]),
-  }) as unknown as WorkerContainer;
+    ...overrides,
+  });
   return {
     container,
     testDb,

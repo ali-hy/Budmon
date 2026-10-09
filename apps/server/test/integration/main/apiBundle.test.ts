@@ -25,8 +25,9 @@ import {
   type FreshPostgres,
 } from "../../support/postgres.js";
 import { testApiConfigFor } from "../../support/api.js";
-import { jobRows, s6, waitFor, type PgBossLike } from "../../support/jobs.js";
+import { jobRows, waitFor, type PgBossLike } from "../../support/jobs.js";
 import { createTestDatabase, type TestDatabase } from "../../support/testDatabase.js";
+import { createPgBoss } from "../../../src/platform/queue/workers.js";
 
 const SERVER_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const REPO_ROOT = path.resolve(SERVER_DIR, "../..");
@@ -705,7 +706,6 @@ describe("TP-6.13, TP-6.15: the built worker with test jobs (fixture worker.mjs,
   beforeAll(async () => {
     testDb = await createTestDatabase("budmon_app");
     dir = mkdtempSync(path.join(tmpdir(), "budmon-worker-fixture-"));
-    const { createPgBoss } = await s6.workers();
     const b = createPgBoss(testApiConfigFor(testDb), "send-only");
     await b.start();
     boss = b;

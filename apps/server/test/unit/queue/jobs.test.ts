@@ -3,14 +3,17 @@
 import { CANARIES } from "@budmon/test-support";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { s6 } from "../../support/jobs.js";
+import { defineJob } from "../../../src/platform/queue/jobs.js";
+import {
+  UnsafeJobPayloadError,
+  assertPayloadSafe,
+} from "../../../src/platform/queue/payloadSafety.js";
+import { createJobRegistry } from "../../../src/platform/queue/registry.js";
 
 const payload = z.object({});
 
 describe("TP-6.1: defineJob (F-70)", () => {
-  it("TP-6.1: the defaults are retryLimit 5, retryDelaySeconds 30, retryBackoff true, expireInSeconds 900, policy standard", async () => {
-    const { defineJob } = await s6.jobs();
-
+  it("TP-6.1: the defaults are retryLimit 5, retryDelaySeconds 30, retryBackoff true, expireInSeconds 900, policy standard", () => {
     const def = defineJob({ name: "test.thing", role: "general", payload });
 
     expect(def).toMatchObject({
@@ -30,9 +33,7 @@ describe("TP-6.1: defineJob (F-70)", () => {
     ["the name Bad", { name: "Bad", role: "general" as const }],
     ["a cron on the capture role", { name: "test.c", role: "capture" as const, cron: "0 3 * * *" }],
     ["the cron '* *'", { name: "test.c", role: "general" as const, cron: "* *" }],
-  ])("TP-6.1: %s throws TypeError", async (_label, def) => {
-    const { defineJob } = await s6.jobs();
-
+  ])("TP-6.1: %s throws TypeError", (_label, def) => {
     expect(() => defineJob({ ...def, payload })).toThrow(TypeError);
   });
 });
@@ -40,25 +41,19 @@ describe("TP-6.1: defineJob (F-70)", () => {
 describe("TP-6.16x: defineJob, further cases (F-70)", () => {
   it.each([["platform"], ["a.B"], ["1a.b"], ["a.b.c"], ["a_b.c"], [""]])(
     "TP-6.16x: the name %j throws TypeError",
-    async (name) => {
-      const { defineJob } = await s6.jobs();
-
+    (name) => {
       expect(() => defineJob({ name, role: "general", payload })).toThrow(TypeError);
     },
   );
 
   it.each([["platform.idempotency-purge"], ["fx.gap-check"], ["a1.b-2"]])(
     "TP-6.16x: the name %j is accepted",
-    async (name) => {
-      const { defineJob } = await s6.jobs();
-
+    (name) => {
       expect(defineJob({ name, role: "general", payload }).name).toBe(name);
     },
   );
 
-  it("TP-6.16x: a general job with a 5-field cron keeps it; given options override the defaults", async () => {
-    const { defineJob } = await s6.jobs();
-
+  it("TP-6.16x: a general job with a 5-field cron keeps it; given options override the defaults", () => {
     const def = defineJob({
       name: "test.cron",
       role: "general",
@@ -73,9 +68,7 @@ describe("TP-6.16x: defineJob, further cases (F-70)", () => {
 });
 
 describe("TP-6.2: createJobRegistry (F-71)", () => {
-  it("TP-6.2: duplicate names throw TypeError", async () => {
-    const { defineJob } = await s6.jobs();
-    const { createJobRegistry } = await s6.registry();
+  it("TP-6.2: duplicate names throw TypeError", () => {
     const a = defineJob({ name: "test.a", role: "general", payload });
 
     expect(() =>
@@ -83,8 +76,7 @@ describe("TP-6.2: createJobRegistry (F-71)", () => {
     ).toThrow(TypeError);
   });
 
-  it("TP-6.2: a name starting with dead-letter. throws TypeError", async () => {
-    const { createJobRegistry } = await s6.registry();
+  it("TP-6.2: a name starting with dead-letter. throws TypeError", () => {
     // defineJob refuses the name already, so the definition is a literal.
     const dead = {
       name: "dead-letter.x",
@@ -100,8 +92,7 @@ describe("TP-6.2: createJobRegistry (F-71)", () => {
     expect(() => createJobRegistry([dead])).toThrow(TypeError);
   });
 
-  it("TP-6.2: deadLetterQueue('general') is dead-letter.general, and capture's dead-letter.capture", async () => {
-    const { createJobRegistry } = await s6.registry();
+  it("TP-6.2: deadLetterQueue('general') is dead-letter.general, and capture's dead-letter.capture", () => {
     const registry = createJobRegistry([]);
 
     expect(registry.deadLetterQueue("general")).toBe("dead-letter.general");
@@ -110,9 +101,7 @@ describe("TP-6.2: createJobRegistry (F-71)", () => {
 });
 
 describe("TP-6.16x: createJobRegistry, further cases (F-71)", () => {
-  it("TP-6.16x: all, forRole and get return the definitions; dead-letter queues aren't definitions", async () => {
-    const { defineJob } = await s6.jobs();
-    const { createJobRegistry } = await s6.registry();
+  it("TP-6.16x: all, forRole and get return the definitions; dead-letter queues aren't definitions", () => {
     const g = defineJob({ name: "test.g", role: "general", payload });
     const c = defineJob({ name: "test.c", role: "capture", payload });
 
@@ -128,9 +117,7 @@ describe("TP-6.16x: createJobRegistry, further cases (F-71)", () => {
 });
 
 describe("TP-6.3: assertPayloadSafe (F-72)", () => {
-  it("TP-6.3: {id: uuid, d: 2026-10-05, n: 3, ok: true} passes", async () => {
-    const { assertPayloadSafe } = await s6.payloadSafety();
-
+  it("TP-6.3: {id: uuid, d: 2026-10-05, n: 3, ok: true} passes", () => {
     expect(() => {
       assertPayloadSafe({
         id: "0190a0b0-1c2d-7e3f-8a4b-5c6d7e8f9a0b",
@@ -149,9 +136,7 @@ describe("TP-6.3: assertPayloadSafe (F-72)", () => {
     ["{a: [canary + ' x']}", { a: [`${CANARIES.payee} x`] }, "a.0", `${CANARIES.payee} x`],
   ])(
     "TP-6.3: %s throws UnsafeJobPayloadError with path %s and a message without the value",
-    async (_label, value, path, raw) => {
-      const { assertPayloadSafe, UnsafeJobPayloadError } = await s6.payloadSafety();
-
+    (_label, value, path, raw) => {
       let caught: unknown;
       try {
         assertPayloadSafe(value);
@@ -177,9 +162,7 @@ describe("TP-6.16x: assertPayloadSafe, further cases (F-72)", () => {
     ["an array of 100 scalars", { a: Array<number>(100).fill(1) }],
     ["one nested object", { a: { b: 1, c: "x", d: null } }],
     ["an empty object", {}],
-  ])("TP-6.16x: %s passes", async (_label, value) => {
-    const { assertPayloadSafe } = await s6.payloadSafety();
-
+  ])("TP-6.16x: %s passes", (_label, value) => {
     expect(() => {
       assertPayloadSafe(value);
     }).not.toThrow();
@@ -192,9 +175,7 @@ describe("TP-6.16x: assertPayloadSafe, further cases (F-72)", () => {
     ["an array holding an object", { a: [{ b: 1 }] }, "a.0"],
     ["a nested array of objects", { a: { b: [{ c: 1 }] } }, "a.b.0"],
     ["a string with /", { s: "a/b" }, "s"],
-  ])("TP-6.16x: %s throws with path %s", async (_label, value, path) => {
-    const { assertPayloadSafe, UnsafeJobPayloadError } = await s6.payloadSafety();
-
+  ])("TP-6.16x: %s throws with path %s", (_label, value, path) => {
     expect(() => {
       assertPayloadSafe(value);
     }).toThrow(UnsafeJobPayloadError);
@@ -210,9 +191,7 @@ describe("TP-6.16x: assertPayloadSafe, further cases (F-72)", () => {
     ["a string", "x"],
     ["null", null],
     ["a Date", new Date(0)],
-  ])("TP-6.16x: a payload that is %s, not a plain object, is refused", async (_label, value) => {
-    const { assertPayloadSafe, UnsafeJobPayloadError } = await s6.payloadSafety();
-
+  ])("TP-6.16x: a payload that is %s, not a plain object, is refused", (_label, value) => {
     expect(() => {
       assertPayloadSafe(value);
     }).toThrow(UnsafeJobPayloadError);

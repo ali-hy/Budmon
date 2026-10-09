@@ -15,7 +15,6 @@ import {
   TEST_JOBS,
   jobRows,
   registryOf,
-  s6,
   waitFor,
   type JobDefinition,
   type JobHandler,
@@ -23,12 +22,20 @@ import {
   type WorkerContainer,
 } from "../../support/jobs.js";
 import { createTestDatabase } from "../../support/testDatabase.js";
+import { createWorkerContainer } from "../../../src/platform/container.js";
 import {
   buildWorkerContainer,
   testWorkerConfig,
   testWorkerEnv,
   type BuiltWorker,
 } from "../../support/worker.js";
+import { listDeadLetters, redriveDeadLetter } from "../../../src/platform/queue/deadLetter.js";
+import { syncQueues } from "../../../src/platform/queue/queueSync.js";
+import {
+  MissingQueueError,
+  createPgBoss,
+  startWorkers,
+} from "../../../src/platform/queue/workers.js";
 
 function queueBoss(c: WorkerContainer): PgBossLike {
   return c.queueBoss ?? c.boss;
@@ -58,12 +65,12 @@ describe("TP-6.7: handler success and failure through a running worker (F-76)", 
     built = await buildWorkerContainer("general", {
       registry: registryOf([TEST_JOBS.ok, TEST_JOBS.fail]),
     });
-    const { startWorkers } = await s6.workers();
     const handlers = new Map<string, JobHandler>([
       [TEST_JOBS.ok.name, () => Promise.resolve({ secret: CANARIES.token })],
       [TEST_JOBS.fail.name, () => Promise.reject(new Error(CANARIES.message))],
     ]);
-    ({ stop } = await startWorkers(built.container, handlers));
+    const w = await startWorkers(built.container, handlers);
+    stop = () => w.stop();
   }, 60_000);
 
   afterAll(async () => {
@@ -98,7 +105,6 @@ describe("TP-6.7: handler success and failure through a running worker (F-76)", 
     expect(Object.keys(output ?? {}).sort()).toEqual(["message", "stack"]);
     expect(output?.["message"]).toBe("Error");
     expect(String(output?.["stack"]).startsWith("JobFailure: Error")).toBe(true);
-    const { listDeadLetters } = await s6.deadLetter();
     const dead = await listDeadLetters(queueBoss(c), "general");
     expect(dead.map((d) => [d.sourceName, d.sourceId])).toContainEqual([
       TEST_JOBS.fail.name,
@@ -124,8 +130,7 @@ describe("TP-6.7: attempts with retryLimit 2 (F-76, A-207)", () => {
 
   beforeAll(async () => {
     built = await buildWorkerContainer("general", { registry: registryOf([TEST_JOBS.fail3]) });
-    const { startWorkers } = await s6.workers();
-    ({ stop } = await startWorkers(
+    const w = await startWorkers(
       built.container,
       new Map<string, JobHandler>([
         [
@@ -136,7 +141,8 @@ describe("TP-6.7: attempts with retryLimit 2 (F-76, A-207)", () => {
           },
         ],
       ]),
-    ));
+    );
+    stop = () => w.stop();
   }, 60_000);
 
   afterAll(async () => {
@@ -165,11 +171,11 @@ describe("TP-6.8: worker-capture as budmon_capture (F-77)", () => {
 
   beforeAll(async () => {
     built = await buildWorkerContainer("capture", { registry: registryOf([TEST_JOBS.capture]) });
-    const { startWorkers } = await s6.workers();
-    ({ stop } = await startWorkers(
+    const w = await startWorkers(
       built.container,
       new Map<string, JobHandler>([[TEST_JOBS.capture.name, () => Promise.resolve(undefined)]]),
-    ));
+    );
+    stop = () => w.stop();
   }, 60_000);
 
   afterAll(async () => {
@@ -208,7 +214,7 @@ describe("TP-6.8: worker-capture as budmon_capture (F-77)", () => {
 });
 
 describe("TP-6.9: start-up checks and schedules (F-78)", () => {
-  const cron: JobDefinition = {
+  const cron: JobDefinition<unknown> = {
     name: "test.cron",
     role: "general",
     payload: z.object({}),
@@ -221,12 +227,11 @@ describe("TP-6.9: start-up checks and schedules (F-78)", () => {
   };
 
   it("TP-6.9: a registered job without a queue: startWorkers throws MissingQueueError", async () => {
-    const missing: JobDefinition = { ...TEST_JOBS.ok, name: "test.no-queue" };
+    const missing: JobDefinition<unknown> = { ...TEST_JOBS.ok, name: "test.no-queue" };
     const built = await buildWorkerContainer("general", {
       registry: registryOf([TEST_JOBS.ok, missing]),
     });
     try {
-      const { startWorkers, MissingQueueError } = await s6.workers();
       const handlers = new Map<string, JobHandler>([
         [TEST_JOBS.ok.name, () => Promise.resolve(undefined)],
         [missing.name, () => Promise.resolve(undefined)],
@@ -249,8 +254,6 @@ describe("TP-6.9: start-up checks and schedules (F-78)", () => {
   it("TP-6.19x: a definition without a handler: startWorkers throws 'no handler for <name>'", async () => {
     const built = await buildWorkerContainer("general", { registry: registryOf([TEST_JOBS.ok]) });
     try {
-      const { startWorkers } = await s6.workers();
-
       await expect(startWorkers(built.container, new Map())).rejects.toThrow(
         `no handler for ${TEST_JOBS.ok.name}`,
       );
@@ -262,8 +265,6 @@ describe("TP-6.9: start-up checks and schedules (F-78)", () => {
   it("TP-6.9: a general worker schedules its cron job in UTC; a capture-only worker registers no schedule", async () => {
     const registry = registryOf([TEST_JOBS.ok, TEST_JOBS.capture, cron]);
     const general = await buildWorkerContainer("general", { registry });
-    const { startWorkers } = await s6.workers();
-    const { syncQueues } = await s6.queueSync();
     const handlers = new Map<string, JobHandler>(
       [TEST_JOBS.ok, TEST_JOBS.capture, cron].map((d) => [
         d.name,
@@ -303,8 +304,6 @@ describe("TP-6.9: platform.fx-gap-check only when registered (F-78, A-203)", () 
   it("TP-6.9: a general worker whose registry has no platform.fx-gap-check starts, and nothing is enqueued under that name", async () => {
     const built = await buildWorkerContainer("general", { registry: registryOf([TEST_JOBS.ok]) });
     try {
-      const { startWorkers } = await s6.workers();
-
       const w = await startWorkers(
         built.container,
         new Map<string, JobHandler>([[TEST_JOBS.ok.name, () => Promise.resolve(undefined)]]),
@@ -324,7 +323,6 @@ describe("TP-6.11: dead-letter list and redrive (F-81)", () => {
 
   beforeAll(async () => {
     built = await buildWorkerContainer("general", { registry: registryOf([TEST_JOBS.fail]) });
-    const { startWorkers } = await s6.workers();
     const w = await startWorkers(
       built.container,
       new Map<string, JobHandler>([[TEST_JOBS.fail.name, () => Promise.reject(new Error("x"))]]),
@@ -345,7 +343,6 @@ describe("TP-6.11: dead-letter list and redrive (F-81)", () => {
   });
 
   it("TP-6.11: list gives 1 entry with failure 'Error'; redrive moves it back to its source queue; an unknown id moves 0", async () => {
-    const { listDeadLetters, redriveDeadLetter } = await s6.deadLetter();
     const boss = queueBoss(built.container);
 
     const dead = await listDeadLetters(boss, "general");
@@ -396,7 +393,6 @@ describe("TP-6.11: dead-letter list and redrive (F-81)", () => {
   }, 60_000);
 
   it("TP-6.11: (A-218) createPgBoss mode cli connects with the queue login as budmon-cli", async () => {
-    const { createPgBoss } = await s6.workers();
     const cfg = testWorkerConfig(built.testDb.endpoint, built.testDb.name, "general");
     const boss = (createPgBoss as (c: typeof cfg, mode: string) => PgBossLike)(cfg, "cli");
     await boss.start();
@@ -413,7 +409,6 @@ describe("TP-6.11: dead-letter list and redrive (F-81)", () => {
   });
 
   it("TP-6.19x: listDeadLetters without a role covers both roles; the capture list is empty", async () => {
-    const { listDeadLetters } = await s6.deadLetter();
     const boss = queueBoss(built.container);
 
     expect(await listDeadLetters(boss, "capture")).toEqual([]);
@@ -424,10 +419,7 @@ describe("TP-6.11: dead-letter list and redrive (F-81)", () => {
 describe("TP-6.14: createWorkerContainer's module defaults (F-96, A-26)", () => {
   it("TP-6.14: with no overrides: onGeneralStarted is [], erasureHandler is null, sealedColumns.all() is []", async () => {
     const testDb = await createTestDatabase();
-    const { createWorkerContainer } = await import("../../../src/platform/container.js");
-    const c = createWorkerContainer(
-      testWorkerConfig(testDb.endpoint, testDb.name, "general"),
-    ) as unknown as WorkerContainer;
+    const c = createWorkerContainer(testWorkerConfig(testDb.endpoint, testDb.name, "general"));
     try {
       expect(c.onGeneralStarted).toEqual([]);
       expect(c.erasureHandler).toBeNull();

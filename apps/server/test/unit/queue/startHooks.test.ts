@@ -4,8 +4,9 @@ import { CANARIES, scanForCanaries } from "@budmon/test-support";
 import { describe, expect, it, vi } from "vitest";
 import { createMemoryErrorReporter } from "../../../src/platform/observability/errorReporter.js";
 import { createLogger } from "../../../src/platform/observability/logger.js";
-import { s6, type WorkerRole } from "../../support/jobs.js";
+import { type WorkerRole } from "../../support/jobs.js";
 import { logCapture } from "../../support/telemetry.js";
+import { runGeneralStartHooks } from "../../../src/platform/queue/workers.js";
 
 function deps(roles: readonly WorkerRole[], hooks: (() => Promise<void>)[]) {
   const capture = logCapture();
@@ -29,7 +30,6 @@ function deps(roles: readonly WorkerRole[], hooks: (() => Promise<void>)[]) {
 
 describe("TP-6.14: runGeneralStartHooks (F-78b, A-26)", () => {
   it("TP-6.14: roles {general} and [h1, h2]: h1 then h2, each once", async () => {
-    const { runGeneralStartHooks } = await s6.workers();
     const order: string[] = [];
     const h1 = vi.fn(() => {
       order.push("h1");
@@ -47,7 +47,6 @@ describe("TP-6.14: runGeneralStartHooks (F-78b, A-26)", () => {
   });
 
   it("TP-6.14: roles {capture} and [h1]: no hook is called", async () => {
-    const { runGeneralStartHooks } = await s6.workers();
     const h1 = vi.fn(() => Promise.resolve());
 
     await runGeneralStartHooks(deps(["capture"], [h1]).c);
@@ -56,7 +55,6 @@ describe("TP-6.14: runGeneralStartHooks (F-78b, A-26)", () => {
   });
 
   it("TP-6.14: h1 rejecting with a canary: h2 still runs, one report, one worker_start_hook_failed line with step onGeneralStarted:0, no canary, resolves", async () => {
-    const { runGeneralStartHooks } = await s6.workers();
     const h1 = vi.fn(() => Promise.reject(new Error(CANARIES.message)));
     const h2 = vi.fn(() => Promise.resolve());
     const d = deps(["general"], [h1, h2]);
@@ -80,7 +78,6 @@ describe("TP-6.14: runGeneralStartHooks (F-78b, A-26)", () => {
   });
 
   it("TP-6.14: with both roles the hooks run; with no hooks it resolves", async () => {
-    const { runGeneralStartHooks } = await s6.workers();
     const h1 = vi.fn(() => Promise.resolve());
 
     await runGeneralStartHooks(deps(["capture", "general"], [h1]).c);

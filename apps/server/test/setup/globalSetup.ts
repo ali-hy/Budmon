@@ -108,7 +108,7 @@ export default async function setup(project: TestProject): Promise<() => Promise
   try {
     const mode = process.env["BUDMON_SCHEMA_MODE"] === "migrate" ? "migrate" : "push";
     // A-202: every production queue plus the test.* ones.
-    const registry = await templateJobRegistry();
+    const registry = templateJobRegistry();
     await runSchemaStep(schemaStepInput(migrator, mode, undefined, undefined, registry));
   } finally {
     await migrator.close();

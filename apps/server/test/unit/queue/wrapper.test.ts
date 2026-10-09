@@ -9,7 +9,8 @@ import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { BudmonError } from "../../../src/platform/errors/BudmonError.js";
 import { observed } from "../../support/api.js";
-import { s6, type JobDefinition } from "../../support/jobs.js";
+import { type JobDefinition } from "../../support/jobs.js";
+import { JobFailure, wrapHandler } from "../../../src/platform/queue/wrapper.js";
 
 const DEF: JobDefinition<{ n: number }> = {
   name: "test.wrapped",
@@ -22,21 +23,21 @@ const DEF: JobDefinition<{ n: number }> = {
   policy: "standard",
 };
 
-function fakeJob(data: unknown, retryCount = 0) {
+type WorkJob = Parameters<ReturnType<typeof wrapHandler>>[0][number];
+
+function fakeJob(data: unknown, retryCount = 0): WorkJob {
   return {
     id: "0190a0b0-1c2d-7e3f-8a4b-5c6d7e8f9a0b",
-    name: DEF.name,
-    data,
+    data: data as WorkJob["data"],
     retryCount,
     createdOn: new Date("2026-10-09T12:00:00Z"),
   };
 }
 
-async function wrapped(
+function wrapped(
   handler: (payload: { n: number }) => Promise<unknown>,
   def: JobDefinition<{ n: number }> = DEF,
 ) {
-  const { wrapHandler } = await s6.wrapper();
   const obs = observed();
   const run = wrapHandler(def, handler, {
     logger: obs.overrides.logger,
@@ -67,7 +68,7 @@ async function counterTotal(obs: ReturnType<typeof observed>, name: string): Pro
 describe("TP-6.17x: wrapHandler (F-76)", () => {
   it("TP-6.17x: the handler gets the parsed payload and a context; its return value is discarded", async () => {
     const handler = vi.fn(() => Promise.resolve({ secret: CANARIES.token }));
-    const { run } = await wrapped(handler);
+    const { run } = wrapped(handler);
 
     await expect(run([fakeJob({ n: 3 })])).resolves.toBeUndefined();
 
@@ -83,7 +84,7 @@ describe("TP-6.17x: wrapHandler (F-76)", () => {
   });
 
   it("TP-6.17x: a success records jobs_processed_total and job_duration_seconds", async () => {
-    const { run, obs } = await wrapped(() => Promise.resolve(undefined));
+    const { run, obs } = wrapped(() => Promise.resolve(undefined));
 
     await run([fakeJob({ n: 1 })]);
 
@@ -93,8 +94,7 @@ describe("TP-6.17x: wrapHandler (F-76)", () => {
   });
 
   it("TP-6.17x: a thrown Error becomes a JobFailure with message 'Error', frames only, no other own properties; job_failed is logged; it's reported", async () => {
-    const { JobFailure } = await s6.wrapper();
-    const { run, obs } = await wrapped(() =>
+    const { run, obs } = wrapped(() =>
       Promise.reject(Object.assign(new Error(CANARIES.message), { payee: CANARIES.payee })),
     );
 
@@ -121,7 +121,7 @@ describe("TP-6.17x: wrapHandler (F-76)", () => {
   });
 
   it("TP-6.17x: a BudmonError fails with its key and isn't reported", async () => {
-    const { run, obs } = await wrapped(() =>
+    const { run, obs } = wrapped(() =>
       Promise.reject(new BudmonError("CONFLICT", 409, "Conflict")),
     );
 
@@ -133,7 +133,7 @@ describe("TP-6.17x: wrapHandler (F-76)", () => {
 
   it("TP-6.17x: a payload that doesn't parse fails without calling the handler, and holds no data", async () => {
     const handler = vi.fn(() => Promise.resolve(undefined));
-    const { run, obs } = await wrapped(handler);
+    const { run, obs } = wrapped(handler);
 
     const failure = await failureOf(run([fakeJob({ n: CANARIES.payee })]));
 
@@ -144,11 +144,11 @@ describe("TP-6.17x: wrapHandler (F-76)", () => {
   });
 
   it("TP-6.17x: the last attempt's failure increments jobs_dead_lettered_total; an earlier one doesn't", async () => {
-    const first = await wrapped(() => Promise.reject(new Error("x")));
+    const first = wrapped(() => Promise.reject(new Error("x")));
     await failureOf(first.run([fakeJob({ n: 1 }, 0)]));
     expect(await counterTotal(first.obs, "jobs_dead_lettered_total")).toBe(0);
 
-    const last = await wrapped(() => Promise.reject(new Error("x")));
+    const last = wrapped(() => Promise.reject(new Error("x")));
     await failureOf(last.run([fakeJob({ n: 1 }, 1)]));
     expect(await counterTotal(last.obs, "jobs_dead_lettered_total")).toBe(1);
   });

@@ -1,17 +1,22 @@
 // F-80 platform maintenance jobs, through maintenanceHandlers(c) (A-210). TP-6.12 with A-193's
 // rate-limit purge, plus extra cases TP-6.20x. IDs ending in "x" are test-architect additions, not
 // LLD test-plan IDs.
+import { Temporal } from "@budmon/shared";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { s6, type JobContext, type JobHandler } from "../../support/jobs.js";
+import { type JobContext, type JobHandler } from "../../support/jobs.js";
 import { resetBetweenTests } from "../../support/testDatabase.js";
 import { buildWorkerContainer, type BuiltWorker } from "../../support/worker.js";
+import { buildHandlerMap } from "../../../src/platform/queue/handlers.js";
+import {
+  maintenanceHandlers,
+  platformMaintenanceJobs,
+} from "../../../src/platform/maintenance/maintenanceJobs.js";
 
 let built: BuiltWorker;
 let handlers: ReadonlyMap<string, JobHandler>;
 
 beforeAll(async () => {
   built = await buildWorkerContainer("general");
-  const { maintenanceHandlers } = await s6.maintenance();
   handlers = maintenanceHandlers(built.container);
 });
 
@@ -27,7 +32,7 @@ function context(): JobContext {
   return {
     jobId: "0190a0b0-1c2d-7e3f-8a4b-5c6d7e8f9a0b",
     attempt: 1,
-    createdOn: new Date(),
+    createdOn: Temporal.Now.instant(),
     logger: built.container.logger,
     signal: new AbortController().signal,
   };
@@ -103,10 +108,7 @@ describe("TP-6.12: maintenance purges (F-80)", () => {
 });
 
 describe("TP-6.20x: the maintenance definitions (F-80)", () => {
-  it("TP-6.20x: platformMaintenanceJobs has the three definitions (A-210); buildHandlerMap includes the maintenance handlers", async () => {
-    const { platformMaintenanceJobs } = await s6.maintenance();
-    const { buildHandlerMap } = await s6.handlers();
-
+  it("TP-6.20x: platformMaintenanceJobs has the three definitions (A-210); buildHandlerMap includes the maintenance handlers", () => {
     expect(platformMaintenanceJobs.map((d) => d.name).sort()).toEqual([
       "platform.exports-purge",
       "platform.idempotency-purge",
