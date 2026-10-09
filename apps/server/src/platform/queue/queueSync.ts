@@ -15,6 +15,8 @@ export async function syncQueues(
 ): Promise<{ created: number; updated: number }> {
   let created = 0;
   let updated = 0;
+  // Idempotent: a started instance is left as it is.
+  await boss.start();
 
   const deadLetters = new Set(ROLES.map((r) => registry.deadLetterQueue(r)));
   for (const name of deadLetters) {
@@ -51,7 +53,12 @@ export async function syncQueues(
   }
 
   for (const queue of await boss.getQueues()) {
-    if (registry.get(queue.name) === undefined && !deadLetters.has(queue.name)) {
+    // pg-boss's own queues (`__pgboss__send-it`, for schedules) aren't Budmon's.
+    if (
+      registry.get(queue.name) === undefined &&
+      !deadLetters.has(queue.name) &&
+      !queue.name.startsWith("__pgboss__")
+    ) {
       logger.warn("queue_unregistered", { queue: queue.name });
     }
   }

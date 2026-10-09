@@ -14,7 +14,13 @@ import type { JobDefinition } from "./jobs.js";
  * What pg-boss stores as a failed job's output: `message` (the sanitised key, code or class) and
  * `stack` (sanitised frames), and nothing else.
  */
-export class JobFailure extends Error {}
+export class JobFailure extends Error {
+  /** pg-boss serialises a failure with serialize-error, which uses toJSON when present: only
+   * these two fields are stored (otherwise `name` would be added). */
+  toJSON(): { message: string; stack: string | undefined } {
+    return { message: this.message, stack: this.stack };
+  }
+}
 // On the prototype, so a JobFailure has no own properties beyond message and stack.
 JobFailure.prototype.name = "JobFailure";
 

@@ -39,11 +39,15 @@ function asQueueRole(plan: string): string {
   const commit = /COMMIT;\s*$/;
   if (!begin.test(plan) || !commit.test(plan)) throw new Error("unexpected pg-boss plan shape");
   return [
-    // budmon_queue has no CREATE on the database; the migrator (its owner) creates the schema
-    // for it, so pg-boss's own CREATE SCHEMA IF NOT EXISTS is a no-op.
+    // budmon_queue has no CREATE on the database, and Postgres checks that privilege even for
+    // IF NOT EXISTS: the migrator (the database's owner) creates the schema for it, and pg-boss's
+    // own CREATE SCHEMA is removed from the plan.
     `CREATE SCHEMA IF NOT EXISTS ${SCHEMA} AUTHORIZATION budmon_queue;`,
     "SET LOCAL ROLE budmon_queue;",
-    plan.replace(begin, "").replace(commit, ""),
+    plan
+      .replace(begin, "")
+      .replace(commit, "")
+      .replace(`CREATE SCHEMA IF NOT EXISTS ${SCHEMA};`, ""),
     `GRANT USAGE ON SCHEMA ${SCHEMA} TO ${USERS};`,
     `GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA ${SCHEMA} TO ${USERS};`,
     `GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA ${SCHEMA} TO ${USERS};`,

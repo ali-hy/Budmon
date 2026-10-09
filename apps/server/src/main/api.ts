@@ -74,6 +74,7 @@ main().then(
   },
   (error: unknown) => {
     state.logger.error("startup_failed", describeFailure(error), error);
-    process.exitCode = 1;
+    // Started resources (the send-only pg-boss, A-209) would keep the process alive.
+    void withDeadline(() => getTelemetry().shutdown(), 2_000).then(() => process.exit(1));
   },
 );

@@ -4,9 +4,10 @@ import { readFileSync, realpathSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { isUuid } from "@budmon/shared";
 import { EXIT_CONFIG, loadConfigOrReport } from "../platform/config/startup.js";
-import { createWorkerContainer } from "../platform/container.js";
 import { describeFailure } from "../platform/observability/describeFailure.js";
+import { createLogger } from "../platform/observability/logger.js";
 import { listDeadLetters, redriveDeadLetter } from "../platform/queue/deadLetter.js";
+import { createPgBoss } from "../platform/queue/workers.js";
 import type { WorkerRole } from "../platform/queue/jobs.js";
 
 const EXIT_USAGE = 64;
@@ -62,9 +63,17 @@ export async function runCli(
     io.stderr,
   );
   if (config === null) return EXIT_CONFIG;
-  const container = createWorkerContainer(config);
+  const logger = createLogger({
+    service: "cli",
+    release: config.release,
+    level: config.logLevel,
+    appEnv: config.appEnv,
+    // stdout carries only the command's output.
+    destination: { write: (line: string) => process.stderr.write(line) },
+  });
+  // A-218: no supervision or schedules beside the real worker.
+  const boss = createPgBoss(config, "cli", logger);
   try {
-    const boss = container.boss;
     await boss.start();
     if (sub === "list") {
       const limit = limitText === undefined ? undefined : Number.parseInt(limitText, 10);
@@ -76,10 +85,10 @@ export async function runCli(
     io.stdout(JSON.stringify({ moved }));
     return moved === 1 ? 0 : 2;
   } catch (error) {
-    container.logger.error("cli_failed", describeFailure(error), error);
+    logger.error("cli_failed", describeFailure(error));
     return 1;
   } finally {
-    await container.close();
+    await boss.stop({ graceful: false });
   }
 }
 

@@ -2,6 +2,7 @@
 import { PgBoss } from "pg-boss";
 import type { Config } from "../config/schema.js";
 import type { WorkerContainer } from "../container.js";
+import { describeFailure } from "../observability/describeFailure.js";
 import type { Logger } from "../observability/logger.js";
 import { startHeartbeat } from "./heartbeat.js";
 import { wrapHandler, type JobContext } from "./wrapper.js";
@@ -21,16 +22,22 @@ export class MissingQueueError extends Error {
  */
 export function createPgBoss(
   cfg: Config,
-  mode: "send-only" | "capture" | "general",
+  mode: "send-only" | "capture" | "general" | "cli",
   logger?: Logger,
 ): PgBoss {
   const queue = cfg.worker?.queue;
-  if (mode === "general" && queue === undefined) {
-    throw new Error("a general pg-boss needs the queue login");
+  const queueLogin = mode === "general" || mode === "cli";
+  if (queueLogin && queue === undefined) {
+    throw new Error(`a ${mode} pg-boss needs the queue login`);
   }
   const login =
-    mode === "general" && queue !== undefined
-      ? { user: queue.user, password: queue.password.reveal(), max: queue.poolMax }
+    queueLogin && queue !== undefined
+      ? {
+          user: queue.user,
+          password: queue.password.reveal(),
+          // A-218: a one-off command needs only a small pool.
+          max: mode === "cli" ? 2 : queue.poolMax,
+        }
       : {
           user: cfg.db.user,
           password: cfg.db.password.reveal(),
@@ -52,9 +59,12 @@ export function createPgBoss(
     useListenNotify: false,
     supervise: mode === "general",
     schedule: mode === "general",
+    // The instance registry prunes with DELETE, which only the schema's owner (budmon_queue) has
+    // (F-74 grants budmon_app and budmon_capture SELECT, INSERT and UPDATE).
+    registerInstance: queueLogin,
   });
   boss.on("error", (error) => {
-    logger?.error("queue_error", {}, error);
+    logger?.error("queue_error", describeFailure(error), error);
   });
   return boss;
 }
@@ -85,7 +95,11 @@ export async function startWorkers(
   const stop = async (): Promise<void> => {
     heartbeat?.stop();
     clearInterval(depthTimer);
-    for (const boss of started) await boss.stop({ graceful: true, timeout: 30_000 });
+    // The pool stays open (close: false), so the container can still use the instance (for
+    // example dead-letter commands); container.close() closes it.
+    for (const boss of started) {
+      await boss.stop({ graceful: true, timeout: 30_000, close: false });
+    }
   };
   try {
     for (const { role, boss } of rolesBosses(c)) {
