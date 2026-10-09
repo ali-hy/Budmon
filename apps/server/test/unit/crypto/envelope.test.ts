@@ -245,6 +245,7 @@ describe("TP-8.5: the KMS unsealer (F-112)", () => {
     const plaintext = await createKmsCaptureUnsealer({
       client,
       metrics: observed().metrics,
+      configuredKeyVersion: KMS_VERSION,
     }).unseal(envelope, CTX);
 
     expect(plaintext).toEqual(Buffer.from("kms plaintext"));
@@ -261,7 +262,11 @@ describe("TP-8.5: the KMS unsealer (F-112)", () => {
   it("TP-8.5: a rejecting client is KmsUnavailableError and kms_errors_total 1", async () => {
     const obs = observed();
     const client = { asymmetricDecrypt: vi.fn(() => Promise.reject(new Error("UNAVAILABLE"))) };
-    const unsealer = createKmsCaptureUnsealer({ client, metrics: obs.metrics });
+    const unsealer = createKmsCaptureUnsealer({
+      client,
+      metrics: obs.metrics,
+      configuredKeyVersion: KMS_VERSION,
+    });
 
     const envelope = kmsEnvelope(Buffer.from("x"));
 
@@ -276,6 +281,7 @@ describe("TP-8.5: the KMS unsealer (F-112)", () => {
     const plaintext = await createKmsCaptureUnsealer({
       client: fakeKms("uint8array"),
       metrics: observed().metrics,
+      configuredKeyVersion: KMS_VERSION,
     }).unseal(envelope, CTX);
 
     expect(Buffer.from(plaintext)).toEqual(Buffer.from("uint8 plaintext"));
@@ -286,6 +292,7 @@ describe("TP-8.5: the KMS unsealer (F-112)", () => {
     const unsealer = createKmsCaptureUnsealer({
       client: fakeKms("string"),
       metrics: observed().metrics,
+      configuredKeyVersion: KMS_VERSION,
     });
 
     await expectCryptoError(() => unsealer.unseal(envelope, CTX), "KmsUnavailableError");
@@ -296,10 +303,24 @@ describe("TP-8.5: the KMS unsealer (F-112)", () => {
     const unsealer = createKmsCaptureUnsealer({
       client: fakeKms("missing"),
       metrics: observed().metrics,
+      configuredKeyVersion: KMS_VERSION,
     });
 
     await expectCryptoError(() => unsealer.unseal(envelope, CTX), "KmsUnavailableError");
   });
+
+  it.each([[""], ["local:1"]])(
+    'TP-8.5 (A-260): configuredKeyVersion %j throws TypeError("configured key version required")',
+    (configuredKeyVersion) => {
+      expect(() =>
+        createKmsCaptureUnsealer({
+          client: fakeKms(),
+          metrics: observed().metrics,
+          configuredKeyVersion,
+        }),
+      ).toThrow(new TypeError("configured key version required"));
+    },
+  );
 
   describe("TP-8.5 (A-258): the envelope's key version must be a version of the configured key", () => {
     const KEY = "projects/p/locations/l/keyRings/r/cryptoKeys";
@@ -355,7 +376,12 @@ describe("TP-8.5: the KMS unsealer (F-112)", () => {
     const client = fakeKms();
 
     await expectCryptoError(
-      () => createKmsCaptureUnsealer({ client, metrics: observed().metrics }).unseal(local, CTX),
+      () =>
+        createKmsCaptureUnsealer({
+          client,
+          metrics: observed().metrics,
+          configuredKeyVersion: KMS_VERSION,
+        }).unseal(local, CTX),
       "EnvelopeFormatError",
     );
     expect(client.asymmetricDecrypt).not.toHaveBeenCalled();
@@ -368,10 +394,11 @@ describe("TP-8.5: the KMS unsealer (F-112)", () => {
 
     await expectCryptoError(
       () =>
-        createKmsCaptureUnsealer({ client: fakeKms(), metrics: observed().metrics }).unseal(
-          envelope,
-          CTX,
-        ),
+        createKmsCaptureUnsealer({
+          client: fakeKms(),
+          metrics: observed().metrics,
+          configuredKeyVersion: KMS_VERSION,
+        }).unseal(envelope, CTX),
       "EnvelopeAuthError",
     );
   });
