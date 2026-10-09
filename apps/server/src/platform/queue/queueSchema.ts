@@ -66,6 +66,8 @@ const GRANTS: readonly string[] = [
   `GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA ${SCHEMA} TO ${USERS};`,
   `GRANT INSERT ON ${SCHEMA}.job_common TO budmon_app;`,
   `GRANT INSERT, UPDATE, DELETE ON ${SCHEMA}.job_common TO budmon_capture;`,
+  // A-228: failing a job inserts its dead-letter copy through the parent table.
+  `GRANT INSERT ON ${SCHEMA}.job TO budmon_capture;`,
   `ALTER DEFAULT PRIVILEGES IN SCHEMA ${SCHEMA} GRANT SELECT ON TABLES TO ${USERS};`,
   `ALTER DEFAULT PRIVILEGES IN SCHEMA ${SCHEMA} GRANT EXECUTE ON FUNCTIONS TO ${USERS};`,
 ];
