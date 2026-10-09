@@ -128,8 +128,8 @@ export async function createApiServer(
     api?.clientVersions ?? { minAndroid: 0, latestAndroid: 0, minWeb: 0 },
     c.metrics,
   );
-  // A-148, A-165, A-173: query and path strings become the integer, boolean or date the input schema
-  // declares, only for methods without a body; JSON bodies are never coerced.
+  // A-148, A-165, A-173, A-175: query and path strings become the integer, boolean or date the input schema
+  // declares, only for GET (HEAD is unsupported on /api/v1); bodies are never coerced.
   const converter = new ZodToJsonSchemaConverter();
   const coercer = new JsonSchemaCoercer();
   const inputJsonSchemas = new WeakMap<object, JsonSchema>();
@@ -140,7 +140,7 @@ export async function createApiServer(
   }): unknown => {
     const schema = options.procedure["~orpc"].inputSchema;
     const method = options.context.method;
-    if (typeof schema !== "object" || schema === null || (method !== "GET" && method !== "HEAD")) {
+    if (typeof schema !== "object" || schema === null || method !== "GET") {
       return options.input;
     }
     let json = inputJsonSchemas.get(schema);
