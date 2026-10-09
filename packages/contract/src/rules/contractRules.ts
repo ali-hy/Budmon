@@ -104,7 +104,8 @@ function allowedParameterSchema(doc: Json, schema: unknown): boolean {
   );
 }
 
-/** A-165: a path parameter of an operation with a body isn't coerced, so it must be a string. */
+/** A-165, A-173: a path parameter of an operation other than GET and HEAD isn't coerced, so it
+ * must be a string. */
 function stringParameterSchema(doc: Json, schema: unknown): boolean {
   const s = resolve(doc, schema);
   if (s === undefined || !types(s).includes("string")) return false;
@@ -174,7 +175,8 @@ export function checkContractRules(document: OpenAPIV3_1.Document): Violation[] 
         });
       }
 
-      if (method === "get" && op["requestBody"] !== undefined) {
+      // A-173: a DELETE takes path parameters only.
+      if ((method === "get" || method === "delete") && op["requestBody"] !== undefined) {
         violations.push({ rule: "R4", location: at(pointer, "requestBody") });
       }
       const parameters = Array.isArray(op["parameters"]) ? op["parameters"] : [];
@@ -190,8 +192,10 @@ export function checkContractRules(document: OpenAPIV3_1.Document): Violation[] 
         if (
           ((where === "query" || where === "path") &&
             !allowedParameterSchema(doc, parameter["schema"])) ||
+          (where === "query" && method === "delete") ||
           (where === "path" &&
-            op["requestBody"] !== undefined &&
+            method !== "get" &&
+            method !== "head" &&
             !stringParameterSchema(doc, parameter["schema"]))
         ) {
           violations.push({ rule: "R4", location: p });
