@@ -115,12 +115,35 @@ export const METRIC_ATTRIBUTE_ALLOWLIST: readonly string[] = [
 /** A-135: the shape a span name must have to be exported. */
 export const SPAN_NAME = /^[A-Za-z0-9_.:/{}* -]{1,120}$/;
 
-/** A-164: `@fastify/otel` names hook spans `<hook> - <handler or plugin name>`; plugin names have
- * no bounded alphabet, so only the hook name is kept (a deterministic rewrite, no drop). */
+const PG_DATABASE = /^[a-z0-9_]{1,63}$/;
+
+/**
+ * A-237: `instrumentation-pg` names query spans `pg.query:<first token or statement name>
+ * <database>`; the token can carry anything up to the first space (a newline, quoted text). The
+ * name is rebuilt from safe parts only: the token's leading letters upper-cased (else UNKNOWN)
+ * and the database when it has a plain name.
+ */
+function pgQueryName(name: string): string {
+  const rest = name.startsWith("pg.query:") ? name.slice("pg.query:".length) : name.slice(8);
+  const keyword = /^[A-Za-z]+/.exec(rest)?.[0].toUpperCase() ?? "UNKNOWN";
+  const space = rest.lastIndexOf(" ");
+  const database = space === -1 ? "" : rest.slice(space + 1);
+  return PG_DATABASE.test(database) ? `pg.query:${keyword} ${database}` : `pg.query:${keyword}`;
+}
+
+/** Deterministic rewrites of instrumentation-made names (no drop counted). */
 function spanName(span: ReadableSpan): string {
-  if (span.instrumentationScope.name !== "@fastify/otel") return span.name;
-  const separator = span.name.indexOf(" - ");
-  return separator === -1 ? span.name : span.name.slice(0, separator);
+  const scope = span.instrumentationScope.name;
+  // A-164: `@fastify/otel` names hook spans `<hook> - <handler or plugin name>`; plugin names
+  // have no bounded alphabet, so only the hook name is kept.
+  if (scope === "@fastify/otel") {
+    const separator = span.name.indexOf(" - ");
+    return separator === -1 ? span.name : span.name.slice(0, separator);
+  }
+  if (scope === "@opentelemetry/instrumentation-pg" && span.name.startsWith("pg.query")) {
+    return pgQueryName(span.name);
+  }
+  return span.name;
 }
 
 const IDENT_START = /[A-Za-z_\u0080-\uffff]/;
