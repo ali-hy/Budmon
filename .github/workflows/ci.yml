@@ -79,11 +79,14 @@ jobs:
         run: ./node_modules/.bin/tsx checkApiMinor.ts "$RUNNER_TEMP/base-openapi.json" "$GITHUB_WORKSPACE/packages/contract/openapi.json"
       - name: No breaking changes against the base branch (oasdiff)
         if: steps.base.outputs.exists == 'true'
-        uses: oasdiff/oasdiff-action/breaking@b9325c9e0a27ab65b0da3b766522cedec6be81dc # v0.1.18
-        with:
-          base: ${{ runner.temp }}/base-openapi.json
-          revision: packages/contract/openapi.json
-          fail-on: ERR
+        env:
+          OASDIFF_VERSION: 1.33.0
+          OASDIFF_SHA256: 43a4e328e2d13ba1552d760aa68d2485c75c5621f309f6ff64ae895188345247
+        run: |
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/oasdiff.tgz" "https://github.com/oasdiff/oasdiff/releases/download/v${OASDIFF_VERSION}/oasdiff_${OASDIFF_VERSION}_linux_amd64.tar.gz"
+          echo "${OASDIFF_SHA256}  $RUNNER_TEMP/oasdiff.tgz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/oasdiff.tgz" -C "$RUNNER_TEMP" oasdiff
+          "$RUNNER_TEMP/oasdiff" breaking "$RUNNER_TEMP/base-openapi.json" packages/contract/openapi.json --fail-on ERR --allow-external-refs=false --format githubactions
 
   migrations:
     name: migrations
