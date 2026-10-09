@@ -10,10 +10,9 @@ import type { Database } from "../../../src/platform/db/types.js";
 import type { JobQueue } from "../../../src/platform/queue/jobQueue.js";
 import { observed } from "../../support/api.js";
 import { recordingLogger } from "../../support/platform.js";
-import { s9, type RatesAddedPayload } from "../../support/s9.js";
+import { createFxService, RatesAddedPayload } from "../../../src/platform/fx/fxService.js";
 
-async function service() {
-  const { createFxService } = await s9.fxService();
+function service() {
   return createFxService({
     database: {} as Database,
     queue: {} as JobQueue,
@@ -37,9 +36,8 @@ function subscriber(role: "general" | "capture", payload: z.ZodType<RatesAddedPa
 }
 
 describe("TP-9.15: subscriber validation (F-132)", () => {
-  it("TP-9.15 (a): a subscriber with role capture throws TypeError", async () => {
-    const { RatesAddedPayload } = await s9.fxService();
-    const fx = await service();
+  it("TP-9.15 (a): a subscriber with role capture throws TypeError", () => {
+    const fx = service();
 
     expect(() => {
       fx.registerRatesAddedSubscriber(subscriber("capture", RatesAddedPayload));
@@ -47,9 +45,8 @@ describe("TP-9.15: subscriber validation (F-132)", () => {
     expect(fx.subscribers()).toEqual([]);
   });
 
-  it("TP-9.21x: a general subscriber with RatesAddedPayload is stored and listed", async () => {
-    const { RatesAddedPayload } = await s9.fxService();
-    const fx = await service();
+  it("TP-9.21x: a general subscriber with RatesAddedPayload is stored and listed", () => {
+    const fx = service();
     const def = subscriber("general", RatesAddedPayload);
 
     fx.registerRatesAddedSubscriber(def);
@@ -57,8 +54,8 @@ describe("TP-9.15: subscriber validation (F-132)", () => {
     expect(fx.subscribers()).toEqual([def]);
   });
 
-  it("TP-9.15 (b): a general subscriber with an equivalent payload schema, not RatesAddedPayload, throws TypeError", async () => {
-    const fx = await service();
+  it("TP-9.15 (b): a general subscriber with an equivalent payload schema, not RatesAddedPayload, throws TypeError", () => {
+    const fx = service();
     const other = z.object({
       rateDate: z.string(),
       affectedFrom: z.string(),
@@ -70,9 +67,7 @@ describe("TP-9.15: subscriber validation (F-132)", () => {
     }).toThrow(TypeError);
   });
 
-  it("TP-9.21x: RatesAddedPayload takes {rateDate, affectedFrom, affectedTo} with affectedTo nullable", async () => {
-    const { RatesAddedPayload } = await s9.fxService();
-
+  it("TP-9.21x: RatesAddedPayload takes {rateDate, affectedFrom, affectedTo} with affectedTo nullable", () => {
     expect(
       RatesAddedPayload.safeParse({
         rateDate: "2026-10-04",

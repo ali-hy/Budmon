@@ -13,16 +13,10 @@ import { TEST_FX_RATES_ADDED, templateJobRegistry } from "../../support/jobs.js"
 import { query } from "../../support/postgres.js";
 import { recordingLogger } from "../../support/platform.js";
 import { buildWorkerContainer, type BuiltWorker } from "../../support/worker.js";
-import {
-  fakeProvider,
-  fxOf,
-  fxOverrides,
-  queuedJobs,
-  s9,
-  storeDay,
-  storedRates,
-  type FxProvider,
-} from "../../support/s9.js";
+import { fxGapCheck } from "../../../src/platform/fx/fxJobs.js";
+import { RatesAddedPayload } from "../../../src/platform/fx/fxService.js";
+import { type FxProvider, FxProviderError } from "../../../src/platform/fx/providers.js";
+import { fakeProvider, queuedJobs, storeDay, storedRates } from "../../support/s9.js";
 
 const FETCH = "platform.fx-rates-fetch";
 const BACKFILL = "platform.fx-backfill";
@@ -38,7 +32,7 @@ async function worker(now: string, primary: FxProvider, fallback: FxProvider) {
   built = await buildWorkerContainer("general", {
     clock: fixedClock(now),
     registry: templateJobRegistry(),
-    ...fxOverrides({ fxProviders: { primary, fallback } }),
+    fxProviders: { primary, fallback },
   });
   // Enqueueing needs the container's pg-boss started (no workers run here, A-271).
   await built.container.boss.start();
@@ -69,19 +63,16 @@ function events(b: BuiltWorker, event: string): Record<string, unknown>[] {
 }
 
 const rates = (r: Record<string, string>) => () => Promise.resolve(new Map(Object.entries(r)));
-const failWith =
-  (reason: "not_found" | "http" | "network" | "invalid", status?: number) => async () => {
-    const { FxProviderError } = await s9.providers();
-    throw new FxProviderError(reason, status);
-  };
+const failWith = (reason: "not_found" | "http" | "network" | "invalid", status?: number) => () => {
+  throw new FxProviderError(reason, status);
+};
 
 describe("TP-9.9: the daily fetch and the rates-added fan-out (F-137, F-138)", () => {
   it("TP-9.9: at 2026-10-05T00:30Z the fetch stores 2026-10-04 from openexchangerates, enqueues one subscriber job {2026-10-04, 2026-10-04, 2026-10-06} in the same transaction, and a second run doesn't fetch", async () => {
-    const { RatesAddedPayload } = await s9.fxService();
     const primary = fakeProvider("openexchangerates", rates({ EGP: "48.5", JPY: "149.25" }));
     const fallback = fakeProvider("fawazahmed0", rates({}));
     const b = await worker("2026-10-05T00:30:00Z", primary, fallback);
-    fxOf(b.container).registerRatesAddedSubscriber({
+    b.container.fx.registerRatesAddedSubscriber({
       ...TEST_FX_RATES_ADDED,
       payload: RatesAddedPayload,
     });
@@ -130,10 +121,9 @@ describe("TP-9.9: the daily fetch and the rates-added fan-out (F-137, F-138)", (
   });
 
   it("TP-9.21x: fx_rates_fetched_total{provider} +1 and one fx_day_stored line {rateDate, provider, inserted, rejected}; affectedTo is null with no later day", async () => {
-    const { RatesAddedPayload } = await s9.fxService();
     const primary = fakeProvider("openexchangerates", rates({ EGP: "48.5", JPY: "149.25" }));
     const b = await worker("2026-10-05T00:30:00Z", primary, fakeProvider("fawazahmed0", rates({})));
-    fxOf(b.container).registerRatesAddedSubscriber({
+    b.container.fx.registerRatesAddedSubscriber({
       ...TEST_FX_RATES_ADDED,
       payload: RatesAddedPayload,
     });
@@ -185,7 +175,6 @@ describe("TP-9.10: the fallback after 6 hours (F-137)", () => {
   });
 
   it("TP-9.21x: at 5 h 59 min the primary is still used, and its failure throws for a retry", async () => {
-    const { FxProviderError } = await s9.providers();
     const primary = fakeProvider("openexchangerates", failWith("http", 500));
     const fallback = fakeProvider("fawazahmed0", rates({ EGP: "48.6" }));
     const b = await worker("2026-10-05T06:29:00Z", primary, fallback);
@@ -199,7 +188,6 @@ describe("TP-9.10: the fallback after 6 hours (F-137)", () => {
 
 describe("TP-9.11: bad provider data (F-137)", () => {
   it("TP-9.11: EGP valid, XAU (not in the table), ZWL inactive, EUR 0, GBP abc: only EGP stored, fx_rates_rejected_total 2; a provider with only invalid values throws FxProviderError(invalid) and stores nothing", async () => {
-    const { FxProviderError } = await s9.providers();
     let answer: Record<string, string> = {
       EGP: "48.5",
       XAU: "0.0005",
@@ -273,7 +261,6 @@ describe("TP-9.14: backfill (F-137)", () => {
   });
 
   it("TP-9.21x: a stored day completes without fetching; another provider error throws for a retry", async () => {
-    const { FxProviderError } = await s9.providers();
     const fallback = fakeProvider("fawazahmed0", failWith("http", 503));
     const b = await worker(
       "2026-10-05T12:00:00Z",
@@ -294,7 +281,6 @@ describe("TP-9.14: backfill (F-137)", () => {
 
 describe("TP-9.19: the gap check (F-139)", () => {
   async function gapCheck(latest: string | null) {
-    const { fxGapCheck } = await s9.fxJobs();
     const b = await worker(
       "2026-10-07T10:00:00Z",
       fakeProvider("openexchangerates", rates({})),

@@ -2,7 +2,13 @@
 // TP-9.21x. IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { describe, expect, it, vi } from "vitest";
 import { Secret } from "../../../src/platform/observability/redaction.js";
-import { s9, type FxProviderErrorReason } from "../../support/s9.js";
+import {
+  createFawazahmed0,
+  createFixedProvider,
+  createOpenExchangeRates,
+  FxProviderError,
+  type FxProviderErrorReason,
+} from "../../../src/platform/fx/providers.js";
 
 const DATE = "2026-10-04";
 const APP_ID = "oxr-app-id-7f3a";
@@ -34,8 +40,7 @@ async function failure(
 }
 
 describe("TP-9.12: Open Exchange Rates (F-133)", () => {
-  async function oxr(respond: () => Promise<Response>) {
-    const { createOpenExchangeRates } = await s9.providers();
+  function oxr(respond: () => Promise<Response>) {
     const fetchImpl = vi.fn<typeof fetch>(respond);
     const provider = createOpenExchangeRates(
       { baseUrl: new URL("https://oxr.example/api"), appId: Secret.of(APP_ID) },
@@ -45,7 +50,7 @@ describe("TP-9.12: Open Exchange Rates (F-133)", () => {
   }
 
   it("TP-9.12: 200 gives the rates as exact strings; the URL is /historical/<date>.json with app_id and base=USD", async () => {
-    const { provider, fetchImpl } = await oxr(() =>
+    const { provider, fetchImpl } = oxr(() =>
       Promise.resolve(
         text(200, '{"base":"USD","rates":{"EGP":48.123456789012345,"EUR":0.92,"JPY":149.25}}'),
       ),
@@ -91,8 +96,7 @@ describe("TP-9.12: Open Exchange Rates (F-133)", () => {
   ];
 
   it.each(cases)("TP-9.12: %s is FxProviderError %s", async (_label, respond, reason, status) => {
-    const { FxProviderError } = await s9.providers();
-    const { provider } = await oxr(respond);
+    const { provider } = oxr(respond);
 
     const error = await failure(() => provider.fetchDay(DATE, new AbortController().signal));
 
@@ -111,7 +115,7 @@ describe("TP-9.12: Open Exchange Rates (F-133)", () => {
   it.each(cases)(
     "TP-9.12: %s: the error carries no app_id or query string",
     async (_label, respond) => {
-      const { provider } = await oxr(respond);
+      const { provider } = oxr(respond);
 
       const error = await failure(() => provider.fetchDay(DATE, new AbortController().signal));
 
@@ -130,8 +134,7 @@ describe("TP-9.13: fawazahmed0 (F-133)", () => {
   const BASE = "https://cdn.example/npm/@fawazahmed0/currency-api@{date}/v1";
   const MIRROR = "https://{date}.currency-api.example/v1";
 
-  async function fawaz(...responses: (() => Promise<Response>)[]) {
-    const { createFawazahmed0 } = await s9.providers();
+  function fawaz(...responses: (() => Promise<Response>)[]) {
     let n = 0;
     const fetchImpl = vi.fn<typeof fetch>(() => {
       const respond = responses[Math.min(n, responses.length - 1)];
@@ -146,7 +149,7 @@ describe("TP-9.13: fawazahmed0 (F-133)", () => {
     Promise.resolve(text(200, `{"date":"${DATE}","usd":{"egp":48.5,"eur":0.92,"jpy":149.25}}`));
 
   it("TP-9.13: primary 503 then mirror 200: the mirror is used and codes are upper-cased", async () => {
-    const { provider, fetchImpl } = await fawaz(() => Promise.resolve(json(503, {})), ok);
+    const { provider, fetchImpl } = fawaz(() => Promise.resolve(json(503, {})), ok);
 
     const rates = await provider.fetchDay(DATE, new AbortController().signal);
 
@@ -168,10 +171,7 @@ describe("TP-9.13: fawazahmed0 (F-133)", () => {
   });
 
   it("TP-9.21x: a primary network error also retries once on the mirror", async () => {
-    const { provider, fetchImpl } = await fawaz(
-      () => Promise.reject(new TypeError("fetch failed")),
-      ok,
-    );
+    const { provider, fetchImpl } = fawaz(() => Promise.reject(new TypeError("fetch failed")), ok);
 
     await provider.fetchDay(DATE, new AbortController().signal);
 
@@ -179,7 +179,7 @@ describe("TP-9.13: fawazahmed0 (F-133)", () => {
   });
 
   it("TP-9.21x: a primary 200 doesn't touch the mirror", async () => {
-    const { provider, fetchImpl } = await fawaz(ok);
+    const { provider, fetchImpl } = fawaz(ok);
 
     await provider.fetchDay(DATE, new AbortController().signal);
 
@@ -194,8 +194,7 @@ describe("TP-9.13: fawazahmed0 (F-133)", () => {
     ],
     ["404", () => Promise.resolve(json(404, {})), "not_found"],
   ])("TP-9.13: %s is FxProviderError %s", async (_label, respond, reason) => {
-    const { FxProviderError } = await s9.providers();
-    const { provider, fetchImpl } = await fawaz(respond);
+    const { provider, fetchImpl } = fawaz(respond);
 
     const error = await failure(() => provider.fetchDay(DATE, new AbortController().signal));
 
@@ -207,7 +206,6 @@ describe("TP-9.13: fawazahmed0 (F-133)", () => {
 
 describe("TP-9.21x: the fixed provider (F-133)", () => {
   it("TP-9.21x: returns the seven fixed rates for any date", async () => {
-    const { createFixedProvider } = await s9.providers();
     const provider = createFixedProvider();
 
     const rates = await provider.fetchDay("2020-01-01", new AbortController().signal);

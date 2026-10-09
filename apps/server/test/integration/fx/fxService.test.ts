@@ -11,15 +11,17 @@ import { withTransaction } from "../../../src/platform/db/transaction.js";
 import { observed } from "../../support/api.js";
 import { TEST_FX_RATES_ADDED, TEST_JOBS, registryOf } from "../../support/jobs.js";
 import { buildWorkerContainer, testWorkerConfig, type BuiltWorker } from "../../support/worker.js";
+import { insertDay } from "../../../src/platform/fx/fxRepo.js";
 import {
-  queuedJobs,
-  s9,
-  storeDay,
-  fxOverrides,
-  storedRates,
   type ConversionResult,
+  createFxService,
+  FX_FALLBACK_FIRST_DATE,
   type FxService,
-} from "../../support/s9.js";
+  RatesAddedPayload,
+  UnknownCurrencyError,
+} from "../../../src/platform/fx/fxService.js";
+import * as repo from "../../../src/platform/fx/fxRepo.js";
+import { queuedJobs, storeDay, storedRates } from "../../support/s9.js";
 
 const USD = asCurrencyCode("USD");
 const EGP = asCurrencyCode("EGP");
@@ -29,8 +31,7 @@ const BACKFILL = "platform.fx-backfill";
 
 const day = (d: string) => Temporal.PlainDate.from(d);
 
-async function serviceOn(built: BuiltWorker, now: string): Promise<FxService> {
-  const { createFxService } = await s9.fxService();
+function serviceOn(built: BuiltWorker, now: string): FxService {
   const c = built.container;
   return createFxService({
     database: c.database,
@@ -56,7 +57,7 @@ describe("TP-9.2 to TP-9.4, TP-9.6 to TP-9.8: conversion on one stored day (F-13
     await built.container.boss.start();
     // Day 2026-10-04: EGP 48.5, JPY 149.25 (no KWD, TP-9.6).
     await storeDay(built.testDb, "2026-10-04", { EGP: "48.5", JPY: "149.25" });
-    fx = await serviceOn(built, "2026-10-05T12:00:00Z");
+    fx = serviceOn(built, "2026-10-05T12:00:00Z");
   }, 60_000);
 
   afterAll(async () => {
@@ -107,16 +108,12 @@ describe("TP-9.2 to TP-9.4, TP-9.6 to TP-9.8: conversion on one stored day (F-13
   });
 
   it("TP-9.7: converting to ZZZ (a valid code, not in the table) throws UnknownCurrencyError", async () => {
-    const { UnknownCurrencyError } = await s9.fxService();
-
     await expect(
       fx.convert(Money.of(100n, USD), asCurrencyCode("ZZZ"), day("2026-10-04")),
     ).rejects.toBeInstanceOf(UnknownCurrencyError);
   });
 
   it("TP-9.21x: converting from ZZZ throws UnknownCurrencyError too", async () => {
-    const { UnknownCurrencyError } = await s9.fxService();
-
     await expect(
       fx.convert(Money.of(100n, asCurrencyCode("ZZZ")), USD, day("2026-10-04")),
     ).rejects.toBeInstanceOf(UnknownCurrencyError);
@@ -186,7 +183,7 @@ describe("TP-9.5: no stored day (F-132)", () => {
   });
 
   it("TP-9.5: on an empty table, a future date is no_rate/no_day and enqueues nothing", async () => {
-    const fx = await serviceOn(built, "2026-10-05T12:00:00Z");
+    const fx = serviceOn(built, "2026-10-05T12:00:00Z");
 
     const r = await fx.convert(Money.of(100n, USD), EGP, day("2026-10-10"));
 
@@ -195,10 +192,9 @@ describe("TP-9.5: no stored day (F-132)", () => {
   });
 
   it("TP-9.5: first stored day 2026-10-01: 2025-01-10 inside a rolled-back transaction is no_rate/no_day and its backfill job survives the rollback; 2024-01-01 (before the floor) enqueues nothing", async () => {
-    const { FX_FALLBACK_FIRST_DATE } = await s9.fxService();
     expect(FX_FALLBACK_FIRST_DATE).toBe("2024-03-02");
     await storeDay(built.testDb, "2026-10-01", { EGP: "48.5" });
-    const fx = await serviceOn(built, "2026-10-05T12:00:00Z");
+    const fx = serviceOn(built, "2026-10-05T12:00:00Z");
     let inside: ConversionResult | undefined;
 
     await withTransaction(built.container.database, async (tx) => {
@@ -217,7 +213,7 @@ describe("TP-9.5: no stored day (F-132)", () => {
   });
 
   it("TP-9.21x: converting 2025-01-10 again doesn't add a second backfill job (singletonKey)", async () => {
-    const fx = await serviceOn(built, "2026-10-05T12:00:00Z");
+    const fx = serviceOn(built, "2026-10-05T12:00:00Z");
 
     await fx.convert(Money.of(100n, USD), EGP, day("2025-01-10"));
 
@@ -243,7 +239,7 @@ describe("TP-9.5b: a provisional past date enqueues a backfill (F-132, S-1)", ()
   });
 
   it("TP-9.5b: 2026-09-30 and 2026-10-04 are both provisional; a backfill for 2026-09-30 only (2026-10-04 is today − 1, the daily job is due)", async () => {
-    const fx = await serviceOn(built, "2026-10-05T12:00:00Z");
+    const fx = serviceOn(built, "2026-10-05T12:00:00Z");
 
     const older = converted(await fx.convert(Money.of(100n, USD), EGP, day("2026-09-30")));
     const recent = converted(await fx.convert(Money.of(100n, USD), EGP, day("2026-10-04")));
@@ -272,7 +268,6 @@ describe("TP-9.16: stored days are final (F-131)", () => {
   });
 
   it("TP-9.16: insertDay again for a stored day with different values returns 0 and leaves the values unchanged", async () => {
-    const { insertDay } = await s9.fxRepo();
     const h = built.container.database.handle;
 
     const first = await insertDay(
@@ -315,7 +310,6 @@ describe("TP-9.16: stored days are final (F-131)", () => {
   });
 
   it("TP-9.21x: the other repo reads: latest day on or before, next day after, day exists, rates on a day, currencies", async () => {
-    const repo = await s9.fxRepo();
     const h = built.container.database.handle;
     await storeDay(built.testDb, "2026-10-07", { EGP: "48.7" });
 
@@ -350,8 +344,7 @@ describe("TP-9.15 (c): subscribers must be in the job registry (F-96, A-266)", (
   });
 
   it("TP-9.15 (c): a general RatesAddedPayload subscriber missing from the registry makes createWorkerContainer throw TypeError naming it", async () => {
-    const { RatesAddedPayload } = await s9.fxService();
-    const fx = await serviceOn(built, "2026-10-05T12:00:00Z");
+    const fx = serviceOn(built, "2026-10-05T12:00:00Z");
     fx.registerRatesAddedSubscriber({ ...TEST_FX_RATES_ADDED, payload: RatesAddedPayload });
     let made: { close(): Promise<void> } | undefined;
 
@@ -361,7 +354,7 @@ describe("TP-9.15 (c): subscribers must be in the job registry (F-96, A-266)", (
         {
           ...observed().overrides,
           registry: registryOf([TEST_JOBS.ok]),
-          ...fxOverrides({ fx }),
+          fx,
         },
       );
     };
