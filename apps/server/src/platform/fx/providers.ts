@@ -1,7 +1,7 @@
 // F-133: FX providers. They log nothing (A-268). Each returns upper-case code → the rate's exact decimal text. Errors carry
 // only a reason and an HTTP status, never the URL (which holds Open Exchange Rates' app_id).
 import type { Secret } from "../observability/redaction.js";
-import { parseJsonKeepingNumberText } from "./decimal.js";
+import { JsonNumber, parseJsonKeepingNumberText } from "./decimal.js";
 
 export type FxProviderName = "openexchangerates" | "fawazahmed0" | "fixed";
 export type FxProviderErrorReason = "not_found" | "http" | "network" | "invalid";
@@ -63,15 +63,16 @@ async function bodyOf(response: Response): Promise<Record<string, unknown>> {
   return parsed as Record<string, unknown>;
 }
 
-/** `{ code: number }` (numbers already as their text) → a map with upper-case codes. */
+/** `{ code: number }` → upper-case code → the number's source text. A-281: every rate must be a
+ * JSON number, else the whole body is invalid. */
 function ratesOf(value: unknown): Map<string, string> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new FxProviderError("invalid");
   }
   const out = new Map<string, string>();
   for (const [code, rate] of Object.entries(value)) {
-    if (typeof rate !== "string") throw new FxProviderError("invalid");
-    out.set(code.toUpperCase(), rate);
+    if (!(rate instanceof JsonNumber)) throw new FxProviderError("invalid");
+    out.set(code.toUpperCase(), rate.source);
   }
   return out;
 }

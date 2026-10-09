@@ -18,6 +18,11 @@ export interface JobDefinition<P> {
   readonly cron?: string;
   /** A-227: a general job that worker-capture may enqueue (F-75b's INSERT policy). */
   readonly sendableFromCapture?: boolean;
+  /**
+   * A-283: the payload field capture's rows must use as their singleton key (with `created` state
+   * and the queue's policy), pinned by F-75b's INSERT policy. Only with `sendableFromCapture`.
+   */
+  readonly captureSingletonKeyField?: string;
 }
 
 /** `<module>.<job>`, the same rule as F-30's job names. */

@@ -1,13 +1,18 @@
-// F-130: provider decimal parsing. Numbers keep their exact source text; rates are normalised to
-// 12 decimal places through F-300.
+// F-130: provider decimal parsing. Numbers keep their exact source text, wrapped so they stay
+// distinguishable from strings (A-281); rates are normalised to 12 decimal places through F-300.
 import { parseDecimal, toFixedDecimalString, type Rational } from "@budmon/shared";
+
+/** A JSON number, as its exact source text. */
+export class JsonNumber {
+  constructor(readonly source: string) {}
+}
 
 type Reviver = (key: string, value: unknown, context: { source: string }) => unknown;
 
-/** `JSON.parse` where every number becomes its exact source text. */
+/** `JSON.parse` where every number becomes a `JsonNumber` of its exact source text. */
 export function parseJsonKeepingNumberText(text: string): unknown {
   const reviver: Reviver = (_key, value, context) =>
-    typeof value === "number" ? context.source : value;
+    typeof value === "number" ? new JsonNumber(context.source) : value;
   return JSON.parse(text, reviver as (key: string, value: unknown) => unknown);
 }
 

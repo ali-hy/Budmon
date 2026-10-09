@@ -44,6 +44,8 @@ export const fxBackfillJob = defineJob({
   policy: "short",
   // F-96: fx is built for worker-capture too, and its conversions may enqueue backfills.
   sendableFromCapture: true,
+  // A-283: capture's rows must be keyed by their date (one queued backfill per date).
+  captureSingletonKeyField: "rateDate",
 });
 
 export const fxGapCheckJob = defineJob({
@@ -111,7 +113,8 @@ async function storeDayFrom(
   const fetchedAt = new Date(deps.clock.now().epochMilliseconds);
   const inserted = await withTransaction(deps.database, async (tx) => {
     const count = await insertDay(tx, rows, rateDate, provider.name, fetchedAt);
-    await enqueueRatesAdded(tx, deps.fx, deps.queue, rateDate);
+    // A-282: a racing fetch or backfill that inserted nothing doesn't notify again.
+    if (count > 0) await enqueueRatesAdded(tx, deps.fx, deps.queue, rateDate);
     return count;
   });
   deps.metrics.fxRatesFetched.add(1, { provider: provider.name });

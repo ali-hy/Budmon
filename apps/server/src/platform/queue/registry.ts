@@ -17,6 +17,9 @@ export function createJobRegistry(defs: readonly JobDefinition<unknown>[]): JobR
       throw new TypeError(`job names can't start with ${DEAD_LETTER_PREFIX}: ${def.name}`);
     }
     if (byName.has(def.name)) throw new TypeError(`duplicate job: ${def.name}`);
+    if (def.captureSingletonKeyField !== undefined && def.sendableFromCapture !== true) {
+      throw new TypeError(`captureSingletonKeyField needs sendableFromCapture: ${def.name}`);
+    }
     byName.set(def.name, def);
   }
   const all = [...defs];

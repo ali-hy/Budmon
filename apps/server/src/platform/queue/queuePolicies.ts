@@ -18,8 +18,32 @@ const POLICIES = [
 ] as const;
 
 /** A SQL array literal of queue names (names follow F-70's pattern; quotes are doubled anyway). */
+function literal(value: string): string {
+  return `'${value.replaceAll("'", "''")}'`;
+}
+
+/**
+ * A-283: for each sendable general queue with `captureSingletonKeyField`, capture's rows must be
+ * `created`, carry the queue's policy, and take their singleton key from that payload field.
+ */
+function capturePins(registry: JobRegistry, self: string): string {
+  return registry
+    .forRole("general")
+    .filter((d) => d.sendableFromCapture === true && d.captureSingletonKeyField !== undefined)
+    .map((d) => {
+      const n = literal(d.name);
+      const field = literal(d.captureSingletonKeyField as string);
+      return (
+        ` AND (${self}.name <> ${n} OR (${self}.state = 'created'` +
+        ` AND ${self}.policy IS NOT DISTINCT FROM (SELECT q.policy FROM pgboss.queue q WHERE q.name = ${n})` +
+        ` AND ${self}.singleton_key IS NOT DISTINCT FROM ${self}.data->>${field}))`
+      );
+    })
+    .join("");
+}
+
 function nameArray(names: readonly string[]): string {
-  const items = [...new Set(names)].sort().map((n) => `'${n.replaceAll("'", "''")}'`);
+  const items = [...new Set(names)].sort().map(literal);
   return `ARRAY[${items.join(", ")}]::text[]`;
 }
 
@@ -49,7 +73,7 @@ export function queuePolicyStatements(registry: JobRegistry): string[] {
       `ALTER TABLE ${table} ENABLE ROW LEVEL SECURITY;`,
       ...POLICIES.map((p) => `DROP POLICY IF EXISTS ${p} ON ${table};`),
       `CREATE POLICY capture_select ON ${table} FOR SELECT TO budmon_capture USING (name = ANY(${visible}));`,
-      `CREATE POLICY capture_insert ON ${table} FOR INSERT TO budmon_capture WITH CHECK (name = ANY(${visible}) AND ${routing});`,
+      `CREATE POLICY capture_insert ON ${table} FOR INSERT TO budmon_capture WITH CHECK (name = ANY(${visible}) AND ${routing}${capturePins(registry, self)});`,
       `CREATE POLICY capture_update ON ${table} FOR UPDATE TO budmon_capture USING (name = ANY(${own})) WITH CHECK (name = ANY(${own}) AND ${routing});`,
       `CREATE POLICY capture_delete ON ${table} FOR DELETE TO budmon_capture USING (name = ANY(${own}));`,
       `CREATE POLICY app_select ON ${table} FOR SELECT TO budmon_app USING (true);`,
