@@ -2,7 +2,7 @@
 module: platform
 doc: lld
 status: approved # draft | in-review | approved
-version: 0.65
+version: 0.66
 hld_version: 1.3
 author: planner
 approved_by: the user (project owner), delegated auto-approval
@@ -131,6 +131,7 @@ Nothing in that list changes application code (D-29 rule 2).
 | 0.63    | 2026-10-09 | Implementation-time amendment A-237 (S-6 QA D-1): F-40 rebuilds `pg.query` span names from the leading SQL keyword and the database name, an expected rewrite with no drop counted. Tests: TP-3.7, TP-6.15 extended. Approval stands. |
 | 0.64    | 2026-10-09 | Implementation-time amendment A-238 (S-6 QA D-1 follow-up): `pgboss.` added to F-40's expected-drop prefixes. Tests: TP-3.7, TP-6.15 extended. Approval stands. |
 | 0.65    | 2026-10-09 | Implementation-time amendments A-239, A-240 (S-7 review notes). **A-239:** a conflict whose row has vanished retries the insert once instead of answering 409. **A-240:** the pg span keyword comes from a fixed SQL keyword list, else `OTHER`. Tests: TP-3.7 extended; TP-7.16 added. Approval stands. |
+| 0.66    | 2026-10-09 | Implementation-time amendments A-241 to A-243 (S-7 QA observations). **A-241:** an over-long cursor is refused by the schema (`too_big`), which is accepted. **A-242:** wire instants always have exactly three fraction digits (`.sssZ`), via F-310's new `toInstantWire`. **A-243:** cursor decode rejects an expiry more than 24 h + 5 min ahead. Tests: TP-7.10, TP-1.11, TP-7.15 extended. Approval stands. |
 
 ## Amendments
 
@@ -376,6 +377,9 @@ Nothing in that list changes application code (D-29 rule 2).
 | A-238 | TP-6.15's lifecycle run still records 120 `unexpected` attribute drops, all from scope `pg-boss`: `pgboss.schema` and `pgboss.job.retry_count` (coordinator, S-6 QA follow-up). | **Expected drop by prefix: `pgboss.` is added to `EXPECTED_DROPPED_SPAN_ATTRIBUTES`.** Checked against pg-boss 12.36.0's `telemetry.js`: its span attributes are `messaging.*` (already expected, A-219), `error.type` (expected), `db.namespace` (allowlisted) and three `pgboss.*` ones: `pgboss.schema` (the constant schema name), `pgboss.job.retry_count` (a number) and `pgboss.job.state` (an enum). All three are safe, but none is needed: retries and outcomes are already in `jobs_processed_total` and the job log lines, so allowlisting them would add trace volume for no use. (`pgboss.queue.jobs` is a metric name, governed by F-36's metric View, not F-40.) | F-40, TP-3.7, TP-6.15 | none | planner decision |
 | A-239 | N-2a (S-7 review): after an `INSERT … ON CONFLICT DO NOTHING` conflict, `find` can return null (the row was purged as expired between the two statements), which F-100 maps to `IdempotencyKeyReusedError` (409) for a key the client never reused. | **Retry the insert once.** An expired record is forgotten by design (90-day retention), so the request is new: when `find` returns null after a conflict, F-100 calls `insertIfAbsent` again; inserted → proceeds as a new request; a conflict again followed by `find` returning a row → the normal replay/reuse checks; null again → `Error("idempotency record vanished")` (→ `INTERNAL`, unreachable in practice). | F-100 | none | planner decision |
 | A-240 | N-1 (S-7 review, A-237): the pg span keyword is the token's whole leading letter run, so a letters-only prepared-statement name survives (`pg.query:CANARYPAYEE budmon`); A-116 already forbids data-derived names. | **Close it outright with a keyword allowlist.** `<KEYWORD>` is the upper-cased leading letters of the token only if they are one of `SELECT`, `INSERT`, `UPDATE`, `DELETE`, `MERGE`, `WITH`, `VALUES`, `BEGIN`, `START`, `COMMIT`, `ROLLBACK`, `SAVEPOINT`, `RELEASE`, `SET`, `RESET`, `SHOW`, `LOCK`, `CREATE`, `ALTER`, `DROP`, `GRANT`, `REVOKE`, `TRUNCATE`, `ANALYZE`, `VACUUM`, `REINDEX`, `CLUSTER`, `REFRESH`, `COMMENT`, `COPY`, `DO`, `CALL`, `EXPLAIN`, `LISTEN`, `NOTIFY`, `UNLISTEN`, `DECLARE`, `FETCH`, `CLOSE`, `PREPARE`, `EXECUTE`, `DEALLOCATE`, `DISCARD`; anything else, including letters-only statement names and a token without letters, becomes `OTHER` (replacing A-237's `UNKNOWN`). | F-40, A-237, TP-3.7 | none | planner decision |
+| A-241 | A cursor longer than 512 characters is rejected by `CursorSchema.max(512)` with `too_big` before F-103 runs, not with `invalid_cursor` (S-7 QA). | **The schema wins; accepted as is.** F-103's indistinguishability protects *why* a well-formed token fails (bad tag, expiry, filter mismatch); "too long" reveals nothing about the token's contents, and bounding input before decryption is the cheaper check. F-344's `max(512)` stays and appears in the OpenAPI document; F-103's own length check remains for direct callers. | F-103, F-344 | none | planner decision |
+| A-242 | `createdAt` renders a variable number of fraction digits (`…57.04Z`); the contract text shows `.000Z` (S-7 QA). | **Fixed at millisecond precision.** F-310 adds `export function toInstantWire(i: Temporal.Instant): string` = `i.round({ smallestUnit: "millisecond", roundingMode: "trunc" }).toString({ fractionalSecondDigits: 3 })` (always `YYYY-MM-DDTHH:MM:SS.sssZ`). F-102 and every server output use it. `InstantWire` (F-340) becomes exactly `^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$` (plus a valid-instant refine), in both directions; clients format instants the same way (web through `toInstantWire`, Android with an ISO formatter fixed at three fraction digits). | F-310, F-340, F-102, TP-1.11, TP-7.15 | none | planner decision |
+| A-243 | Cursor decode doesn't check a future issue time; a cursor with a far-future timestamp is accepted (S-7 QA). | **Bound the expiry.** The cursor carries `exp` (issue + 24 h), not `iat`; `decode` also rejects `exp > now + 86400 + 300` (24 h plus 5 minutes of skew) with the same `invalid_cursor`. Only a holder of the cursor key can mint such a token, so this is defence in depth. | F-103, TP-7.10 | none | planner decision |
 
 ## 1. Deviations from the HLD, and decisions the HLD left open
 
@@ -963,6 +967,7 @@ Pure functions with no I/O. Imported by the server and the web app. Android mirr
   export function isValidTimeZone(zone: string): boolean;
   export function todayIn(clock: Clock, timeZone: string): Temporal.PlainDate;
   export function utcDateOf(instant: Temporal.Instant): Temporal.PlainDate;
+  export function toInstantWire(i: Temporal.Instant): string; // A-242: truncated to ms, always .sssZ
   ```
 - **Behaviour:**
   - `isValidTimeZone(zone)` (A-42) is true when `zone` is a non-empty string that `new Intl.DateTimeFormat("en", { timeZone: zone })` accepts, isn't `Etc/Unknown`, and doesn't start with `+` or `-` (offset strings such as `+02:00` are rejected). `todayIn` applies the same check.
@@ -1895,7 +1900,7 @@ Pure functions with no I/O. Imported by the server and the web app. Android mirr
   1. Reads `ctx.headers["idempotency-key"]`, which must be a lower-case RFC 9562 UUID.
   2. `withTransaction(db, (tx) => idempotency.run(tx, { userId: ctx.principal.userId, key, procedure, input }, () => work(tx)), { tracker: ctx.commitTracker })`.
   3. On a replay, `ctx.responseHeaders.set("Idempotent-Replayed", "true")` (A-232).
-  4. Returns the wire shape `{ id, createdAt: createdAt.toString() }` (RFC 3339 with `Z`).
+  4. Returns the wire shape `{ id, createdAt: toInstantWire(createdAt) }` (always three fraction digits, A-242).
 - **Errors:** a missing or invalid header throws `ValidationFailedError([{ path: ["headers", "idempotency-key"], code: "invalid_idempotency_key", message: "Idempotency-Key must be a UUID" }])`. F-100's errors propagate.
 
 #### F-103: `createCursorCodec`
@@ -1912,7 +1917,7 @@ Pure functions with no I/O. Imported by the server and the web app. Android mirr
   - AES-256-GCM with a 12-byte random nonce and no AAD.
   - Token `base64url(0x01 ‖ nonce ‖ ciphertext ‖ tag)`, no padding.
   - Built by the API container with `config.api.cursorKey` and the container's clock (A-235).
-  - `decode` reverses this and checks `exp ≥ now` and `f === expectedFilterHash`.
+  - `decode` reverses this and checks `now ≤ exp ≤ now + 86400 + 300` (A-243) and `f === expectedFilterHash`. Over-long input is normally refused earlier by `CursorSchema.max(512)` with `too_big` (A-241).
 - **Errors:** `decode` throws `ValidationFailedError([{ path: ["cursor"], code: "invalid_cursor", message: "Invalid cursor" }])` for any of: length > 512, a base64 failure, a wrong version byte, an authentication failure, malformed JSON, an expired cursor, or a filter mismatch. All are indistinguishable.
 
 #### F-104: `filterHash`
@@ -2274,7 +2279,7 @@ Pure functions with no I/O. Imported by the server and the web app. Android mirr
   export const CurrencyCodeSchema: z.ZodString;     // regex ^[A-Z]{3}$
   export const MoneySchema: z.ZodObject<{ amount: typeof MoneyAmount; currency: typeof CurrencyCodeSchema }>;
   export const PlainDateWire: z.ZodString;          // ^\d{4}-\d{2}-\d{2}$ + refine(valid calendar date)
-  export const InstantWire: z.ZodString;            // RFC 3339 with "Z", e.g. 2026-10-05T12:00:00.000Z
+  export const InstantWire: z.ZodString;            // exactly ^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$ + valid-instant refine, e.g. 2026-10-05T12:00:00.000Z (A-242)
   export const UuidSchema: z.ZodString;             // A-153, A-169: z.string().regex(UUID_PATTERN), registered with JSON_SCHEMA_REGISTRY.add(UuidSchema, { format: "uuid", pattern: UUID_PATTERN.source }); UUID_PATTERN copies F-311's (drift test TP-4.28)
   ```
 - **Behaviour:** `MoneyAmount` is registered in `@orpc/zod/zod4`'s `JSON_SCHEMA_REGISTRY` with `{ type: "integer", format: "int64", minimum: -9007199254740991, maximum: 9007199254740991 }`, so input and output are emitted identically. No `.transform()` anywhere in the contract.
@@ -3712,7 +3717,7 @@ Types: **U** unit, **I** integration (real Postgres and/or HTTP in-process), **E
 | TP-1.8 | S-1 | U | F-305 (A-37) | vectors (normalised spaces) | | `expected` for every case, failing (not skipping) on a mismatch; `minorUnits: 5` → `RangeError` |
 | TP-1.9 | S-1 | U | F-306 | `{b:1,a:{d:2,c:[3,{f:1,e:0}]},u:undefined}`; `1n`; `NaN`; `new Date()` | (A-38) `[1, undefined]`; `{a:[[undefined]]}`; `undefined`; `{a:undefined}`; (A-45) `a` with `a.self = a`; `arr` with `arr.push(arr)`; `x = {v:1}` in `{p:x, q:x}`; (A-48) 100 nested arrays around `1`; 101 nested arrays; 10 000 nested objects | `{"a":{"c":[3,{"e":0,"f":1}],"d":2},"b":1}`; `TypeError` ×3; (A-38) `TypeError` ×3; `{}`; (A-45) `TypeError("Circular structure")` ×2; `{"p":{"v":1},"q":{"v":1}}`; (A-48) a string of 100 `[` then `1` then 100 `]`; `TypeError("Structure too deep")` ×2 (no `RangeError`) |
 | TP-1.10 | S-1 | S | F-313 | vector files | Count cases | rounding ≥ 10 including ±1/2, ±3/2, ±5/2, 7/2, 1/3, −1/3; allocate ≥ 6 including 100/[1,1,1], −100/[1,1,1], 0/[1,2], 1/[0,1], 5/[1,1]; convert ≥ 6 including EGP→JPY, JPY→KWD, USD→EGP, 9000000000000000 EGP→USD; wire ±2^53−1 and ±2^53; format EGP/JPY/KWD in en-US and de-DE plus negatives; every format case has a locale in {`en-US`, `de-DE`}, `currencyDisplay` `code` (or absent) and no U+00A0 or U+202F in `expected` (A-37) |
-| TP-1.11 | S-1 | U | F-310 | `fixedClock("2026-10-05T22:30:00Z")` | `todayIn(c, "Africa/Cairo")`, `todayIn(c, "UTC")`, `todayIn(c, "Mars/Base")`; `advance({ hours: 2 })` then `utcDateOf`; (A-42) `isValidTimeZone` with `Africa/Cairo`, `africa/cairo`, `UTC`, `Etc/Unknown`, `+02:00`, `-05:00`, `""`, `Mars/Base`; `todayIn(c, "+02:00")` | 2026-10-06, 2026-10-05, `RangeError`, 2026-10-06; (A-42) true, true, true, false ×5; `RangeError` |
+| TP-1.11 | S-1 | U | F-310 | `fixedClock("2026-10-05T22:30:00Z")` | `todayIn(c, "Africa/Cairo")`, `todayIn(c, "UTC")`, `todayIn(c, "Mars/Base")`; `advance({ hours: 2 })` then `utcDateOf`; (A-42) `isValidTimeZone` with `Africa/Cairo`, `africa/cairo`, `UTC`, `Etc/Unknown`, `+02:00`, `-05:00`, `""`, `Mars/Base`; `todayIn(c, "+02:00")`; (A-242) `toInstantWire` of `2026-10-05T12:00:57.04Z`, `…:00Z`, `…:00.123456789Z` | 2026-10-06, 2026-10-05, `RangeError`, 2026-10-06; (A-42) true, true, true, false ×5; `RangeError`; (A-242) `2026-10-05T12:00:57.040Z`, `…:00.000Z`, `…:00.123Z` |
 | TP-1.12 | S-1 | U | F-311 | none | 1000 × `next()`; (A-41) `isUuid` with a v4 and a v7 sample, a v7 in upper case, nil, max, version 0, version 9, variant `c`, braces, `urn:uuid:` prefix, no dashes | All match the UUIDv7 regex; lexicographically non-decreasing; (A-41) true, true, false ×9 |
 | TP-1.13 | S-1 | U | F-312 | none | `resolveLocale("ar-EG", ["en","ar"])`, `("fr", ["en"])`, `directionOf("ar-XB")`, `("he")`, `("en")`, `isolate("x")`; (A-39) `resolveLocale("en", ["en-US"])`, `("en-GB", ["en-US","en"])`, `("pt", ["pt-BR","pt-PT"])`, `("EN-us", ["en-US"])`, `(null, ["en"], "ar")`; (A-40) `directionOf("en-XA")`, `("AR-eg")` | "ar", "en", rtl, rtl, ltr, "⁨x⁩"; (A-39) "en-US", "en", "pt-BR", "en-US", "ar"; (A-40) ltr, rtl |
 | TP-1.14 | S-1 | U | F-310 (A-34) | a test file importing only from `@budmon/shared`; a second run with `globalThis.Temporal` stubbed to a sentinel object before import | `expectTypeOf(todayIn(fixedClock("2026-10-05T22:30:00Z"), "UTC")).toEqualTypeOf<Temporal.PlainDate>()`; `const i: Temporal.Instant = systemClock.now()`; compare `Temporal` with the polyfill's export | Type-checks; `Temporal === (await import("@js-temporal/polyfill")).Temporal` in both runs (the stub is never used) |
@@ -3843,12 +3848,12 @@ Types: **U** unit, **I** integration (real Postgres and/or HTTP in-process), **E
 | TP-7.8 | S-7 | U | F-100 `requestHashOf` (A-233) | none | inputs `{a:1,b:2}` vs `{b:2,a:1}`; `{a:1}` vs `{a:2}` | Same 32-byte hash; different hashes |
 | TP-7.9 | S-7 | U | F-100 | `h.inTransaction=false` | `run` | `Error("idempotency requires a transaction")` |
 | TP-7.16 | S-7 | U | F-100 vanished row (A-239) | fake repo: `insertIfAbsent` returns false then true; `find` returns null; a second fake where both inserts conflict and `find` returns null twice | `run` | First: `work` called once, `replayed:false`, no `IdempotencyKeyReusedError`; second: `Error("idempotency record vanished")` |
-| TP-7.10 | S-7 | U | F-103 | key, `fixedClock` | encode then decode; flip one byte; advance 24 h + 1 s; wrong filter hash; a 513-character token; a non-base64 token | Round trip; then `ValidationFailedError` with the identical issue `invalid_cursor` for each |
+| TP-7.10 | S-7 | U | F-103 | key, `fixedClock` | encode then decode; flip one byte; advance 24 h + 1 s; wrong filter hash; a 513-character token; a non-base64 token; (A-243) a token encoded with a clock 25 h ahead, decoded at the real time; one 24 h + 4 min ahead | Round trip; then `ValidationFailedError` with the identical issue `invalid_cursor` for each; (A-243) `invalid_cursor`; accepted |
 | TP-7.11 | S-7 | U | F-103 | sortKey `[CANARIES.payee]` | Encode; inspect the token and its base64 decode | The canary doesn't appear |
 | TP-7.12 | S-7 | U | F-105 | 51 rows, limit 50; 50 rows | `paginate` | 50 items + cursor; 50 items + null |
 | TP-7.13 | S-7 | U | F-104 | none | `{a:1,b:[1,2]}` vs `{b:[1,2],a:1}`; `{b:[2,1]}` | Equal (22 chars); different |
 | TP-7.14 | S-7 | U | F-343 | test contract with `createRoute("/things")` | Emit and check rules | R5 satisfied; header required, `format: uuid`; 201 |
-| TP-7.15 | S-7 | I | F-102 end to end | test create procedure inserting into a test table created by the test as `budmon_migrator` and granted `SELECT, INSERT` to `budmon_app` (A-236); the user from `createTestUser` (A-234) | POST twice with the same key, then with a new key | 201 + body; 201 + same body + `Idempotent-Replayed: true`; 201 + a new id; the table has 2 rows; the stored `request_hash` equals `requestHashOf(input)` (A-233) |
+| TP-7.15 | S-7 | I | F-102 end to end | test create procedure inserting into a test table created by the test as `budmon_migrator` and granted `SELECT, INSERT` to `budmon_app` (A-236); the user from `createTestUser` (A-234) | POST twice with the same key, then with a new key; (A-242) the `createdAt` of each response | 201 + body; 201 + same body + `Idempotent-Replayed: true`; 201 + a new id; the table has 2 rows; the stored `request_hash` equals `requestHashOf(input)` (A-233); (A-242) matches `^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$` |
 | TP-8.1 | S-8 | U | F-110 | parts with keyVersion `local:1`, wrapped DEK 384 bytes, ciphertext 10 bytes | encode/decode; truncated buffers at each field; version byte 2; provider 9; L=0 | Exact byte layout per the table; round trip; `EnvelopeFormatError` for each malformed case |
 | TP-8.2 | S-8 | U | F-110 `aadFor` | none | `{table:"t",rowId:"r 1",purpose:"p"}` | `RangeError` |
 | TP-8.3 | S-8 | U | F-111, F-113 | RSA-3072 pair, version `local:1` | seal + unseal; unseal with `rowId` changed; flip a ciphertext byte | Plaintext equal; provider byte `0x02`; `EnvelopeAuthError` ×2 |
