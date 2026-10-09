@@ -1,13 +1,17 @@
 // F-94 runDbResetCli (A-58). TP-2.24 (e) to (g), TP-2.29 and TP-2.16's A-93 cases, plus extra cases
-// TP-2.59x, TP-2.68x, TP-2.76x, TP-2.78x and TP-2.81x.
+// TP-2.59x, TP-2.68x, TP-2.76x, TP-2.78x, TP-2.81x and TP-2.84x.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import { runDbResetCli, seedAll } from "../../../src/main/dbReset.js";
 import { ConfigError } from "../../../src/platform/config/loadConfig.js";
 import { createWorkerContainer } from "../../../src/platform/container.js";
-import { seeders } from "../../../src/platform/db/seed.js";
+import { runSeeders, seeders } from "../../../src/platform/db/seed.js";
+import type { WorkerContainer } from "../../support/jobs.js";
+import { testWorkerEnv } from "../../support/worker.js";
 import {
   ResetRefusedError,
   resetDevelopmentDatabase,
@@ -29,6 +33,12 @@ const ROLES_JSON = JSON.stringify({
 vi.mock("../../../src/platform/container.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../../src/platform/container.js")>();
   return { ...actual, createWorkerContainer: vi.fn(actual.createWorkerContainer) };
+});
+
+// TP-2.29 (g) (A-278): a spy in place of F-23's runSeeders; the seeder list stays the real one.
+vi.mock("../../../src/platform/db/seed.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../src/platform/db/seed.js")>();
+  return { ...actual, runSeeders: vi.fn(() => Promise.resolve()) };
 });
 
 type Deps = Parameters<typeof runDbResetCli>[1];
@@ -273,6 +283,65 @@ describe("TP-2.29: runDbResetCli arguments and environment", () => {
     await expect(seedAll({})).rejects.toBeInstanceOf(ConfigError);
 
     expect(vi.mocked(createWorkerContainer)).not.toHaveBeenCalled();
+  });
+
+  it("TP-2.29 (g) (A-278): seedAll on a development environment without FX_PROVIDER builds one worker container, runs the seeders on it, starts no pg-boss and closes it afterwards", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "budmon-seedall-"));
+    const order: string[] = [];
+    const start = vi.fn(() => Promise.resolve());
+    const fake = {
+      boss: { start },
+      queueBoss: { start },
+      captureBoss: { start },
+      close: vi.fn(() => {
+        order.push("close");
+        return Promise.resolve();
+      }),
+    } as unknown as WorkerContainer;
+    vi.mocked(createWorkerContainer).mockClear();
+    vi.mocked(createWorkerContainer).mockImplementationOnce(() => fake);
+    vi.mocked(runSeeders).mockClear();
+    vi.mocked(runSeeders).mockImplementationOnce(() => {
+      order.push("seed");
+      return Promise.resolve();
+    });
+    try {
+      const env: Record<string, string | undefined> = {
+        ...testWorkerEnv(dir, { host: "localhost", port: 5432 }, "budmon", "capture,general"),
+        APP_ENV: "development",
+      };
+      delete env["FX_PROVIDER"];
+
+      await seedAll(env);
+
+      expect(vi.mocked(createWorkerContainer)).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(createWorkerContainer).mock.calls[0]?.[0].fx).toEqual({ provider: "fixed" });
+      expect(vi.mocked(runSeeders)).toHaveBeenCalledWith(fake);
+      expect(order).toEqual(["seed", "close"]);
+      expect(start).not.toHaveBeenCalled();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("TP-2.84x (A-278): a seeder failure still closes the container, and seedAll rejects", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "budmon-seedall-"));
+    const close = vi.fn(() => Promise.resolve());
+    vi.mocked(createWorkerContainer).mockImplementationOnce(
+      () => ({ close }) as unknown as WorkerContainer,
+    );
+    vi.mocked(runSeeders).mockImplementationOnce(() => Promise.reject(new Error("seed failed")));
+    try {
+      const env = {
+        ...testWorkerEnv(dir, { host: "localhost", port: 5432 }, "budmon", "capture,general"),
+        APP_ENV: "development",
+      };
+
+      await expect(seedAll(env)).rejects.toThrow("seed failed");
+      expect(close).toHaveBeenCalledTimes(1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

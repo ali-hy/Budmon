@@ -1,5 +1,5 @@
 // F-78 and F-139 start-up enqueue, the F-42 freshness gauge and the F-23 FX seeder, on template
-// copies. TP-9.17, TP-9.18 and TP-9.20, plus extra cases TP-9.21x. IDs ending in "x" are
+// copies. TP-9.17, TP-9.18 and TP-9.20, plus extra cases TP-9.22x. IDs ending in "x" are
 // test-architect additions, not LLD test-plan IDs.
 //
 // TP-9.17 (A-265): the general worker observes the gauge, refreshed with the queue depths.
@@ -10,6 +10,7 @@ import { fixedClock } from "@budmon/shared";
 import { afterAll, describe, expect, it } from "vitest";
 import { createWorkerContainer } from "../../../src/platform/container.js";
 import { runSeeders, seeders } from "../../../src/platform/db/seed.js";
+import { fxGapCheckJob } from "../../../src/platform/fx/fxJobs.js";
 import { buildHandlerMap } from "../../../src/platform/queue/handlers.js";
 import { startWorkers } from "../../../src/platform/queue/workers.js";
 import { observed } from "../../support/api.js";
@@ -64,7 +65,7 @@ describe("TP-9.20: the start-up gap check (F-78, F-139)", () => {
         expect(jobs[0]?.singletonKey).toBe("startup");
         expect(jobs[0]?.data).toEqual({});
         expect(schedules).toContainEqual({ name: GAP_CHECK, cron: "45 6 * * *", timezone: "UTC" });
-        // TP-9.21x: the daily fetch is scheduled too (F-137).
+        // TP-9.22x: the daily fetch is scheduled too (F-137).
         expect(schedules).toContainEqual({
           name: "platform.fx-rates-fetch",
           cron: "30 0 * * *",
@@ -79,7 +80,26 @@ describe("TP-9.20: the start-up gap check (F-78, F-139)", () => {
     }
   }, 120_000);
 
-  it("TP-9.20 (b): two general workers started together before either job runs leave one job", async () => {
+  it("TP-9.20 (b1): with no worker, two enqueues with singletonKey startup: the second returns null and there's one row", async () => {
+    const built = await buildWorkerContainer("general");
+    try {
+      await built.container.boss.start();
+      const c = built.container;
+      const enqueue = () =>
+        c.queue.enqueue(c.database.handle, fxGapCheckJob, {}, { singletonKey: "startup" });
+
+      const first = await enqueue();
+      const second = await enqueue();
+
+      expect(first).not.toBeNull();
+      expect(second).toBeNull();
+      expect(await queuedJobs(built.testDb, GAP_CHECK)).toHaveLength(1);
+    } finally {
+      await built.close();
+    }
+  }, 120_000);
+
+  it("TP-9.20 (b2): two general workers started together leave at most one created and at most one active startup job (A-273)", async () => {
     const built = await buildWorkerContainer("general");
     const second = createWorkerContainer(
       testWorkerConfig(built.testDb.endpoint, built.testDb.name, "general"),
@@ -93,8 +113,13 @@ describe("TP-9.20: the start-up gap check (F-78, F-139)", () => {
         startWorkers(second, two.handlers, { heartbeatPath: heartbeatPath() }),
       ]);
       try {
-        const jobs = await queuedJobs(built.testDb, GAP_CHECK);
-        expect(jobs, JSON.stringify(jobs)).toHaveLength(1);
+        const jobs = (await queuedJobs(built.testDb, GAP_CHECK)).filter(
+          (j) => j.singletonKey === "startup",
+        );
+        const states = JSON.stringify(jobs);
+        expect(jobs.length, states).toBeGreaterThanOrEqual(1);
+        expect(jobs.filter((j) => j.state === "created").length, states).toBeLessThanOrEqual(1);
+        expect(jobs.filter((j) => j.state === "active").length, states).toBeLessThanOrEqual(1);
       } finally {
         one.release();
         two.release();
@@ -155,8 +180,8 @@ describe("TP-9.17: the freshness gauge (F-42)", () => {
   }, 120_000);
 });
 
-describe("TP-9.21x: the freshness gauge with no stored day (A-265)", () => {
-  it("TP-9.21x: an empty exchange_rates gives no fx_last_day_timestamp_seconds data point", async () => {
+describe("TP-9.22x: the freshness gauge with no stored day (A-265)", () => {
+  it("TP-9.22x: an empty exchange_rates gives no fx_last_day_timestamp_seconds data point", async () => {
     const built = await buildWorkerContainer("general");
     const { handlers, release } = heldHandlers(built.container);
     try {

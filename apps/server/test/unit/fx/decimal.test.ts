@@ -1,4 +1,4 @@
-// F-130 provider decimal parsing. TP-9.1, plus extra cases TP-9.21x.
+// F-130 provider decimal parsing. TP-9.1, plus extra cases TP-9.22x.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { describe, expect, it } from "vitest";
 import { normaliseRate, parseJsonKeepingNumberText } from "../../../src/platform/fx/decimal.js";
@@ -18,7 +18,7 @@ describe("TP-9.1: lossless parsing and normalisation (F-130)", () => {
     expect(normaliseRate(raw)).toBeNull();
   });
 
-  it("TP-9.21x: strings, booleans and nested arrays are unchanged; a number in an array keeps its text", () => {
+  it("TP-9.22x: strings, booleans and nested arrays are unchanged; a number in an array keeps its text", () => {
     expect(parseJsonKeepingNumberText('{"a":"1.50","b":true,"c":[0.10,2],"d":null}')).toEqual({
       a: "1.50",
       b: true,
@@ -31,7 +31,7 @@ describe("TP-9.1: lossless parsing and normalisation (F-130)", () => {
     ["48.5", "48.500000000000"],
     ["0.000000000001", "0.000000000001"],
     ["999999999999.999999999999", "999999999999.999999999999"],
-  ])("TP-9.21x: normaliseRate(%j) is %j", (raw, normalised) => {
+  ])("TP-9.22x: normaliseRate(%j) is %j", (raw, normalised) => {
     expect(normaliseRate(raw)).toBe(normalised);
   });
 });
