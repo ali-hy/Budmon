@@ -2,7 +2,7 @@
 module: platform
 doc: lld
 status: approved # draft | in-review | approved
-version: 0.67
+version: 0.68
 hld_version: 1.3
 author: planner
 approved_by: the user (project owner), delegated auto-approval
@@ -133,6 +133,7 @@ Nothing in that list changes application code (D-29 rule 2).
 | 0.65    | 2026-10-09 | Implementation-time amendments A-239, A-240 (S-7 review notes). **A-239:** a conflict whose row has vanished retries the insert once instead of answering 409. **A-240:** the pg span keyword comes from a fixed SQL keyword list, else `OTHER`. Tests: TP-3.7 extended; TP-7.16 added. Approval stands. |
 | 0.66    | 2026-10-09 | Implementation-time amendments A-241 to A-243 (S-7 QA observations). **A-241:** an over-long cursor is refused by the schema (`too_big`), which is accepted. **A-242:** wire instants always have exactly three fraction digits (`.sssZ`), via F-310's new `toInstantWire`. **A-243:** cursor decode rejects an expiry more than 24 h + 5 min ahead. Tests: TP-7.10, TP-1.11, TP-7.15 extended. Approval stands. |
 | 0.67    | 2026-10-09 | Implementation-time amendments A-244 to A-250 (test-architect, S-8 tests `35a5bef`). TP-7.10's A-243 cases reworded; TP-8.7's connection proxy accepted (no hook); crypto errors in `platform/crypto/cryptoErrors.ts`; the KMS client's `[{ plaintext }]` response pinned; `configKeysFor(kind)` added and the api config stops reading capture secrets; `captureUnsealer` overrides confirmed; TP-8.16's CLI environment defined. Tests: TP-7.10, TP-8.5, TP-8.15, TP-8.16 reworded. Approval stands. |
+| 0.68    | 2026-10-09 | Implementation-time amendments A-251 to A-257: the engineer's S-8 choices (`697bc7c`), confirmed, with a drift test for `configKeysFor`; the api's `GOOGLE_OAUTH_CLIENT_ID` and F-121's Sentry host deferred to the `sources` module's build. Tests: TP-8.3, TP-8.7, TP-8.8, TP-8.12, TP-8.15 extended. Approval stands. |
 
 ## Amendments
 
@@ -388,6 +389,13 @@ Nothing in that list changes application code (D-29 rule 2).
 | A-248 | TP-8.15 can't read `configSchemaFor("api")`'s keys, and the api config currently does read `CAPTURE_PRIVATE_KEY_FILE` (a code change) (test-architect). | **Both:** F-10 adds `export function configKeysFor(kind: ProcessKind, roles?: readonly WorkerRole[]): readonly string[]` (the variables that kind, and those worker roles, may read; sorted), and `loadConfig` reads only those, so the api never reads `CAPTURE_PRIVATE_KEY_FILE`, `KMS_PROVIDER`, `GCP_CREDENTIALS_FILE` or `MAILBOX_HMAC_KEY_FILE`. TP-8.15 checks the key list and the behaviour (`readFile` is never called with those paths). | F-10, F-11, TP-8.15 | none | planner decision |
 | A-249 | TP-8.8 injects an unsealer holding both keys through a `captureUnsealer` container override, which the LLD doesn't list (test-architect). | **Confirmed:** F-96's `overrides` may replace any container member, `captureUnsealer` included; the handler is reached through `buildHandlerMap(c).get("platform.capture-rewrap")` as the test does. | F-96, TP-8.8 | none | planner decision |
 | A-250 | TP-8.16's CLI case runs `secrets:rewrap-api` through `runCli`; which process kind and keys? (test-architect) | **Kind `api`** (F-93): the test environment is the minimal valid api configuration from the test helpers, with `DB_*` pointing at the test file's database as `budmon_app`, and `API_SECRETS_KEYS_FILE` holding `{ "current": "k2", "keys": { "k1": …, "k2": … } }`. | TP-8.16 | none | planner decision |
+| A-251 | `configKeysFor` is a hand-written list; a worker with no valid `WORKER_ROLES` gets both roles' keys and the schema reports the `WORKER_ROLES` error (software-engineer, `697bc7c`). | **Confirmed, with a drift guard.** TP-8.15 also loads each kind (and each worker role) with an `env` wrapped in a `Proxy` that records every variable read, and asserts the recorded set ⊆ `configKeysFor(kind, roles)`, so a schema change that reads a new variable fails until the list is updated. | F-10, TP-8.15 | none | planner decision |
+| A-252 | `ApiContainer.captureSealer` is `CaptureSealer \| null` (null without a configured capture public key); a capture worker seals with `config.capture`, other roles with `config.sealing` (software-engineer). | **Confirmed.** F-96 types it `CaptureSealer \| null`; production and rehearsal configs always set `CAPTURE_PUBLIC_KEY_FILE`, so it's null only in development or test configurations without one, and callers that seal must handle `null` (`sources` throws `ServiceUnavailableError`). | F-96 | none | planner decision |
+| A-253 | "Stop when a batch returns no rows" loops forever on a skipped row that is still on an old key; each run excludes ids it has already tried (`NOT id = ANY($3)`) (software-engineer). | **Confirmed** for F-117 and F-118: each run keeps the set of ids it has selected and excludes them from later batches, so every row is tried at most once per run; a skipped row is picked up by the next run. | F-117, F-118, TP-8.7, TP-8.8 | none | planner decision |
+| A-254 | F-117 logs `info("api_secrets_rewrap", { count })`, unnamed in the LLD (software-engineer). | **Confirmed:** one line per run, `count` = rows re-wrapped (F-118's `capture_rewrap` is the capture counterpart). | F-117 | none | planner decision |
+| A-255 | F-120: a status not in the error table (e.g. a redirect, never followed) → `rejected`, not retryable; a 200 without `access_token` or `expires_in` → `server`, retryable (software-engineer). | **Confirmed;** both rows are added to F-120's table. | F-120, TP-8.12 | none | planner decision |
+| A-256 | The local unsealer with the wrong private key throws `EnvelopeAuthError` (software-engineer). | **Confirmed:** RSA-OAEP decryption failure of the wrapped DEK is reported as `EnvelopeAuthError` (not retryable), like a GCM tag failure. | F-113, TP-8.3 | none | planner decision |
+| A-257 | Not built: F-119 says the api reads `GOOGLE_OAUTH_CLIENT_ID`, but the api config doesn't (so it isn't in the api's key list); F-121's Sentry-host allowlist addition isn't wired because no capture integration uses the guarded fetch yet (software-engineer). | **Both deferred to the `sources` module's build**, which starts the Gmail connection flow in the api and the first capture integration: it adds `Config.api.googleOAuth?: { clientId }` (and the key-list entry), and wires `CAPTURE_EGRESS_HOSTS` plus the Sentry DSN host into worker-capture's container. S-8 delivers F-119 and F-121 as library functions only. F-119's and F-121's text and F-10's row say so. | F-10, F-119, F-121 | none | planner decision |
 
 ## 1. Deviations from the HLD, and decisions the HLD left open
 
@@ -1045,7 +1053,7 @@ Pure functions with no I/O. Imported by the server and the web app. Android mirr
 | `KMS_PROVIDER` | worker with `capture` | `gcp\|local`; `production` requires `gcp`; `rehearsal` allows `local` (DV-2) | `local` |
 | `GCP_CREDENTIALS_FILE` | worker with `capture`, `gcp` | service-account JSON (secret) | (empty) |
 | `CAPTURE_PRIVATE_KEY_FILE` | worker with `capture`, `local` | PEM RSA private key (secret) | `.data/dev-secrets/capture_private.pem` |
-| `GOOGLE_OAUTH_CLIENT_ID` | api, worker with `capture` | non-empty; optional in development and test and for the api (A-76) | (empty) |
+| `GOOGLE_OAUTH_CLIENT_ID` | api (from the `sources` build, A-257), worker with `capture` | non-empty; optional in development and test and for the api (A-76) | (empty) |
 | `GOOGLE_OAUTH_CLIENT_SECRET_FILE` | worker with `capture` | secret; required when the client id is set | (empty) |
 | `GOOGLE_OAUTH_REDIRECT_ORIGIN` | api, worker with `capture` | an `https://` origin, or exactly `http://localhost:<port>` (allowed in every environment, HLD A-16); no path, query or trailing slash. api: defaults to `PUBLIC_ORIGIN`. Worker with `capture`: required when the client id is set. The `sources` LLD appends its callback path to build `redirect_uri` for both the authorization URL (F-119) and the code exchange (F-120), which must use the same value. | `http://localhost:5173` |
 | `MAILBOX_HMAC_KEY_FILE` | worker with `capture` | base64 ≥ 32 bytes (secret) | `.data/dev-secrets/mailbox_key` |
@@ -1858,7 +1866,7 @@ Pure functions with no I/O. Imported by the server and the web app. Android mirr
     sealedColumns: SealedColumnRegistry;                    // A-26 (F-115)
     close(): Promise<void> }
   export interface ApiContainer extends BaseContainer { authHook: AuthHook; rateLimiter: RateLimiter; idempotency: Idempotency; cursors: CursorCodec;
-    captureSealer: CaptureSealer; apiSecrets: ApiSecretsCipher; objectStore: ObjectStore; fx: FxService;
+    captureSealer: CaptureSealer | null /* A-252 */; apiSecrets: ApiSecretsCipher; objectStore: ObjectStore; fx: FxService;
     moduleRoutes: ((app: import("fastify").FastifyInstance) => void)[] }   // A-26
   export interface WorkerContainer extends BaseContainer { roles: ReadonlySet<WorkerRole>; captureSealer: CaptureSealer | null; captureUnsealer: CaptureUnsealer | null;
     fx: FxService; objectStore: ObjectStore | null; erasureLog: ErasureLog | null; fxProviders: FxProviders | null; queueBoss: PgBoss | null; captureBoss: PgBoss | null;
@@ -2017,7 +2025,7 @@ Pure functions with no I/O. Imported by the server and the web app. Android mirr
   2. In one transaction per batch, for each row: `unseal` with `{ table, rowId: id, purpose }`, then `seal` with the current key, then `UPDATE … SET <col> = $new WHERE <id> = $id AND <col> = $old`.
   3. A row updated 0 times (changed concurrently) counts as `skipped`.
 
-  The loop stops when a batch returns no rows. Identifiers are quoted with `pg`'s `escapeIdentifier`.
+  The loop stops when a batch returns no rows; each run excludes ids it has already selected (`NOT id = ANY($3)`), so a skipped row isn't retried in the same run (A-253). Logs `info("api_secrets_rewrap", { count })` once per run (A-254). Identifiers are quoted with `pg`'s `escapeIdentifier`.
 - **Errors:** `UnknownKeyVersionError` and `EnvelopeAuthError` abort that batch's transaction and propagate (CLI exit 1), naming table and column only.
 
 #### F-118: `platform.capture-rewrap` job
@@ -2036,7 +2044,7 @@ Pure functions with no I/O. Imported by the server and the web app. Android mirr
 - **Behaviour:**
   - The verifier is the base64url of 32 random bytes (43 characters). The challenge is `base64url(sha256(verifier))`.
   - The URL is `https://accounts.google.com/o/oauth2/v2/auth` with `response_type=code`, `client_id`, `redirect_uri`, `scope` (space-joined), `state`, `code_challenge`, `code_challenge_method=S256`, `access_type=offline`, `prompt=consent` and `include_granted_scopes=true`.
-  - The API reads `GOOGLE_OAUTH_CLIENT_ID` (kind `api`, optional; added to F-10 for both `api` and capture workers).
+  - The api's `GOOGLE_OAUTH_CLIENT_ID` (its `Config` field and key-list entry) arrives with the `sources` module's build, which starts the Gmail connection in the api; S-8 delivers these functions only (A-257).
 
 #### F-120: `exchangeAuthorizationCode`
 - **File:** `platform/crypto/oauth.ts` · **Layer:** integration (worker-capture only)
@@ -2057,6 +2065,8 @@ Pure functions with no I/O. Imported by the server and the web app. Android mirr
   | Other 4xx | `rejected` | false |
   | 5xx or 429 | `server` | true |
   | Network error or timeout | `network` | true |
+  | Any other status, including 3xx (never followed) (A-255) | `rejected` | false |
+  | 200 without `access_token` or `expires_in` (A-255) | `server` | true |
 
   Response bodies are never kept on the error.
 
@@ -2064,7 +2074,7 @@ Pure functions with no I/O. Imported by the server and the web app. Android mirr
 - **File:** `platform/crypto/egress.ts`
 - **Signatures:** `export const CAPTURE_EGRESS_HOSTS: ReadonlySet<string>; export class EgressDeniedError extends Error { readonly host: string }; export function createGuardedFetch(allowed: ReadonlySet<string>, inner: typeof fetch): typeof fetch`
 - **Behaviour:**
-  - `CAPTURE_EGRESS_HOSTS = { "oauth2.googleapis.com", "gmail.googleapis.com", "cloudkms.googleapis.com", "pubsub.googleapis.com" }`, plus the Sentry DSN host, added at container build from config.
+  - `CAPTURE_EGRESS_HOSTS = { "oauth2.googleapis.com", "gmail.googleapis.com", "cloudkms.googleapis.com", "pubsub.googleapis.com" }`, plus the Sentry DSN host, added at container build from config; the container wiring arrives with the `sources` module's first capture integration (A-257).
   - The guarded fetch rejects a URL unless: the protocol is `https:`, there's no user info, the port is empty or `443`, and the hostname is exactly in `allowed`. It forces `redirect: "manual"`.
   - worker-capture passes this fetch to F-120 and to every capture integration. Google client libraries (KMS, Pub/Sub over gRPC) are constructed with `apiEndpoint` set to the allowlisted host explicitly.
 - **Errors:** `EgressDeniedError(host)` (the host isn't sensitive).
@@ -3864,20 +3874,20 @@ Types: **U** unit, **I** integration (real Postgres and/or HTTP in-process), **E
 | TP-7.15 | S-7 | I | F-102 end to end | test create procedure inserting into a test table created by the test as `budmon_migrator` and granted `SELECT, INSERT` to `budmon_app` (A-236); the user from `createTestUser` (A-234) | POST twice with the same key, then with a new key; (A-242) the `createdAt` of each response | 201 + body; 201 + same body + `Idempotent-Replayed: true`; 201 + a new id; the table has 2 rows; the stored `request_hash` equals `requestHashOf(input)` (A-233); (A-242) matches `^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$` |
 | TP-8.1 | S-8 | U | F-110 | parts with keyVersion `local:1`, wrapped DEK 384 bytes, ciphertext 10 bytes | encode/decode; truncated buffers at each field; version byte 2; provider 9; L=0 | Exact byte layout per the table; round trip; `EnvelopeFormatError` for each malformed case |
 | TP-8.2 | S-8 | U | F-110 `aadFor` | none | `{table:"t",rowId:"r 1",purpose:"p"}` | `RangeError` |
-| TP-8.3 | S-8 | U | F-111, F-113 | RSA-3072 pair, version `local:1` | seal + unseal; unseal with `rowId` changed; flip a ciphertext byte | Plaintext equal; provider byte `0x02`; `EnvelopeAuthError` ×2 |
+| TP-8.3 | S-8 | U | F-111, F-113 | RSA-3072 pair, version `local:1` | seal + unseal; unseal with `rowId` changed; flip a ciphertext byte; (A-256) unseal with a different RSA-3072 private key | Plaintext equal; provider byte `0x02`; `EnvelopeAuthError` ×2; (A-256) `EnvelopeAuthError` |
 | TP-8.4 | S-8 | U | F-111 | RSA-2048 key | construct | `TypeError` |
 | TP-8.5 | S-8 | U | F-112 | fake KMS client decrypting with a local private key; envelope with version `projects/p/…/cryptoKeyVersions/1` | unseal; client rejects; envelope with provider local; (A-247) the fake returns `[{ plaintext: Uint8Array }]`; then `[{ plaintext: "str" }]` | Plaintext; `asymmetricDecrypt` called with `{name, ciphertext}` and `timeout: 5000`; `KmsUnavailableError` + `kms_errors_total` 1; `EnvelopeFormatError`; (A-247) plaintext; `KmsUnavailableError` |
 | TP-8.6 | S-8 | U | F-114 | keys `{k1}`, then `{k1,k2}` current `k2` | seal with k1; unseal with the k1-only cipher; unseal the k1 envelope with the {k1,k2} cipher; unseal with the cipher holding only k2 | ok; ok; `UnknownKeyVersionError` |
-| TP-8.7 | S-8 | I | F-117 | test table `sealed_test(id uuid, secret bytea)` registered (provider api), 3 rows with k1, 1 with k2 | rewrap with current k2; one row updated concurrently between select and update (test hook) | `{rewrapped: 2, skipped: 1}`; all non-skipped rows now carry `k2` and unseal to the original plaintext |
-| TP-8.8 | S-8 | I | F-118 | test table with capture provider, envelopes `local:1`; config `local:2` with a new key pair; local unsealer holds both keys (test override) | Run the job handler | Rows re-sealed under `local:2` |
+| TP-8.7 | S-8 | I | F-117 | test table `sealed_test(id uuid, secret bytea)` registered (provider api), 3 rows with k1, 1 with k2 | rewrap with current k2; one row updated concurrently between select and update (test hook); (A-253) the concurrently changed row is re-sealed under k1 (still old) by the proxy | `{rewrapped: 2, skipped: 1}`; all non-skipped rows now carry `k2` and unseal to the original plaintext; (A-253) the run ends with `skipped: 1` (no endless loop); one `api_secrets_rewrap` line (A-254); a second run re-wraps it |
+| TP-8.8 | S-8 | I | F-118 | test table with capture provider, envelopes `local:1`; config `local:2` with a new key pair; local unsealer holds both keys (test override) | Run the job handler; (A-253) a row whose re-seal is skipped | Rows re-sealed under `local:2`; (A-253) the run ends; the next run picks it up |
 | TP-8.9 | S-8 | U | F-115 | none | table `Bad-Name`; purpose `has space`; a duplicate | `TypeError` ×3 |
 | TP-8.10 | S-8 | U | F-119 | `randomBytes` returning RFC 7636 appendix B bytes | `createPkcePair` | verifier `dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk`, challenge `E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM` |
 | TP-8.11 | S-8 | U | F-119 | none | `buildGoogleAuthorizationUrl(...)` | Host, path and exactly the listed parameters |
-| TP-8.12 | S-8 | U | F-120 | `fakeFetch` | 200 full; 200 without refresh; 400 invalid_grant (description = canary); 403; 503; 429; network error; timeout | Tokens (`Secret`s), `expiresAt` = now + `expires_in`; `no_refresh_token`; `invalid_grant`; `rejected`; `server`; `server`; `network`; `network`. The request body has `grant_type`, `code`, `code_verifier`, `client_id`, `client_secret`, `redirect_uri`. The canary never appears in the errors' properties or messages |
+| TP-8.12 | S-8 | U | F-120 | `fakeFetch` | 200 full; 200 without refresh; 400 invalid_grant (description = canary); 403; 503; 429; network error; timeout; (A-255) 302 with a `Location`; 200 `{ refresh_token }` without `access_token`; 200 without `expires_in` | Tokens (`Secret`s), `expiresAt` = now + `expires_in`; `no_refresh_token`; `invalid_grant`; `rejected`; `server`; `server`; `network`; `network`. The request body has `grant_type`, `code`, `code_verifier`, `client_id`, `client_secret`, `redirect_uri`. The canary never appears in the errors' properties or messages; (A-255) `rejected` (not followed, not retryable); `server` ×2 (retryable) |
 | TP-8.13 | S-8 | U | F-121 | inner fetch spy | `https://gmail.googleapis.com/x`; `http://gmail.googleapis.com/`; `https://evil.example/`; `https://gmail.googleapis.com:8443/`; `https://u:p@gmail.googleapis.com/` | Called with `redirect:"manual"`; `EgressDeniedError` ×4; inner not called |
 | TP-8.14 | S-8 | I | F-122 | local HTTPS target and a CONNECT proxy recording hosts (test helper) | (a) `HTTPS_PROXY` set; (b) set with `NO_PROXY` including the target; (c) unset — each in a child process calling `installProxySupport` then `fetch` | (a) the proxy saw a CONNECT to the target; (b), (c) no CONNECT; requests succeed |
 | TP-8.16 | S-8 | I | F-96, F-117 `rewrapApiSecretsCommand`, F-93 (A-26) | `sealed_test` as in TP-8.7 with 2 rows sealed under k1; config current `k2`; an API container whose `sealedColumns` override has `sealed_test` registered (provider api) | `rewrapApiSecretsCommand(c)`; `createApiContainer(config).sealedColumns.all()`; CLI `secrets:rewrap-api` on that database (nothing registered); (A-250) the CLI run uses kind `api` with the test helpers' minimal api environment, `DB_*` for the test database as `budmon_app` and `API_SECRETS_KEYS_FILE` = `{ current: k2, keys: { k1, k2 } }` | `{rewrapped:2, skipped:0}` and both rows under `k2`; `[]`; stdout `{"rewrapped":0,"skipped":0}`, exit 0 |
-| TP-8.15 | S-8 | U | F-96, F-10 | API config | Build an `ApiContainer`; `configKeysFor("api")`; `loadConfig("api", env, readFileSpy)` with every capture variable set | No `captureUnsealer` member; the key list has no `KMS_PROVIDER`, `GCP_CREDENTIALS_FILE`, `CAPTURE_PRIVATE_KEY_FILE` or `MAILBOX_HMAC_KEY_FILE`; `readFileSpy` never called with those files' paths (A-248) |
+| TP-8.15 | S-8 | U | F-96, F-10 | API config | Build an `ApiContainer`; `configKeysFor("api")`; `loadConfig("api", env, readFileSpy)` with every capture variable set; (A-251) `loadConfig` for `api`, `migrate`, worker `capture`, worker `general` with an `env` `Proxy` recording reads | No `captureUnsealer` member; the key list has no `KMS_PROVIDER`, `GCP_CREDENTIALS_FILE`, `CAPTURE_PRIVATE_KEY_FILE` or `MAILBOX_HMAC_KEY_FILE`; `readFileSpy` never called with those files' paths (A-248); (A-251) each recorded set ⊆ `configKeysFor(kind, roles)` |
 | TP-9.1 | S-9 | U | F-130 | none | `{"rates":{"EGP":48.123456789012345,"X":1e-3}}`; `normaliseRate("48.123456789012345")`, `("0")`, `("-1")`, `("1e12")`, `("abc")` | `"48.123456789012345"`, `"1e-3"` as strings; `"48.123456789012"`; null ×4 |
 | TP-9.2 | S-9 | I | F-132 | currencies loaded | `convert(EGP 100.00, EGP, d)` | Same money; provisional false; rateDate d |
 | TP-9.3 | S-9 | I | F-132 | day 2026-10-04: EGP 48.5, JPY 149.25 | `convert(EGP 123.45, JPY, 2026-10-04)` | JPY 380; provisional false |
