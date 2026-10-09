@@ -21,7 +21,11 @@ import type { ApiContainer } from "../container.js";
 import { readJournal } from "../db/migrations.js";
 import { createCommitTracker } from "../db/transaction.js";
 import { createErrorInterceptor } from "../errors/interceptor.js";
-import { registerRequestLog, type RequestLogRequest } from "../observability/requestLog.js";
+import {
+  recordRequest,
+  registerRequestLog,
+  type RequestLogRequest,
+} from "../observability/requestLog.js";
 import {
   applySecurityHeaders,
   registerBodyHandling,
@@ -106,16 +110,19 @@ export async function createApiServer(
       applySecurityHeaders(reply);
       reply.header("x-request-id", request.id);
       reply.code(400);
-      // No hook runs for these replies, so F-38's line is written here.
-      c.logger.info("http_request", {
-        method: request.method,
-        route: "/unmatched",
-        status: 400,
-        statusClass: "4xx",
-        durationMs: reply.elapsedTime,
-        clientKind: "other",
-        requestId: request.id,
-      });
+      // No hook runs for these replies, so the request is recorded here (A-183).
+      recordRequest(
+        { logger: c.logger, metrics: c.metrics },
+        {
+          method: request.method,
+          route: "/unmatched",
+          status: 400,
+          durationMs: reply.elapsedTime,
+          clientKind: "other",
+          clientVersion: null,
+          requestId: request.id,
+        },
+      );
       void reply.send({
         defined: true,
         code: "VALIDATION_FAILED",
@@ -131,14 +138,17 @@ export async function createApiServer(
       });
     },
     clientErrorHandler: (err: Error, socket: Socket) => {
+      // A-184: the peer is gone; nothing is written and nothing counted.
       if ((err as { code?: unknown }).code === "ECONNRESET" || socket.destroyed) return;
+      if (!socket.writable) {
+        socket.destroy();
+        return;
+      }
       const reason = clientErrorReason(err);
       c.metrics.httpClientErrors.add(1, { reason });
-      if (socket.writable) {
-        socket.write(
-          `${CLIENT_ERROR_RESPONSES[reason]}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`,
-        );
-      }
+      socket.write(
+        `${CLIENT_ERROR_RESPONSES[reason]}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`,
+      );
       socket.destroy();
     },
   });

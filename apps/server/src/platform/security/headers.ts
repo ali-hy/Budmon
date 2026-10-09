@@ -1,6 +1,6 @@
 // F-61 security headers and F-62 body handling (delivered in S-4, A-124).
 import helmet from "@fastify/helmet";
-import type { FastifyError, FastifyInstance, FastifyReply } from "fastify";
+import type { FastifyError, FastifyInstance } from "fastify";
 import secureJson from "secure-json-parse";
 import type { ErrorReporter } from "../observability/errorReporter.js";
 import type { Logger } from "../observability/logger.js";
@@ -23,7 +23,7 @@ export async function registerSecurityHeaders(app: FastifyInstance): Promise<voi
 
 /** F-61's headers as helmet sends them (A-151), for responses written outside the hooks that
  * helmet uses: Fastify's frameworkErrors answer before any onRequest hook runs (A-178). */
-const SECURITY_HEADERS: Readonly<Record<string, string>> = {
+export const SECURITY_HEADERS: Readonly<Record<string, string>> = {
   "content-security-policy": "default-src 'none';frame-ancestors 'none'",
   "cross-origin-opener-policy": "same-origin",
   "cross-origin-resource-policy": "same-origin",
@@ -38,7 +38,9 @@ const SECURITY_HEADERS: Readonly<Record<string, string>> = {
   "x-xss-protection": "0",
 };
 
-export function applySecurityHeaders(reply: FastifyReply): void {
+export function applySecurityHeaders(reply: {
+  header(name: string, value: string): unknown;
+}): void {
   for (const [name, value] of Object.entries(SECURITY_HEADERS)) reply.header(name, value);
 }
 
