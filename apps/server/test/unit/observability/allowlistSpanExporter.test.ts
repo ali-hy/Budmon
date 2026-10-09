@@ -244,6 +244,7 @@ describe("TP-3.26x: AllowlistSpanExporter, further cases (F-40)", () => {
         "db.statement",
         "db.postgresql.",
         "messaging.",
+        "pgboss.", // A-238
         "fastify.",
         "hook.",
         "service.name",
@@ -540,5 +541,28 @@ describe("TP-3.7: pg.query span names rewritten to keyword + database (A-237)", 
 
     expect(inner.spans[0]?.name).toBe("span");
     expect(sums).toEqual({ expected: 0, unexpected: 1 });
+  });
+});
+
+describe("TP-3.7: pg-boss's own attributes are expected drops (A-238)", () => {
+  it("TP-3.7: a span from scope pg-boss with pgboss.schema, pgboss.job.retry_count and pgboss.job.state drops all three as expected, none unexpected", () => {
+    const { inner, sums } = exportThrough(
+      makeSpans(
+        [
+          {
+            attributes: {
+              "pgboss.schema": "pgboss",
+              "pgboss.job.retry_count": 1,
+              "pgboss.job.state": "retry",
+            },
+          },
+        ],
+        "process test.ok",
+        "pg-boss",
+      ),
+    );
+
+    expect(inner.spans[0]?.attributes).toEqual({});
+    expect(sums).toEqual({ expected: 3, unexpected: 0 });
   });
 });
