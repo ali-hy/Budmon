@@ -2,7 +2,7 @@
 module: platform
 doc: lld
 status: approved # draft | in-review | approved
-version: 0.54
+version: 0.55
 hld_version: 1.3
 author: planner
 approved_by: the user (project owner), delegated auto-approval
@@ -120,6 +120,7 @@ Nothing in that list changes application code (D-29 rule 2).
 | 0.52    | 2026-10-09 | Implementation-time amendment A-200 (S-5 review N-3): `randomToken`'s 16..64-byte bounds confirmed and stated in its signature comment; TP-5.9 adds the boundaries. Approval stands. |
 | 0.53    | 2026-10-09 | Implementation-time amendments A-201 to A-210 (test-architect, S-6 tests `e554a98`). `runWorker(env, overrides)` and a bundle fixture; `buildJobRegistry()`; gap-check enqueue only when registered; A-179 narrowed to fresh databases, queue steps always run; logger parameters for `syncQueues` and F-79 (`PlatformMetrics`); `attempt` = `retryCount + 1`; healthcheck reads the file content and `PORT`; F-90 starts the send-only pg-boss; F-80's handler exports and one log line per run. Tests: TP-2.15, TP-6.6, TP-6.7, TP-6.9, TP-6.10, TP-6.12, TP-6.13, TP-6.15 changed. Approval stands. |
 | 0.54    | 2026-10-09 | Implementation-time amendments A-211 to A-219: the engineer's S-6 choices (`518d36b`). Confirmed: `runWorker` owns its signal handlers; the migrator creates schema `pgboss`; step 6's pg-boss connection; pg-boss logins per mode; `platform.exports-purge` deferred to S-10; `queue_depth` refresh; `queue_error` and `cli_failed` log events; the job span is pg-boss's CONSUMER `process <queue>`. Overruled: `jobs:dead` uses a new `cli` pg-boss mode with supervise and schedule off. Tests: TP-6.11 extended. Approval stands. |
+| 0.55    | 2026-10-09 | Implementation-time amendments A-220 to A-225: the engineer's S-6 `test:int` fixes (`9663c94`), all confirmed. pg-boss's `CREATE SCHEMA` stripped from its plan; `registerInstance` only for the queue login (no `DELETE` grant); `JobFailure.toJSON()`; `stop()` keeps the pool for `container.close()`; `syncQueues` starts pg-boss and skips `__pgboss__` queues; `jobs:dead` builds no container; the api cleans up and exits 1 after `startup_failed`. No test changes. Approval stands. |
 
 ## Amendments
 
@@ -344,6 +345,12 @@ Nothing in that list changes application code (D-29 rule 2).
 | A-217 | Extra log events `queue_error` and `cli_failed` (software-engineer). | **Confirmed and recorded:** `error("queue_error", describeFailure(err), err)` for pg-boss `error` events (F-77); `error("cli_failed", describeFailure(err))` when a CLI command fails (F-93), before its non-zero exit. | F-77, F-93 | none | planner decision |
 | A-218 | `jobs:dead` starts the general pg-boss with supervise and schedule on for the command's duration; is that appropriate? (software-engineer) | **Overruled.** A one-off command must not run maintenance or install schedules beside the real worker. F-77 gains mode **`cli`**: the queue login (`config.worker.queue.user`), pool `max` 2, `supervise: false`, `schedule: false`; F-93's `jobs:dead` commands start a `cli` instance and stop it before exiting. | F-77, F-93, TP-6.11 | none | planner decision |
 | A-219 | Is the job span pg-boss's own CONSUMER span, and does F-76's wrapper create none? (coordinator, for TP-6.15) | **Confirmed against pg-boss 12.36.0's `telemetry.js`:** each job runs inside a CONSUMER span named `process <queue>` (e.g. `process test.select-one`), with `messaging.*` attributes (dropped as `expected`, F-40); F-76 creates no span of its own, so a handler's `pg` span is a child of that CONSUMER span. Queue names pass A-164's span-name rule. | F-36, F-76, TP-6.15 | none | planner decision |
+| A-220 | Postgres checks `CREATE` on the database even for `CREATE SCHEMA IF NOT EXISTS`, so pg-boss's plan fails as `budmon_queue` (software-engineer, `9663c94`). | **Confirmed:** F-74 removes pg-boss's own `CREATE SCHEMA` statement from the plan; the migrator has already created `pgboss` (A-212). | F-74 | none | planner decision |
+| A-221 | `registerInstance` is on only for the queue login (general, cli): pg-boss prunes its instance registry with `DELETE`, which F-74 doesn't grant to `budmon_app` or `budmon_capture`. Or grant `DELETE`? (software-engineer) | **Confirmed; no `DELETE` grant.** `budmon_app` and `budmon_capture` keep `SELECT, INSERT, UPDATE` on `pgboss` (least privilege: they send and work jobs, they don't manage pg-boss's bookkeeping). `registerInstance: true` only for `general` and `cli`, which log in as `budmon_queue` (the schema owner); `send-only` and `capture` set it false. | F-74, F-77 | none | planner decision |
+| A-222 | `JobFailure.toJSON()` returns only `message` and `stack`, because pg-boss serialises errors through `toJSON` (software-engineer). | **Confirmed:** together with "no other own properties", it guarantees the stored `output` holds exactly those two fields. | F-76 | none | planner decision |
+| A-223 | F-78's `stop()` leaves the pool open (`close: false`) so dead-letter calls work during shutdown; `container.close()` closes it (software-engineer). | **Confirmed:** `stop()` calls `boss.stop({ graceful: true, timeout: 30000, close: false })`; `container.close()` closes the pools within A-180's budget. | F-78, F-96 | none | planner decision |
+| A-224 | F-75 calls `boss.start()` first (a no-op when started) and skips queues named `__pgboss__*` (pg-boss internals) (software-engineer). | **Confirmed:** internal queues are neither synced nor reported as `queue_unregistered`. | F-75 | none | planner decision |
+| A-225 | `jobs:dead` builds no container (its own stderr logger and a `cli` pg-boss); the api now shuts telemetry down and exits 1 after `startup_failed` once pg-boss has started, instead of hanging (software-engineer). | **Confirmed both.** `jobs:dead` needs only F-77 and F-31 (`stream: "stderr"`, A-109). F-90: after a start-up failure following `container.boss.start()`, it logs `startup_failed`, runs `container.close()` and `getTelemetry().shutdown()` within A-180's 8 s budget, and exits 1 (F-91 the same with its budget). | F-90, F-91, F-93 | none | planner decision |
 
 ## 1. Deviations from the HLD, and decisions the HLD left open
 
@@ -1643,7 +1650,7 @@ Pure functions with no I/O. Imported by the server and the web app. Android mirr
 - **File:** `platform/queue/queueSchema.ts` · **Layer:** infrastructure (schema step 3)
 - **Signature:** `export async function installOrUpgradeQueueSchema(migrator: DbHandle): Promise<"installed" | "upgraded" | "current">`
 - **Behaviour:**
-  1. As `budmon_migrator`: `CREATE SCHEMA IF NOT EXISTS pgboss AUTHORIZATION budmon_queue` (A-212). Then in one transaction: `SET LOCAL ROLE budmon_queue`; pg-boss's plans run with their own `BEGIN`/`COMMIT` stripped. The target version is `pgboss.schema` from pg-boss's `package.json` (located with `createRequire(import.meta.url).resolve("pg-boss")` and walking up to the package root; 44 for 12.36.0).
+  1. As `budmon_migrator`: `CREATE SCHEMA IF NOT EXISTS pgboss AUTHORIZATION budmon_queue` (A-212). Then in one transaction: `SET LOCAL ROLE budmon_queue`; pg-boss's plans run with their own `BEGIN`/`COMMIT` and their `CREATE SCHEMA` statement stripped (A-220). The target version is `pgboss.schema` from pg-boss's `package.json` (located with `createRequire(import.meta.url).resolve("pg-boss")` and walking up to the package root; 44 for 12.36.0).
   2. If schema `pgboss` doesn't exist, executes `getConstructionPlans("pgboss")` → `"installed"`. Else reads `SELECT version FROM pgboss.version`: below target → executes `getMigrationPlans("pgboss", current)` → `"upgraded"`; equal → `"current"`.
   3. Then, still as `budmon_queue`:
      - `GRANT USAGE ON SCHEMA pgboss TO budmon_app, budmon_capture`;
@@ -1659,7 +1666,7 @@ Pure functions with no I/O. Imported by the server and the web app. Android mirr
   - Uses a pg-boss instance with the migrator pool's connection settings and `options: "-c role=budmon_queue"`, started, synced and stopped within the step (A-213).
   - Ensures both dead-letter queues exist (`policy "standard"`, `retentionSeconds 2592000`, `deleteAfterSeconds 2592000`).
   - For each definition: `createQueue(name, { policy, retryLimit, retryDelay, retryBackoff, expireInSeconds, deleteAfterSeconds: 604800, retentionSeconds: 1209600, deadLetter })` if missing, else `updateQueue` with the same options except `policy`.
-  - Queues that exist but aren't registered are left alone and logged as `warn("queue_unregistered", { queue })`.
+  - Calls `boss.start()` first (a no-op when started). Queues that exist but aren't registered are left alone and logged as `warn("queue_unregistered", { queue })`; pg-boss's internal `__pgboss__*` queues are skipped entirely (A-224).
 - **Errors:** an existing queue whose policy differs throws `SchemaStepError("queue_policy_changed", name)`: a policy change needs a queue-upgrade release (D-12).
 
 #### F-76: `wrapHandler` and `JobFailure`
@@ -1672,7 +1679,7 @@ Pure functions with no I/O. Imported by the server and the web app. Android mirr
   4. On throw (or a failed parse):
      - logs `warn("job_failed", { jobName, attempt, errorKey, errorClass })` with F-33;
      - reports to Sentry when the error isn't a `BudmonError`;
-     - throws a new `JobFailure` whose `message` is `s.key ?? s.code ?? s.class` and whose `stack` is `"JobFailure: " + message + "\n    " + s.frames.join("\n    ")`. It has **no other own properties**, so pg-boss's stored `output` holds only `message` and `stack`.
+     - throws a new `JobFailure` whose `message` is `s.key ?? s.code ?? s.class` and whose `stack` is `"JobFailure: " + message + "\n    " + s.frames.join("\n    ")`. It has **no other own properties** and its `toJSON()` returns only `{ message, stack }` (A-222), so pg-boss's stored `output` holds only those.
   5. `attempt = job.retryCount + 1` (A-207). When `attempt > retryLimit` (the last attempt fails), increments `jobs_dead_lettered_total{queue}`.
 
 #### F-77: `createPgBoss`
@@ -1685,6 +1692,8 @@ Pure functions with no I/O. Imported by the server and the web app. Android mirr
   | `send-only` (api) | `config.db.user` (`budmon_app`) | 2 | false / false |
   | `capture` | `config.db.user` (`budmon_capture` in every deployed stage; `budmon_app` in a development worker running both roles, A-214) | 3 | false / false |
   | `cli` (A-218) | `config.worker.queue.user` | 2 | false / false |
+
+  `registerInstance` is true only for `general` and `cli` (the queue login owns pg-boss's instance registry; A-221).
   | `general` | `budmon_queue` | `cfg.worker.queue.poolMax` | true / true |
 
   The `error` event is logged as `error("queue_error", describeFailure(err), err)` (A-217).
@@ -1698,7 +1707,7 @@ Pure functions with no I/O. Imported by the server and the web app. Android mirr
   3. `boss.work(name, { batchSize: 1, pollingIntervalSeconds: 2 }, wrapHandler(...))`.
   4. General role: for each definition with `cron`, `boss.schedule(name, cron, {}, { tz: "UTC" })`. It also registers the `queue_depth` observable gauge, reporting `queuedCount` from `boss.getQueues()` cached at start and refreshed every 60 s (A-216). It then enqueues `platform.fx-gap-check` once with `singletonKey "startup"` (F-139), **only if** `c.registry.get("platform.fx-gap-check")` exists (S-9 registers it, A-203).
   5. Starts F-79.
-  - `stop()` calls `boss.stop({ graceful: true, timeout: 30000 })` for each instance.
+  - `stop()` calls `boss.stop({ graceful: true, timeout: 30000, close: false })` for each instance; `container.close()` closes the pools (A-223).
 - **Errors:** a missing queue throws `MissingQueueError(name)` and the process exits 1 with `error("queue_missing", { queue })`. A missing handler throws `Error("no handler for <name>")`.
 
 #### F-78b: `runGeneralStartHooks` (A-26)
@@ -1755,7 +1764,7 @@ Pure functions with no I/O. Imported by the server and the web app. Android mirr
   - On `SIGTERM`/`SIGINT`, within one **8 s** budget (A-180): `app.close()` (up to 5 s), then `container.close()` and `getTelemetry().shutdown()` (each at most 2 s, within what remains); when the budget runs out, exit 0 anyway (unflushed telemetry is dropped). Compose gives `api` `stop_grace_period: 15s`.
   - Logs `info("api_started")` with no fields; `service` and `release` are the logger's fixed keys (A-161).
   - **Process handlers and start-up logger (A-118, A-120):** first `const state = startupState("api", process.env)` and `installFatalHandlers(state)` (F-39), before anything else; after `loadConfig` succeeds, `state.logger` and `state.reporter` are replaced by the configured logger and `initSentry`'s reporter. Start-up failures before that log through `state.logger`. F-91 the same with `"worker"`.
-- **Errors:** `ConfigError` → exit 78 (F-11). Any start-up error → `error("startup_failed", describeFailure(err))` (F-26, A-81; F-33 for the error report from S-3), then exit 1.
+- **Errors:** `ConfigError` → exit 78 (F-11). Any start-up error → `error("startup_failed", describeFailure(err))`, then (once the container exists) `container.close()` and `getTelemetry().shutdown()` within the 8 s budget (A-225) (F-26, A-81; F-33 for the error report from S-3), then exit 1.
 
 #### F-91: `main/worker.ts`
 - **Signals (A-211):** `runWorker` installs the `SIGTERM`/`SIGINT` handlers (`stop()` within 35 s, exit 0; backstop exit at 35 s); the entry guard installs F-39's fatal handlers and maps failures to exit codes (78 config, 1 after `startup_failed`).
