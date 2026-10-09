@@ -4,11 +4,14 @@
 // TP-8.7's "one row updated concurrently between select and update" has no hook in F-117; the
 // test wraps the database so that, just before the rewrap's UPDATE of the chosen row runs, another
 // connection changes that row (re-sealed under k2), so the rewrap's `AND <col> = $old` matches 0.
+// A-245 accepts this proxy. A-253's cases re-seal the row under the old key instead, so the run
+// must end (each id tried once per run) and the next run picks the row up.
 import { randomBytes } from "node:crypto";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { generateKeyPairSync } from "node:crypto";
+import { Temporal } from "@budmon/shared";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { runCli } from "../../../src/main/cli.js";
 import { createApiContainer, createWorkerContainer } from "../../../src/platform/container.js";
@@ -32,6 +35,15 @@ import { keyVersionOf } from "../../../src/platform/crypto/envelope.js";
 import { rewrapApiSecrets, rewrapApiSecretsCommand } from "../../../src/platform/crypto/rewrap.js";
 import { createTestDatabase, type TestDatabase } from "../../support/testDatabase.js";
 import { testWorkerConfig } from "../../support/worker.js";
+
+/** A new RSA-3072 pair (configEnv's rsaKeyPair is cached). */
+function freshPair(): { publicPem: string; privatePem: string } {
+  const { publicKey, privateKey } = generateKeyPairSync("rsa", { modulusLength: 3072 });
+  return {
+    publicPem: publicKey.export({ type: "spki", format: "pem" }).toString(),
+    privatePem: privateKey.export({ type: "pkcs8", format: "pem" }).toString(),
+  };
+}
 
 const K1 = randomBytes(32);
 const K2 = randomBytes(32);
@@ -188,6 +200,65 @@ describe("TP-8.7: rewrapApiSecrets (F-117)", () => {
   });
 });
 
+describe("TP-8.7 (A-253, A-254): a concurrently changed row still on the old key", () => {
+  let testDb: TestDatabase;
+
+  beforeAll(async () => {
+    testDb = await createTestDatabase();
+    await sealedTable(testDb, "budmon_app");
+  });
+
+  afterAll(async () => {
+    await testDb.drop();
+  });
+
+  it("TP-8.7 (A-253, A-254): re-sealed under k1 by the proxy, the run ends with skipped 1 and one api_secrets_rewrap line; a second run re-wraps it", async () => {
+    const { k1Only, current } = ciphers();
+    for (const id of IDS.slice(0, 3)) {
+      await insert(testDb, id, k1Only.seal(Buffer.from(id), ctx(id)));
+    }
+    const raced = IDS[1] ?? "";
+    const changedTo = Buffer.from("changed concurrently, still k1");
+    const database = interceptUpdate(testDb.database, raced, async () => {
+      await query(
+        testDb.urlAs("budmon_migrator"),
+        "UPDATE sealed_test SET secret = $2 WHERE id = $1",
+        [raced, k1Only.seal(changedTo, ctx(raced))],
+      );
+    });
+    const logger = recordingLogger();
+
+    const first = await rewrapApiSecrets({
+      database,
+      cipher: current,
+      columns: [COLUMN_API],
+      logger,
+    });
+
+    expect(first).toEqual({ rewrapped: 2, skipped: 1 });
+    const lines = logger.lines.filter((l) => l.event === "api_secrets_rewrap");
+    expect(lines).toHaveLength(1);
+    expect(lines[0]?.level).toBe("info");
+    expect(lines[0]?.fields).toMatchObject({ fields: { count: 2 } });
+    const versions = new Map((await rows(testDb)).map((r) => [r.id, keyVersionOf(r.secret)]));
+    expect(versions.get(raced)).toBe("k1");
+
+    const second = await rewrapApiSecrets({
+      database: testDb.database,
+      cipher: current,
+      columns: [COLUMN_API],
+      logger: recordingLogger(),
+    });
+
+    expect(second).toEqual({ rewrapped: 1, skipped: 0 });
+    for (const row of await rows(testDb)) {
+      expect(keyVersionOf(row.secret), row.id).toBe("k2");
+      const expected = row.id === raced ? changedTo : Buffer.from(row.id);
+      expect(current.unseal(row.secret, ctx(row.id)), row.id).toEqual(expected);
+    }
+  });
+});
+
 describe("TP-8.8: the platform.capture-rewrap job (F-118)", () => {
   let testDb: TestDatabase;
 
@@ -255,6 +326,90 @@ describe("TP-8.8: the platform.capture-rewrap job (F-118)", () => {
       for (const row of await rows(testDb)) {
         expect(keyVersionOf(row.secret), row.id).toBe("local:2");
         expect(await unsealTwo.unseal(row.secret, ctx(row.id)), row.id).toEqual(plain.get(row.id));
+      }
+    } finally {
+      await c.close();
+    }
+  });
+});
+
+describe("TP-8.8 (A-253): a capture row whose re-seal is skipped", () => {
+  let testDb: TestDatabase;
+
+  beforeAll(async () => {
+    testDb = await createTestDatabase("budmon_capture");
+    await sealedTable(testDb, "budmon_capture");
+  });
+
+  afterAll(async () => {
+    await testDb.drop();
+  });
+
+  it("TP-8.8 (A-253): a row changed under local:1 during the run is skipped and the run ends; the next run re-seals it under local:2", async () => {
+    const one = freshPair();
+    const two = freshPair();
+    const old = createCaptureSealer({ publicKeyPem: one.publicPem, keyVersion: "local:1" });
+    const plain = new Map(IDS.slice(0, 2).map((id) => [id, Buffer.from(`capture-${id}`)]));
+    for (const [id, p] of plain) await insert(testDb, id, old.seal(p, ctx(id)));
+    const raced = IDS[0] ?? "";
+    const changedTo = Buffer.from("changed concurrently, still local:1");
+    const unsealOne = createLocalCaptureUnsealer({ privateKeyPem: one.privatePem });
+    const unsealTwo = createLocalCaptureUnsealer({ privateKeyPem: two.privatePem });
+    const both: CaptureUnsealer = {
+      unseal: (envelope, c) =>
+        keyVersionOf(envelope) === "local:1"
+          ? unsealOne.unseal(envelope, c)
+          : unsealTwo.unseal(envelope, c),
+    };
+    const sealedColumns = createSealedColumnRegistry();
+    sealedColumns.register({ ...COLUMN_API, provider: "capture" });
+    const config = testWorkerConfig(
+      testDb.endpoint,
+      testDb.name,
+      "capture",
+      { CAPTURE_KEY_VERSION: "local:2" },
+      { CAPTURE_PUBLIC_KEY_FILE: two.publicPem, CAPTURE_PRIVATE_KEY_FILE: two.privatePem },
+    );
+    const c = createWorkerContainer(config, {
+      ...observed().overrides,
+      sealedColumns,
+      captureUnsealer: both,
+    });
+    try {
+      const raceDb = interceptUpdate(c.database, raced, async () => {
+        await query(
+          testDb.urlAs("budmon_migrator"),
+          "UPDATE sealed_test SET secret = $2 WHERE id = $1",
+          [raced, old.seal(changedTo, ctx(raced))],
+        );
+      });
+      const runOnce = async (container: typeof c): Promise<void> => {
+        const handler = buildHandlerMap(container).get("platform.capture-rewrap");
+        expect(handler).toBeDefined();
+        await handler?.(
+          {},
+          {
+            jobId: "0190a0b0-1c2d-7e3f-8a4b-5c6d7e8f9a0b",
+            attempt: 1,
+            createdOn: Temporal.Now.instant(),
+            logger: container.logger,
+            signal: new AbortController().signal,
+          },
+        );
+      };
+
+      await runOnce({ ...c, database: raceDb });
+
+      const afterFirst = new Map((await rows(testDb)).map((r) => [r.id, keyVersionOf(r.secret)]));
+      expect(afterFirst.get(raced)).toBe("local:1");
+      expect(afterFirst.get(IDS[1] ?? "")).toBe("local:2");
+
+      await runOnce(c);
+
+      for (const row of await rows(testDb)) {
+        expect(keyVersionOf(row.secret), row.id).toBe("local:2");
+        const expected = row.id === raced ? changedTo : plain.get(row.id);
+        expect(await unsealTwo.unseal(row.secret, ctx(row.id)), row.id).toEqual(expected);
       }
     } finally {
       await c.close();

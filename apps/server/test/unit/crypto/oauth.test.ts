@@ -202,6 +202,27 @@ describe("TP-8.12: exchangeAuthorizationCode (F-120)", () => {
     ["403", () => Promise.resolve(json(403, { error: CANARIES.payee })), "rejected", false],
     ["503", () => Promise.resolve(json(503, { error: CANARIES.payee })), "server", true],
     ["429", () => Promise.resolve(json(429, {})), "server", true],
+    [
+      "302 with a Location (A-255: not followed)",
+      () =>
+        Promise.resolve(
+          new Response(null, { status: 302, headers: { location: "https://evil.example/" } }),
+        ),
+      "rejected",
+      false,
+    ],
+    [
+      "200 with refresh_token but no access_token (A-255)",
+      () => Promise.resolve(json(200, { refresh_token: "r", expires_in: 3600, scope: "openid" })),
+      "server",
+      true,
+    ],
+    [
+      "200 without expires_in (A-255)",
+      () => Promise.resolve(json(200, { access_token: "a", refresh_token: "r", scope: "openid" })),
+      "server",
+      true,
+    ],
     ["a network error", () => Promise.reject(new TypeError("fetch failed")), "network", true],
     [
       "a timeout",

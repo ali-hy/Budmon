@@ -1,4 +1,9 @@
-// The API can't unseal capture secrets (F-96, F-10, A-248). TP-8.15, plus extra cases TP-8.17x.
+// The API can't unseal capture secrets (F-96, F-10, A-248), and configKeysFor doesn't drift from
+// what the schema reads (A-251). TP-8.15, plus extra cases TP-8.17x.
+//
+// The A-251 drift guard records reads on the env given to parseConfig (F-10), the function
+// loadConfig calls: loadConfig itself enumerates its env (Object.entries) to scope it, so a
+// recording Proxy there would record every key it was given.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { describe, expect, it } from "vitest";
 import { loadConfig } from "../../../src/platform/config/loadConfig.js";
@@ -7,11 +12,24 @@ import { observed } from "../../support/api.js";
 import {
   base64Bytes,
   devApi,
+  devMigrate,
+  devWorker,
+  type Fixture,
+  prodApi,
+  prodMigrate,
+  prodWorkerCapture,
+  prodWorkerGeneral,
   readFileFrom,
   rsaKeyPair,
   withFile,
 } from "../../support/configEnv.js";
-import { configKeysFor } from "../../../src/platform/config/schema.js";
+import {
+  allConfigKeys,
+  configKeysFor,
+  parseConfig,
+  type ProcessKind,
+  type WorkerRole,
+} from "../../../src/platform/config/schema.js";
 
 const CAPTURE_ONLY = [
   "CAPTURE_PRIVATE_KEY_FILE",
@@ -83,5 +101,52 @@ describe("TP-8.15: no capture unsealer on the API side (F-96, F-10)", () => {
     } finally {
       await c.close();
     }
+  });
+});
+
+describe("TP-8.15 (A-251): configKeysFor covers every variable the schema reads", () => {
+  function trimOneNewline(text: string): string {
+    if (text.endsWith("\r\n")) return text.slice(0, -2);
+    return text.endsWith("\n") ? text.slice(0, -1) : text;
+  }
+
+  it.each<[string, () => Fixture]>([
+    ["api (development)", devApi],
+    ["api (production)", () => prodApi()],
+    ["migrate (development)", devMigrate],
+    ["migrate (production)", prodMigrate],
+    ["worker capture,general (development)", devWorker],
+    ["worker capture (production)", () => prodWorkerCapture()],
+    ["worker general (production)", () => prodWorkerGeneral()],
+  ])("TP-8.15 (A-251): %s reads only variables in configKeysFor(kind, roles)", (_label, make) => {
+    const f = make();
+    const kind: ProcessKind = f.kind;
+    const roles =
+      kind === "worker"
+        ? (f.env["WORKER_ROLES"] ?? "")
+            .split(",")
+            .map((r) => r.trim())
+            .filter((r): r is WorkerRole => r === "capture" || r === "general")
+        : undefined;
+    const allowed = new Set(configKeysFor(kind, roles));
+    // Every known variable outside the list is present too, so a schema read of one is recorded.
+    const env: Record<string, string | undefined> = { ...f.env };
+    for (const key of allConfigKeys()) if (!allowed.has(key) && !(key in env)) env[key] = "x";
+    const read = new Set<string>();
+    const recording = new Proxy(env, {
+      get(target, key, receiver) {
+        if (typeof key === "string") read.add(key);
+        return Reflect.get(target, key, receiver) as unknown;
+      },
+    });
+    const files = Object.fromEntries(
+      [...f.files].map(([path, content]) => [path, trimOneNewline(content)]),
+    );
+
+    const result = parseConfig(kind, { env: recording, files });
+
+    expect(result.ok, JSON.stringify(result.ok ? null : result.problems)).toBe(true);
+    expect(read.size).toBeGreaterThan(0);
+    expect([...read].filter((key) => !allowed.has(key))).toEqual([]);
   });
 });

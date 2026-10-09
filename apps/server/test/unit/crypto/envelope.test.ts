@@ -149,6 +149,18 @@ describe("TP-8.3: seal and unseal with a local key (F-111, F-113)", () => {
     await expectCryptoError(() => u.unseal(envelope, CTX), "EnvelopeAuthError");
   });
 
+  it("TP-8.3 (A-256): unsealing with a different RSA-3072 private key is EnvelopeAuthError", async () => {
+    const { sealer: s } = sealer();
+    // rsaKeyPair() is cached, so the other key is generated here.
+    const otherPem = generateKeyPairSync("rsa", { modulusLength: 3072 })
+      .privateKey.export({ type: "pkcs8", format: "pem" })
+      .toString();
+    const other = createLocalCaptureUnsealer({ privateKeyPem: otherPem });
+    const envelope = s.seal(Buffer.from("x"), CTX);
+
+    await expectCryptoError(() => other.unseal(envelope, CTX), "EnvelopeAuthError");
+  });
+
   it("TP-8.17x: two seals of the same plaintext differ (fresh DEK and nonce)", () => {
     const { sealer: s } = sealer();
 
