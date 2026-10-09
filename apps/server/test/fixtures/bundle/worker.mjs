@@ -4,10 +4,21 @@
 // apps/server: F-89 strips `.mjs`, so this process gets worker telemetry. It imports runWorker
 // from the bundle (importing doesn't run worker.js's entry guard) and passes the test registry
 // and handlers for TP-6.13 and TP-6.15. The test.* queues exist in every template copy (A-202).
-import { readFileSync } from "node:fs";
+import fs, { readFileSync } from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import pg from "pg";
 import { z } from "zod";
 import { runWorker } from "../../../dist/main/worker.js";
+
+// F-79 writes the fixed /tmp/heartbeat, which healthcheck.test.ts reads in parallel; this
+// process writes its heartbeat to a file of its own instead (live ESM bindings follow the patch).
+const realWriteFileSync = fs.writeFileSync;
+const ownHeartbeat = path.join(tmpdir(), `budmon-fixture-heartbeat-${String(process.pid)}`);
+fs.writeFileSync = (file, ...rest) =>
+  realWriteFileSync(file === "/tmp/heartbeat" ? ownHeartbeat : file, ...rest);
+syncBuiltinESMExports();
 
 function job(name) {
   return {

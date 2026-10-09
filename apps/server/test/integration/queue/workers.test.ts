@@ -7,7 +7,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { CANARIES, scanForCanaries } from "@budmon/test-support";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { recordingLogger } from "../../support/platform.js";
 import { query } from "../../support/postgres.js";
@@ -36,6 +36,17 @@ import {
   createPgBoss,
   startWorkers,
 } from "../../../src/platform/queue/workers.js";
+
+// F-79 writes the fixed /tmp/heartbeat, which healthcheck.test.ts (running in parallel) reads:
+// the workers started here write that one path nowhere.
+vi.mock("node:fs", async (importOriginal) => {
+  const fs = await importOriginal<typeof import("node:fs")>();
+  const writeFileSync: typeof fs.writeFileSync = (file, ...rest) => {
+    if (file === "/tmp/heartbeat") return;
+    fs.writeFileSync(file, ...rest);
+  };
+  return { ...fs, default: { ...fs, writeFileSync }, writeFileSync };
+});
 
 function queueBoss(c: WorkerContainer): PgBossLike {
   return c.queueBoss ?? c.boss;
@@ -317,25 +328,33 @@ describe("TP-6.9: platform.fx-gap-check only when registered (F-78, A-203)", () 
   }, 60_000);
 });
 
+/**
+ * A general container on its own template copy with one test.fail job dead-lettered, its
+ * workers stopped (so a redriven job stays queued).
+ */
+async function withDeadLetteredJob(): Promise<{ built: BuiltWorker; failId: string | null }> {
+  const built = await buildWorkerContainer("general", { registry: registryOf([TEST_JOBS.fail]) });
+  const w = await startWorkers(
+    built.container,
+    new Map<string, JobHandler>([[TEST_JOBS.fail.name, () => Promise.reject(new Error("x"))]]),
+  );
+  const c = built.container;
+  const failId = await c.queue.enqueue(c.database.handle, TEST_JOBS.fail, { n: 3 });
+  await waitFor(
+    async () => (await jobRows(c.database, "dead-letter.general")).length > 0,
+    60_000,
+    "a dead-lettered job",
+  );
+  await w.stop();
+  return { built, failId };
+}
+
 describe("TP-6.11: dead-letter list and redrive (F-81)", () => {
   let built: BuiltWorker;
   let failId: string | null;
 
   beforeAll(async () => {
-    built = await buildWorkerContainer("general", { registry: registryOf([TEST_JOBS.fail]) });
-    const w = await startWorkers(
-      built.container,
-      new Map<string, JobHandler>([[TEST_JOBS.fail.name, () => Promise.reject(new Error("x"))]]),
-    );
-    const c = built.container;
-    failId = await c.queue.enqueue(c.database.handle, TEST_JOBS.fail, { n: 3 });
-    await waitFor(
-      async () => (await jobRows(c.database, "dead-letter.general")).length > 0,
-      60_000,
-      "a dead-lettered job",
-    );
-    // Stopped, so a redriven job stays queued.
-    await w.stop();
+    ({ built, failId } = await withDeadLetteredJob());
   }, 90_000);
 
   afterAll(async () => {
@@ -363,6 +382,26 @@ describe("TP-6.11: dead-letter list and redrive (F-81)", () => {
     expect(await redriveDeadLetter(boss, "general", "0190a0b0-1c2d-7e3f-8a4b-5c6d7e8f9a0b")).toBe(
       0,
     );
+  });
+
+  it("TP-6.19x: listDeadLetters without a role covers both roles; the capture list is empty", async () => {
+    const boss = queueBoss(built.container);
+
+    expect(await listDeadLetters(boss, "capture")).toEqual([]);
+    expect((await listDeadLetters(boss)).length).toBeGreaterThanOrEqual(0);
+  });
+});
+
+// A-218's cases have their own dead-lettered job: TP-6.11's redrive removes the one above.
+describe("TP-6.11: jobs:dead runs a cli-mode pg-boss (F-93, A-218)", () => {
+  let built: BuiltWorker;
+
+  beforeAll(async () => {
+    ({ built } = await withDeadLetteredJob());
+  }, 90_000);
+
+  afterAll(async () => {
+    await built.close();
   });
 
   it("TP-6.11: (A-218) jobs:dead list through runCli prints the entry; no schedule row or pg-boss maintenance happens during the command", async () => {
@@ -406,13 +445,6 @@ describe("TP-6.11: dead-letter list and redrive (F-81)", () => {
     } finally {
       await boss.stop({ graceful: false });
     }
-  });
-
-  it("TP-6.19x: listDeadLetters without a role covers both roles; the capture list is empty", async () => {
-    const boss = queueBoss(built.container);
-
-    expect(await listDeadLetters(boss, "capture")).toEqual([]);
-    expect((await listDeadLetters(boss)).length).toBeGreaterThanOrEqual(0);
   });
 });
 

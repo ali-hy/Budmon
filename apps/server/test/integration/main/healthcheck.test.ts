@@ -4,7 +4,7 @@
 // a second build in parallel would race). `--heartbeat` reads the fixed `/tmp/heartbeat` and
 // judges its content (F-79's epoch seconds, A-208); `--ready` requests
 // `http://127.0.0.1:${PORT}/health/ready`, so the stub API listens on a free port.
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { existsSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import path from "node:path";
@@ -14,17 +14,29 @@ import { SERVER_DIR } from "../../support/platform.js";
 const HEARTBEAT = "/tmp/heartbeat";
 const TSX = path.join(SERVER_DIR, "node_modules/.bin/tsx");
 
+/**
+ * Runs the entry asynchronously: a blocking spawn would stop this process's stub API from
+ * answering `--ready`.
+ */
 function healthcheck(
   arg: string,
   env: Record<string, string> = {},
-): { status: number | null; output: string } {
-  const result = spawnSync(TSX, ["src/main/healthcheck.ts", arg], {
-    cwd: SERVER_DIR,
-    env: { PATH: process.env["PATH"] ?? "", ...env },
-    encoding: "utf8",
-    timeout: 30_000,
+): Promise<{ status: number | null; output: string }> {
+  return new Promise((resolve) => {
+    const child = spawn(TSX, ["src/main/healthcheck.ts", arg], {
+      cwd: SERVER_DIR,
+      env: { PATH: process.env["PATH"] ?? "", ...env },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let output = "";
+    child.stdout.on("data", (c: Buffer) => (output += c.toString()));
+    child.stderr.on("data", (c: Buffer) => (output += c.toString()));
+    const timer = setTimeout(() => child.kill("SIGKILL"), 30_000);
+    child.on("close", (status) => {
+      clearTimeout(timer);
+      resolve({ status, output });
+    });
   });
-  return { status: result.status, output: `${result.stdout}${result.stderr}` };
 }
 
 describe("TP-6.10: healthcheck --heartbeat", () => {
@@ -46,50 +58,50 @@ describe("TP-6.10: healthcheck --heartbeat", () => {
     utimesSync(HEARTBEAT, now - mtimeAgeSeconds, now - mtimeAgeSeconds);
   }
 
-  it("TP-6.10: a fresh heartbeat exits 0", () => {
+  it("TP-6.10: a fresh heartbeat exits 0", async () => {
     beat(0);
 
-    const { status, output } = healthcheck("--heartbeat");
+    const { status, output } = await healthcheck("--heartbeat");
 
     expect(status, output).toBe(0);
   });
 
-  it("TP-6.10: a 61 s old heartbeat exits 1", () => {
+  it("TP-6.10: a 61 s old heartbeat exits 1", async () => {
     beat(61);
 
-    const { status, output } = healthcheck("--heartbeat");
+    const { status, output } = await healthcheck("--heartbeat");
 
     expect(status, output).toBe(1);
   });
 
-  it("TP-6.10: (A-208) content 'abc' exits 1", () => {
+  it("TP-6.10: (A-208) content 'abc' exits 1", async () => {
     writeFileSync(HEARTBEAT, "abc");
 
-    const { status, output } = healthcheck("--heartbeat");
+    const { status, output } = await healthcheck("--heartbeat");
 
     expect(status, output).toBe(1);
   });
 
-  it("TP-6.10: (A-208) a fresh timestamp in a file whose mtime is 2 minutes old exits 0 (the content decides)", () => {
+  it("TP-6.10: (A-208) a fresh timestamp in a file whose mtime is 2 minutes old exits 0 (the content decides)", async () => {
     beat(0, 120);
 
-    const { status, output } = healthcheck("--heartbeat");
+    const { status, output } = await healthcheck("--heartbeat");
 
     expect(status, output).toBe(0);
   });
 
-  it("TP-6.10: (A-208) a 61 s old timestamp in a file whose mtime is now exits 1", () => {
+  it("TP-6.10: (A-208) a 61 s old timestamp in a file whose mtime is now exits 1", async () => {
     beat(61, 0);
 
-    const { status, output } = healthcheck("--heartbeat");
+    const { status, output } = await healthcheck("--heartbeat");
 
     expect(status, output).toBe(1);
   });
 
-  it("TP-6.10: no heartbeat file exits 1", () => {
+  it("TP-6.10: no heartbeat file exits 1", async () => {
     rmSync(HEARTBEAT, { force: true });
 
-    const { status, output } = healthcheck("--heartbeat");
+    const { status, output } = await healthcheck("--heartbeat");
 
     expect(status, output).toBe(1);
   });
@@ -99,9 +111,11 @@ describe("TP-6.10: healthcheck --ready (PORT, A-208)", () => {
   let server: Server;
   let port = 0;
   let status = 200;
+  let readyRequests = 0;
 
   beforeAll(async () => {
     server = createServer((req, res) => {
+      if (req.url === "/health/ready") readyRequests += 1;
       res.writeHead(req.url === "/health/ready" ? status : 404);
       res.end();
     });
@@ -121,24 +135,30 @@ describe("TP-6.10: healthcheck --ready (PORT, A-208)", () => {
     });
   });
 
-  it("TP-6.10: the API on PORT answering 200 exits 0", () => {
+  it("TP-6.10: the API on PORT answering 200 exits 0", async () => {
     status = 200;
+    readyRequests = 0;
 
-    const { status: code, output } = healthcheck("--ready", { PORT: String(port) });
+    const { status: code, output } = await healthcheck("--ready", { PORT: String(port) });
 
     expect(code, output).toBe(0);
+    expect(readyRequests).toBe(1);
   });
 
-  it("TP-6.10: the API on PORT answering 503 exits 1", () => {
+  it("TP-6.10: the API on PORT answering 503 exits 1, having asked /health/ready", async () => {
     status = 503;
+    readyRequests = 0;
 
-    const { status: code, output } = healthcheck("--ready", { PORT: String(port) });
+    const { status: code, output } = await healthcheck("--ready", { PORT: String(port) });
 
+    // The stub answered 503: the exit isn't a timeout or a connection failure.
+    expect(readyRequests).toBe(1);
     expect(code, output).toBe(1);
   });
 
   it("TP-6.10: (A-208) --ready uses PORT: with the stub answering 200 but PORT pointing elsewhere, it exits 1", async () => {
     status = 200;
+    readyRequests = 0;
     const closed = await new Promise<number>((resolve) => {
       const probe = createServer();
       probe.listen(0, "127.0.0.1", () => {
@@ -150,8 +170,9 @@ describe("TP-6.10: healthcheck --ready (PORT, A-208)", () => {
       });
     });
 
-    const { status: code, output } = healthcheck("--ready", { PORT: String(closed) });
+    const { status: code, output } = await healthcheck("--ready", { PORT: String(closed) });
 
     expect(code, output).toBe(1);
+    expect(readyRequests).toBe(0);
   });
 });
