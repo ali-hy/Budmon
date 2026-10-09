@@ -2,7 +2,7 @@
 module: platform
 doc: lld
 status: approved # draft | in-review | approved
-version: 0.53
+version: 0.54
 hld_version: 1.3
 author: planner
 approved_by: the user (project owner), delegated auto-approval
@@ -119,6 +119,7 @@ Nothing in that list changes application code (D-29 rule 2).
 | 0.51    | 2026-10-09 | Implementation-time amendments A-194 to A-199: the engineer's S-5 choices (`56735d5`), confirmed. Coarse 429 via `CoarseRateLimitError`; only `Retry-After`; `windowSeconds` check; Argon2id as the binding default; `createApiContainer` needs `config.api` or a `rateLimiter`; A-186 only with HTTP RPC metadata. §2.4 already pins `@node-rs/argon2` 2.2.1 and `@fastify/rate-limit` 11.2.0. No test changes. Approval stands. |
 | 0.52    | 2026-10-09 | Implementation-time amendment A-200 (S-5 review N-3): `randomToken`'s 16..64-byte bounds confirmed and stated in its signature comment; TP-5.9 adds the boundaries. Approval stands. |
 | 0.53    | 2026-10-09 | Implementation-time amendments A-201 to A-210 (test-architect, S-6 tests `e554a98`). `runWorker(env, overrides)` and a bundle fixture; `buildJobRegistry()`; gap-check enqueue only when registered; A-179 narrowed to fresh databases, queue steps always run; logger parameters for `syncQueues` and F-79 (`PlatformMetrics`); `attempt` = `retryCount + 1`; healthcheck reads the file content and `PORT`; F-90 starts the send-only pg-boss; F-80's handler exports and one log line per run. Tests: TP-2.15, TP-6.6, TP-6.7, TP-6.9, TP-6.10, TP-6.12, TP-6.13, TP-6.15 changed. Approval stands. |
+| 0.54    | 2026-10-09 | Implementation-time amendments A-211 to A-219: the engineer's S-6 choices (`518d36b`). Confirmed: `runWorker` owns its signal handlers; the migrator creates schema `pgboss`; step 6's pg-boss connection; pg-boss logins per mode; `platform.exports-purge` deferred to S-10; `queue_depth` refresh; `queue_error` and `cli_failed` log events; the job span is pg-boss's CONSUMER `process <queue>`. Overruled: `jobs:dead` uses a new `cli` pg-boss mode with supervise and schedule off. Tests: TP-6.11 extended. Approval stands. |
 
 ## Amendments
 
@@ -334,6 +335,15 @@ Nothing in that list changes application code (D-29 rule 2).
 | A-208 | Healthcheck: is the 60 s measured on the file content or its mtime? Its fixed port 3000 forces tests to bind 3000 (test-architect). | **Content:** `--heartbeat` parses the file's epoch seconds (F-79 writes them) and compares with the current time; an unreadable or non-numeric file exits 1. **Port:** `--ready` requests `http://127.0.0.1:${PORT}/health/ready`, with `PORT` from the environment (default 3000), the same variable the api listens on. | F-175 (health checks), TP-6.10 | none | planner decision |
 | A-209 | Who calls `start()` on the api's send-only pg-boss (`BaseContainer.boss`)? (test-architect) | **F-90 step 4b:** `await container.boss.start()` after `createApiContainer`, before `listen`; `container.close()` stops it within the shutdown budget (A-180). Workers start theirs in F-78 step 1. | F-90 | none | planner decision |
 | A-210 | F-80's handler exports aren't named; does `idempotency_purged` log once per run or per batch? (test-architect) | **Exports** in `platform/maintenance/maintenanceJobs.ts`: `platformMaintenanceJobs` (the three definitions), `purgeIdempotencyRecords(deps: { database: Database; clock: Clock; logger: Logger }): Promise<number>`, `purgeRateLimitCounters(deps: same): Promise<number>`, and `maintenanceHandlers(c: WorkerContainer)` (the handler map merged by `buildHandlerMap`). **One log line per run** with the total: `info("idempotency_purged", { count })` and `info("rate_limits_purged", { count })`. | F-80, TP-6.12 | none | planner decision |
+| A-211 | Where F-91's signal handling lives (software-engineer, `518d36b`). | **Confirmed:** `runWorker` installs `SIGTERM`/`SIGINT` handlers that run `stop()` within the 35 s budget (A-180) and exit 0, with a backstop `exit(0)` at 35 s. The entry guard only installs F-39's fatal handlers and maps failures to exit codes (78 for `ConfigError`, 1 after `startup_failed` for anything else). | F-91 | none | planner decision |
+| A-212 | `budmon_queue` has no `CREATE` on the database, so who creates schema `pgboss`? (software-engineer) | **Confirmed:** F-74 runs `CREATE SCHEMA IF NOT EXISTS pgboss AUTHORIZATION budmon_queue` as `budmon_migrator`, then pg-boss's construction or migration plan as `budmon_queue` (`SET LOCAL ROLE`). The plans' own `BEGIN`/`COMMIT` are stripped and everything runs in F-74's single transaction, so a failed plan leaves nothing half-applied. | F-74 | none | planner decision |
+| A-213 | How step 6 connects (software-engineer). | **Confirmed:** F-75's pg-boss uses the migrator pool's connection settings with `options: "-c role=budmon_queue"`; it is started, syncs the queues and is stopped within the step. | F-75 | none | planner decision |
+| A-214 | pg-boss logins: send-only and capture use the configured `DB_USER`; general uses the queue login (software-engineer). | **Confirmed:** `send-only` and `capture` use `config.db.user`, which is `budmon_app` for the api and `budmon_capture` for worker-capture in every deployed stage; general uses `config.worker.queue.user` (`budmon_queue`). A development worker running both roles uses `budmon_app` for its capture instance, which is acceptable only there (production requires exactly one role per worker, F-10). F-77's table is updated accordingly. | F-77 | none | planner decision |
+| A-215 | `platform.exports-purge` is left out of `platformMaintenanceJobs` until its handler exists (software-engineer). | **Confirmed:** a registered job without a handler stops the worker (F-78), so the definition is added in **S-10** with F-144's handler. | F-80, S-10 | none | planner decision |
+| A-216 | The `queue_depth` gauge reads `getQueues()` at start and every 60 s (software-engineer). | **Confirmed:** the observable gauge reports the last cached counts, refreshed at start and every 60 s, so a metric collection never queries the database. | F-78 | none | planner decision |
+| A-217 | Extra log events `queue_error` and `cli_failed` (software-engineer). | **Confirmed and recorded:** `error("queue_error", describeFailure(err), err)` for pg-boss `error` events (F-77); `error("cli_failed", describeFailure(err))` when a CLI command fails (F-93), before its non-zero exit. | F-77, F-93 | none | planner decision |
+| A-218 | `jobs:dead` starts the general pg-boss with supervise and schedule on for the command's duration; is that appropriate? (software-engineer) | **Overruled.** A one-off command must not run maintenance or install schedules beside the real worker. F-77 gains mode **`cli`**: the queue login (`config.worker.queue.user`), pool `max` 2, `supervise: false`, `schedule: false`; F-93's `jobs:dead` commands start a `cli` instance and stop it before exiting. | F-77, F-93, TP-6.11 | none | planner decision |
+| A-219 | Is the job span pg-boss's own CONSUMER span, and does F-76's wrapper create none? (coordinator, for TP-6.15) | **Confirmed against pg-boss 12.36.0's `telemetry.js`:** each job runs inside a CONSUMER span named `process <queue>` (e.g. `process test.select-one`), with `messaging.*` attributes (dropped as `expected`, F-40); F-76 creates no span of its own, so a handler's `pg` span is a child of that CONSUMER span. Queue names pass A-164's span-name rule. | F-36, F-76, TP-6.15 | none | planner decision |
 
 ## 1. Deviations from the HLD, and decisions the HLD left open
 
@@ -1633,7 +1643,7 @@ Pure functions with no I/O. Imported by the server and the web app. Android mirr
 - **File:** `platform/queue/queueSchema.ts` · **Layer:** infrastructure (schema step 3)
 - **Signature:** `export async function installOrUpgradeQueueSchema(migrator: DbHandle): Promise<"installed" | "upgraded" | "current">`
 - **Behaviour:**
-  1. In one transaction: `SET LOCAL ROLE budmon_queue`. The target version is `pgboss.schema` from pg-boss's `package.json` (located with `createRequire(import.meta.url).resolve("pg-boss")` and walking up to the package root; 44 for 12.36.0).
+  1. As `budmon_migrator`: `CREATE SCHEMA IF NOT EXISTS pgboss AUTHORIZATION budmon_queue` (A-212). Then in one transaction: `SET LOCAL ROLE budmon_queue`; pg-boss's plans run with their own `BEGIN`/`COMMIT` stripped. The target version is `pgboss.schema` from pg-boss's `package.json` (located with `createRequire(import.meta.url).resolve("pg-boss")` and walking up to the package root; 44 for 12.36.0).
   2. If schema `pgboss` doesn't exist, executes `getConstructionPlans("pgboss")` → `"installed"`. Else reads `SELECT version FROM pgboss.version`: below target → executes `getMigrationPlans("pgboss", current)` → `"upgraded"`; equal → `"current"`.
   3. Then, still as `budmon_queue`:
      - `GRANT USAGE ON SCHEMA pgboss TO budmon_app, budmon_capture`;
@@ -1646,7 +1656,7 @@ Pure functions with no I/O. Imported by the server and the web app. Android mirr
 - **File:** `platform/queue/queueSync.ts` · **Layer:** service (schema step 6)
 - **Signature:** `export async function syncQueues(boss: PgBoss, registry: JobRegistry, logger: Logger /* A-205 */): Promise<{ created: number; updated: number }>`
 - **Behaviour:**
-  - Uses a pg-boss instance connected as `budmon_migrator` with `SET ROLE budmon_queue` through its `db` adapter (`options: "-c role=budmon_queue"`).
+  - Uses a pg-boss instance with the migrator pool's connection settings and `options: "-c role=budmon_queue"`, started, synced and stopped within the step (A-213).
   - Ensures both dead-letter queues exist (`policy "standard"`, `retentionSeconds 2592000`, `deleteAfterSeconds 2592000`).
   - For each definition: `createQueue(name, { policy, retryLimit, retryDelay, retryBackoff, expireInSeconds, deleteAfterSeconds: 604800, retentionSeconds: 1209600, deadLetter })` if missing, else `updateQueue` with the same options except `policy`.
   - Queues that exist but aren't registered are left alone and logged as `warn("queue_unregistered", { queue })`.
@@ -1667,16 +1677,17 @@ Pure functions with no I/O. Imported by the server and the web app. Android mirr
 
 #### F-77: `createPgBoss`
 - **File:** `platform/queue/workers.ts`
-- **Signature:** `export function createPgBoss(cfg: Config, mode: "send-only" | "capture" | "general"): PgBoss`
+- **Signature:** `export function createPgBoss(cfg: Config, mode: "send-only" | "capture" | "general" | "cli" /* A-218 */): PgBoss`
 - **Behaviour:** `schema: "pgboss"`, `migrate: false`, `createSchema: false`, `useListenNotify: false`, `application_name: budmon-<mode>`, TLS settings from `cfg.db`. Per mode:
 
   | Mode | User | Pool `max` | `supervise` / `schedule` |
   | ---- | ---- | ---------- | ------------------------ |
-  | `send-only` (api) | `budmon_app` | 2 | false / false |
-  | `capture` | `budmon_capture` | 3 | false / false |
+  | `send-only` (api) | `config.db.user` (`budmon_app`) | 2 | false / false |
+  | `capture` | `config.db.user` (`budmon_capture` in every deployed stage; `budmon_app` in a development worker running both roles, A-214) | 3 | false / false |
+  | `cli` (A-218) | `config.worker.queue.user` | 2 | false / false |
   | `general` | `budmon_queue` | `cfg.worker.queue.poolMax` | true / true |
 
-  The `error` event is logged through F-31 with F-33.
+  The `error` event is logged as `error("queue_error", describeFailure(err), err)` (A-217).
 
 #### F-78: `startWorkers`
 - **File:** `platform/queue/workers.ts`
@@ -1685,7 +1696,7 @@ Pure functions with no I/O. Imported by the server and the web app. Android mirr
   1. For each role in `c.config.worker.roles`: `boss.start()`.
   2. For each definition of the role, `boss.getQueue(name)` must exist, and a handler must be in `handlers`.
   3. `boss.work(name, { batchSize: 1, pollingIntervalSeconds: 2 }, wrapHandler(...))`.
-  4. General role: for each definition with `cron`, `boss.schedule(name, cron, {}, { tz: "UTC" })`. It also registers the `queue_depth` observable gauge, reading `boss.getQueues()` counts (`queuedCount`). It then enqueues `platform.fx-gap-check` once with `singletonKey "startup"` (F-139), **only if** `c.registry.get("platform.fx-gap-check")` exists (S-9 registers it, A-203).
+  4. General role: for each definition with `cron`, `boss.schedule(name, cron, {}, { tz: "UTC" })`. It also registers the `queue_depth` observable gauge, reporting `queuedCount` from `boss.getQueues()` cached at start and refreshed every 60 s (A-216). It then enqueues `platform.fx-gap-check` once with `singletonKey "startup"` (F-139), **only if** `c.registry.get("platform.fx-gap-check")` exists (S-9 registers it, A-203).
   5. Starts F-79.
   - `stop()` calls `boss.stop({ graceful: true, timeout: 30000 })` for each instance.
 - **Errors:** a missing queue throws `MissingQueueError(name)` and the process exits 1 with `error("queue_missing", { queue })`. A missing handler throws `Error("no handler for <name>")`.
@@ -1708,7 +1719,7 @@ Pure functions with no I/O. Imported by the server and the web app. Android mirr
 #### F-80: platform maintenance jobs
 - **File:** `platform/maintenance/maintenanceJobs.ts`
 - **Exports (A-210):** `platformMaintenanceJobs` (the definitions below), `purgeIdempotencyRecords(deps: { database: Database; clock: Clock; logger: Logger }): Promise<number>`, `purgeRateLimitCounters(deps): Promise<number>`, `maintenanceHandlers(c: WorkerContainer)` (merged by `buildHandlerMap`).
-- **Definitions:** `platform.idempotency-purge` (general, cron `0 3 * * *`), `platform.rate-limit-purge` (general, cron `*/10 * * * *`), `platform.exports-purge` (general, cron `15 * * * *`, handler F-144). Each has an empty payload `z.object({})`.
+- **Definitions:** `platform.idempotency-purge` (general, cron `0 3 * * *`), `platform.rate-limit-purge` (general, cron `*/10 * * * *`), and from S-10 `platform.exports-purge` (general, cron `15 * * * *`, handler F-144; A-215). Each has an empty payload `z.object({})`.
 - **Behaviour:**
   - The idempotency purge repeats `DELETE FROM idempotency_records WHERE ctid IN (SELECT ctid FROM idempotency_records WHERE expires_at < $now LIMIT 5000)` until fewer than 5000 rows are affected, and logs `info("idempotency_purged", { count })` **once per run** with the total (A-210).
   - The rate-limit purge is F-64 `deleteExpired` in batches of 10000 until fewer are deleted; one `info("rate_limits_purged", { count })` per run (A-210).
@@ -1747,6 +1758,7 @@ Pure functions with no I/O. Imported by the server and the web app. Android mirr
 - **Errors:** `ConfigError` → exit 78 (F-11). Any start-up error → `error("startup_failed", describeFailure(err))` (F-26, A-81; F-33 for the error report from S-3), then exit 1.
 
 #### F-91: `main/worker.ts`
+- **Signals (A-211):** `runWorker` installs the `SIGTERM`/`SIGINT` handlers (`stop()` within 35 s, exit 0; backstop exit at 35 s); the entry guard installs F-39's fatal handlers and maps failures to exit codes (78 config, 1 after `startup_failed`).
 - **Testable entry (A-201):** `export async function runWorker(env, overrides?: { registry?: JobRegistry; handlers?: ReadonlyMap<string, Handler> }): Promise<{ stop(): Promise<void> }>`; the entry guard calls `runWorker(process.env)`; `overrides.registry` replaces `buildJobRegistry()`, `overrides.handlers` merge over `buildHandlerMap(c)`.
 - **Shutdown budget (A-180):** 35 s overall: `stop()` (pg-boss graceful, up to 30 s), then container and telemetry within the remaining 5 s; Compose gives the workers `stop_grace_period: 45s`.
 - **Interim (A-158):** until S-6 the worker validates configuration, calls `getTelemetry().shutdown()` and exits 0; from S-6 shutdown follows `stop()` on `SIGTERM`.
@@ -1768,7 +1780,7 @@ Pure functions with no I/O. Imported by the server and the web app. Android mirr
 
   | Command | Calls | Output | Exit |
   | ------- | ----- | ------ | ---- |
-  | `jobs:dead list [--role capture\|general] [--limit n]` | F-81 | one JSON line per entry | 0 |
+  | `jobs:dead list [--role capture\|general] [--limit n]` (with `jobs:dead redrive`: a `cli`-mode pg-boss, A-218; a failure logs `cli_failed`, A-217) | F-81 | one JSON line per entry | 0 |
   | `jobs:dead redrive --role r --id <uuid>` | F-81 | `{"moved":n}` | 0 if moved = 1, else 2 |
   | `secrets:rewrap-api` | F-117's `rewrapApiSecretsCommand(createApiContainer(config))`, then `close()` (A-26: the columns come from `container.sealedColumns.all()`) | `{"rewrapped":n,"skipped":m}` | 0 |
   | `restore:verify` | F-150 | report JSON | 0 if ok, else 6. Always run as the `migrate` service (role `budmon_migrator`, which holds `pg_read_all_data` and `EXECUTE` on `bt_index_check`) with that service's secrets; `budmon-local restore` adds `DB_NAME=budmon_restore` (F-178). |
@@ -3775,11 +3787,11 @@ Types: **U** unit, **I** integration (real Postgres and/or HTTP in-process), **E
 | TP-6.8 | S-6 | I | F-77 capture | worker container with `WORKER_ROLES=capture` (`budmon_capture`) and a capture test job | Process a job; then `SELECT * FROM idempotency_records` as `budmon_capture` | Job completed with no permission errors; 42501 |
 | TP-6.9 | S-6 | I | F-78 | registry has a job without a queue | start; start general with a cron job; (A-203) start a general worker whose registry has no `platform.fx-gap-check` | `MissingQueueError`; `pgboss.schedule` has the cron with tz `UTC`; a capture-only worker registers no schedules; (A-203) starts; nothing enqueued under that name |
 | TP-6.10 | S-6 | U+I | F-79, healthcheck | fake `setInterval`, `fixedClock`, `writeFile` spy | start; tick; `writeFile` throws once; run `healthcheck.js --heartbeat` with a fresh vs a 61 s old file; `--ready` against an API returning 200 / 503; (A-206) a recording logger for the write failure; (A-208) heartbeat file containing `abc`; a fresh file whose mtime is 2 minutes old; `--ready` with `PORT` set to a free port | written immediately and on each tick with the epoch seconds; gauge = now; one warn, timer continues; exit 0 / 1; exit 0 / 1; (A-206) one `heartbeat_write_failed` through the passed logger; (A-208) exit 1; exit 0 (content decides); `--ready` uses that port |
-| TP-6.11 | S-6 | I | F-81 | one dead-lettered job | list; redrive the id; redrive an unknown id | 1 entry with `failure:"Error"`; `moved` 1 and the job back in its source queue; 0 |
+| TP-6.11 | S-6 | I | F-81 | one dead-lettered job | list; redrive the id; redrive an unknown id; (A-218) inspect the pg-boss instance the command creates | 1 entry with `failure:"Error"`; `moved` 1 and the job back in its source queue; 0; (A-218) mode `cli`: queue login, supervise and schedule off; no schedule rows or maintenance run during the command |
 | TP-6.12 | S-6 | I | F-80 | 6000 expired + 1 live idempotency records | Run the purge handler; (A-193) expired and live `rate_limit_counters` rows; (A-210) handlers called through `maintenanceHandlers(c)` | 6000 deleted in 2 batches; live remains; (A-193) the rate-limit purge (F-64 `deleteExpired`) removes only the expired rows; (A-210) one `idempotency_purged` line with `count: 6000`, one `rate_limits_purged` line |
 | TP-6.13 | S-6 | I | F-91 | worker process with a long job (2 s) | `SIGTERM` during the job; (A-180) a job that never finishes; (A-201) via `node --import ./dist/main/instrument.js apps/server/test/fixtures/bundle/worker.mjs`, which calls `runWorker` with a test registry and handlers | The job completes; process exits 0 within 30 s; (A-180) the process exits within 35 s |
 | TP-6.14 | S-6 | U+I | F-78b, F-96 (A-26) | `logCapture`, `createMemoryErrorReporter`, hook spies; worker config for `createWorkerContainer` | `runGeneralStartHooks` with roles `{general}` and hooks [h1, h2]; roles `{capture}` and [h1]; roles `{general}` and [h1 rejecting with `new Error(CANARIES.message)`, h2]; `createWorkerContainer(config)` with no overrides | h1 then h2, each once; none called; h2 still called, one report, one `worker_start_hook_failed` line with `step "onGeneralStarted:0"`, no canary in the log or report, resolves; `onGeneralStarted` is `[]`, `erasureHandler` is `null`, `sealedColumns.all()` is `[]` |
-| TP-6.15 | S-6 | I | F-89, F-91 start command (A-147) | built bundle; Postgres; OTLP recorder; `APP_ENV=test` | Spawn `node --import ./dist/main/instrument.js dist/main/worker.js` with `WORKER_ROLES=general`; enqueue a test-registered job whose handler runs `SELECT 1`; (A-201) the job and handler come from the fixture's `runWorker` overrides | The recorder receives a `pg` span whose parent is the job's span |
+| TP-6.15 | S-6 | I | F-89, F-91 start command (A-147) | built bundle; Postgres; OTLP recorder; `APP_ENV=test` | Spawn `node --import ./dist/main/instrument.js dist/main/worker.js` with `WORKER_ROLES=general`; enqueue a test-registered job whose handler runs `SELECT 1`; (A-201) the job and handler come from the fixture's `runWorker` overrides | The recorder receives a `pg` span whose parent is the job's span; the parent is pg-boss's CONSUMER span `process <queue>` (A-219) |
 | TP-7.1 | S-7 | I | F-100 | transaction; `work` spy returns `{id, createdAt}` | `run` | `replayed:false`, status 201; record has the result and `expires_at` = now + 90 d; `work` called once |
 | TP-7.2 | S-7 | I | F-100 | after TP-7.1 | Same key, same input | Stored result; `replayed:true`; `work` not called; `idempotent_replays_total` +1 |
 | TP-7.3 | S-7 | I | F-100 | after TP-7.1 | Same key with a different input; with a different procedure | `IdempotencyKeyReusedError` ×2 |
