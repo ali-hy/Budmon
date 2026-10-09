@@ -2,7 +2,7 @@
 module: platform
 doc: lld
 status: approved # draft | in-review | approved
-version: 0.51
+version: 0.52
 hld_version: 1.3
 author: planner
 approved_by: the user (project owner), delegated auto-approval
@@ -117,6 +117,7 @@ Nothing in that list changes application code (D-29 rule 2).
 | 0.49    | 2026-10-09 | Implementation-time amendment A-186 (S-4 review N-1, optional; built in S-5): the oRPC route interceptor also sets the RPC metadata route, so the http SERVER span and `http.route` carry the procedure template. Tests: TP-4.24 extended (in S-5). Approval stands. |
 | 0.50    | 2026-10-09 | Implementation-time amendments A-187 to A-193 (test-architect, S-5 tests `cff8a8a`). TP-4.24 base row loosened for A-186; IP never logged (TP-5.10 echoes in the response); TP-5.9 uses a Buffer key; TP-5.5's rolled-back hit asserts a refusal; user-facing rate-limit wording is the clients' (S-11b, S-13); no coarse-limit knob for tests; F-80's purge belongs to S-6. Tests: TP-4.24, TP-5.5, TP-5.9, TP-5.10, TP-6.12 changed. Approval stands. |
 | 0.51    | 2026-10-09 | Implementation-time amendments A-194 to A-199: the engineer's S-5 choices (`56735d5`), confirmed. Coarse 429 via `CoarseRateLimitError`; only `Retry-After`; `windowSeconds` check; Argon2id as the binding default; `createApiContainer` needs `config.api` or a `rateLimiter`; A-186 only with HTTP RPC metadata. §2.4 already pins `@node-rs/argon2` 2.2.1 and `@fastify/rate-limit` 11.2.0. No test changes. Approval stands. |
+| 0.52    | 2026-10-09 | Implementation-time amendment A-200 (S-5 review N-3): `randomToken`'s 16..64-byte bounds confirmed and stated in its signature comment; TP-5.9 adds the boundaries. Approval stands. |
 
 ## Amendments
 
@@ -321,6 +322,7 @@ Nothing in that list changes application code (D-29 rule 2).
 | A-197 | `@node-rs/argon2`'s `Algorithm` const enum is rejected by lint, so the code relies on the binding's default, Argon2id; TP-5.9 checks the `$argon2id$` prefix (software-engineer). | **Confirmed:** the default is Argon2id, and TP-5.9's PHC-prefix check (`$argon2id$v=19$m=19456,t=2,p=1$`) fails if a binding upgrade changes it. | F-66 | none | planner decision |
 | A-198 | `createApiContainer` throws when there's neither `config.api` (for `rateLimitKey`) nor a `rateLimiter` override (software-engineer). | **Confirmed:** `Error("api config required")` (a programming error in tests or composition); production API configs always have `api`. | F-96 | none | planner decision |
 | A-199 | A-186's route is set only when the active context holds HTTP-type RPC metadata; otherwise skipped (software-engineer). | **Confirmed:** without it (for example a procedure called in-process in tests) there's no SERVER span to rename; `budmon.route` is still set. | F-55 | none | planner decision |
+| A-200 | N-3 (S-5 review): F-66's signature gives only `randomToken`'s default (32); the code accepts 16 to 64 bytes and throws `RangeError` otherwise (`randomToken(96)` throws). | **Confirmed.** F-66's errors already said 16..64; the signature comment now states it too. 16 bytes (128 bits) is the least any Budmon token may carry; 64 covers every planned use. A caller needing more is a design change, made by amendment. TP-5.9 checks 16, 64, 15, 65 and 96. | F-66, TP-5.9 | none | planner decision |
 
 ## 1. Deviations from the HLD, and decisions the HLD left open
 
@@ -1569,7 +1571,7 @@ Pure functions with no I/O. Imported by the server and the web app. Android mirr
   export async function verifySecret(phc: string, plain: string): Promise<boolean>;
   export function hmacSha256(key: Buffer, data: string | Buffer): Buffer;
   export function timingSafeEqualBytes(a: Uint8Array, b: Uint8Array): boolean;  // false on length mismatch, constant time otherwise
-  export function randomToken(bytes?: number): string;                          // default 32; base64url without padding
+  export function randomToken(bytes?: number): string;                          // default 32, integer 16..64 else RangeError (A-200); base64url without padding
   export function sha256(data: string | Buffer): Buffer;
   ```
 - **Errors:** `verifySecret` with a malformed PHC string returns `false` (it doesn't throw). `randomToken` with `bytes` outside 16..64 throws `RangeError`.
@@ -3748,7 +3750,7 @@ Types: **U** unit, **I** integration (real Postgres and/or HTTP in-process), **E
 | TP-5.7 | S-5 | I | F-65 coarse | API | 301 × `GET /api/v1/meta/client-config` from one IP; 301 × `/health/live` | 301st → 429 envelope; health never 429 |
 | TP-5.8 | S-5 | I | F-64 | 3 expired + 2 live rows | `deleteExpired(h, now, 2)` twice | 2 then 1; live rows remain |
 | TP-5.10 | S-5 | I | trusted proxy (S-5 suggestion) | API with `TRUSTED_PROXY=10.0.0.2` and a test procedure returning `ctx.ip` in its response body (the IP is never logged, A-188) | `inject` from `remoteAddress 10.0.0.9` with `X-Forwarded-For: 1.2.3.4`; from `10.0.0.2` with the same header | `ctx.ip` = `10.0.0.9` (header ignored); `1.2.3.4` |
-| TP-5.9 | S-5 | U | F-66 | none | `hashSecret("pw")` + verify("pw"), verify("x"), verify("garbage", …); `timingSafeEqualBytes` with different lengths; `randomToken()`, `randomToken(8)`; `hmacSha256(Buffer.from("key"),"The quick brown fox jumps over the lazy dog")` (A-189) | PHC starts `$argon2id$v=19$m=19456,t=2,p=1$`; true, false, false; false; 43 chars `[A-Za-z0-9_-]`; `RangeError`; hex `f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8` |
+| TP-5.9 | S-5 | U | F-66 | none | `hashSecret("pw")` + verify("pw"), verify("x"), verify("garbage", …); `timingSafeEqualBytes` with different lengths; `randomToken()`, `randomToken(8)`; `hmacSha256(Buffer.from("key"),"The quick brown fox jumps over the lazy dog")` (A-189); (A-200) `randomToken(16)`, `(64)`, `(15)`, `(65)`, `(96)` | PHC starts `$argon2id$v=19$m=19456,t=2,p=1$`; true, false, false; false; 43 chars `[A-Za-z0-9_-]`; `RangeError`; hex `f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8`; (A-200) 22 and 86 characters; `RangeError` ×3 |
 | TP-6.1 | S-6 | U | F-70 | none | defaults; name `Bad`; cron on capture; cron `* *` | Defaults as specified; `TypeError` ×3 |
 | TP-6.2 | S-6 | U | F-71 | none | duplicate names; name `dead-letter.x` | `TypeError` ×2; `deadLetterQueue("general")` = `dead-letter.general` |
 | TP-6.3 | S-6 | U | F-72 | none | `{id: uuid, d:"2026-10-05", n: 3, ok: true}`; `{note: "has space"}`; `{a: "x".repeat(65)}`; `{a:{b:{c:1}}}`; `{a: Array(101).fill(1)}`; `{a: [CANARIES.payee + " x"]}` | Passes; `UnsafeJobPayloadError` with paths `note`, `a`, `a.b`, `a`, `a.0`; message never contains the value |
