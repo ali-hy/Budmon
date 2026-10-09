@@ -49,10 +49,14 @@ interface SpanSpec {
 }
 
 /** Real finished spans from the SDK, collected by an in-memory exporter. */
-function makeSpans(specs: readonly SpanSpec[], name = "GET /a/{id}"): ReadableSpan[] {
+function makeSpans(
+  specs: readonly SpanSpec[],
+  name = "GET /a/{id}",
+  scope = "test",
+): ReadableSpan[] {
   const source = new InMemorySpanExporter();
   const provider = new BasicTracerProvider({ spanProcessors: [new SimpleSpanProcessor(source)] });
-  const tracer = provider.getTracer("test");
+  const tracer = provider.getTracer(scope);
   for (const spec of specs) {
     const span = tracer.startSpan(name, {
       attributes: spec.attributes,
@@ -359,5 +363,41 @@ describe("TP-3.7: query literals are masked and span names checked (A-135)", () 
     ["$10 is a placeholder", "SELECT $10, 42", "SELECT $10, ?"],
   ])("TP-3.26x: %s", (_label, text, expected) => {
     expect(exportQuery(text).inner.spans[0]?.attributes["db.query.text"]).toBe(expected);
+  });
+});
+
+describe("TP-3.7: span names from instrumentations (A-164)", () => {
+  it("TP-3.7: GET /api/v1/* is kept, with no drop", () => {
+    const { inner, sums } = exportThrough(makeSpans([{ attributes: {} }], "GET /api/v1/*"));
+
+    expect(inner.spans[0]?.name).toBe("GET /api/v1/*");
+    expect(sums).toEqual({ expected: 0, unexpected: 0 });
+  });
+
+  it("TP-3.7: from scope @fastify/otel, 'onRequest - fastify -> @fastify/helmet' becomes onRequest, with no drop", () => {
+    const { inner, sums } = exportThrough(
+      makeSpans([{ attributes: {} }], "onRequest - fastify -> @fastify/helmet", "@fastify/otel"),
+    );
+
+    expect(inner.spans[0]?.name).toBe("onRequest");
+    expect(sums).toEqual({ expected: 0, unexpected: 0 });
+  });
+
+  it("TP-3.7: the same name from another scope becomes span, with one unexpected drop", () => {
+    const { inner, sums } = exportThrough(
+      makeSpans([{ attributes: {} }], "onRequest - fastify -> @fastify/helmet", "other-scope"),
+    );
+
+    expect(inner.spans[0]?.name).toBe("span");
+    expect(sums).toEqual({ expected: 0, unexpected: 1 });
+  });
+
+  it("TP-3.26x: @fastify/otel's request span keeps its name", () => {
+    const { inner, sums } = exportThrough(
+      makeSpans([{ attributes: {} }], "request", "@fastify/otel"),
+    );
+
+    expect(inner.spans[0]?.name).toBe("request");
+    expect(sums).toEqual({ expected: 0, unexpected: 0 });
   });
 });

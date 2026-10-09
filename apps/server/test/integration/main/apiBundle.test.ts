@@ -388,6 +388,8 @@ interface ExportedSpan {
   scope: string;
   kind: number;
   name: string;
+  spanId: string;
+  parentSpanId: string;
   attributes: Record<string, unknown>;
 }
 
@@ -402,6 +404,8 @@ function exportedSpans(requests: readonly OtlpRequest[]): ExportedSpan[] {
           spans?: {
             kind?: number;
             name?: string;
+            spanId?: string;
+            parentSpanId?: string;
             attributes?: { key: string; value: Record<string, unknown> }[];
           }[];
         }[];
@@ -414,6 +418,8 @@ function exportedSpans(requests: readonly OtlpRequest[]): ExportedSpan[] {
             scope: ss.scope?.name ?? "",
             kind: span.kind ?? 0,
             name: span.name ?? "",
+            spanId: span.spanId ?? "",
+            parentSpanId: span.parentSpanId ?? "",
             attributes: Object.fromEntries(
               (span.attributes ?? []).map((a) => [a.key, Object.values(a.value)[0]]),
             ),
@@ -423,6 +429,58 @@ function exportedSpans(requests: readonly OtlpRequest[]): ExportedSpan[] {
     }
   }
   return spans;
+}
+
+/** Whether `ancestorId` is on `span`'s parent chain. */
+function hasAncestor(
+  span: ExportedSpan,
+  ancestorId: string,
+  all: readonly ExportedSpan[],
+): boolean {
+  const byId = new Map(all.map((s) => [s.spanId, s]));
+  let current: ExportedSpan | undefined = span;
+  for (let i = 0; i < 50 && current !== undefined; i++) {
+    if (current.parentSpanId === ancestorId) return true;
+    current = byId.get(current.parentSpanId);
+  }
+  return false;
+}
+
+/** The recorded values of telemetry_attributes_dropped_total with drop_kind "unexpected". */
+function unexpectedDrops(requests: readonly OtlpRequest[]): number[] {
+  const values: number[] = [];
+  for (const r of requests.filter((x) => x.path.endsWith("/v1/metrics"))) {
+    const body = r.body as {
+      resourceMetrics?: {
+        scopeMetrics?: {
+          metrics?: {
+            name?: string;
+            sum?: {
+              dataPoints?: {
+                asInt?: number | string;
+                asDouble?: number;
+                attributes?: { key: string; value: Record<string, unknown> }[];
+              }[];
+            };
+          }[];
+        }[];
+      }[];
+    };
+    for (const rm of body.resourceMetrics ?? []) {
+      for (const sm of rm.scopeMetrics ?? []) {
+        for (const m of sm.metrics ?? []) {
+          if (m.name !== "telemetry_attributes_dropped_total") continue;
+          for (const p of m.sum?.dataPoints ?? []) {
+            const kind = (p.attributes ?? []).find((a) => a.key === "drop_kind");
+            if (kind !== undefined && Object.values(kind.value)[0] === "unexpected") {
+              values.push(Number(p.asInt ?? p.asDouble ?? 0));
+            }
+          }
+        }
+      }
+    }
+  }
+  return values;
 }
 
 const SPAN_KIND_SERVER = 2;
@@ -535,7 +593,7 @@ describe("TP-4.24: the built api exports spans through the production start comm
     }
   }
 
-  it("TP-4.24: with --import, the recorder gets an http and an @fastify/otel server span, and metrics", async () => {
+  it("TP-4.24: with --import, one http SERVER span GET /api/v1/*, @fastify/otel's request under it, hooks named by hook, no unexpected drops, metrics (A-163, A-164)", async () => {
     received.length = 0;
 
     const run = await runApi(START_COMMAND);
@@ -543,15 +601,25 @@ describe("TP-4.24: the built api exports spans through the production start comm
     expect(run.status, run.output).toBe(200);
     const all = exportedSpans(received);
     const seen = JSON.stringify(all.map((s) => [s.scope, s.kind, s.name]));
-    const servers = all.filter((s) => s.kind === SPAN_KIND_SERVER);
+    const servers = all.filter(
+      (s) => s.kind === SPAN_KIND_SERVER && s.scope === "@opentelemetry/instrumentation-http",
+    );
+    expect(servers, seen).toHaveLength(1);
+    const server = servers[0];
+    expect(server?.name).toBe("GET /api/v1/*");
+    const fastify = all.filter((s) => s.scope === "@fastify/otel");
+    const requests = fastify.filter((s) => s.name === "request");
+    expect(requests.length, seen).toBeGreaterThanOrEqual(1);
     expect(
-      servers.some((s) => s.scope.includes("instrumentation-http")),
+      requests.some((s) => hasAncestor(s, server?.spanId ?? "", all)),
       seen,
     ).toBe(true);
+    for (const span of fastify) expect(span.name, seen).toMatch(/^[A-Za-z]+$/);
     expect(
-      servers.some((s) => s.scope.includes("fastify")),
+      all.filter((s) => s.name === "span"),
       seen,
-    ).toBe(true);
+    ).toEqual([]);
+    expect(unexpectedDrops(received).filter((v) => v > 0)).toEqual([]);
     expect(received.some((r) => r.path.endsWith("/v1/metrics"))).toBe(true);
   }, 90_000);
 
