@@ -2,7 +2,7 @@
 module: platform
 doc: lld
 status: approved # draft | in-review | approved
-version: 0.61
+version: 0.62
 hld_version: 1.3
 author: planner
 approved_by: the user (project owner), delegated auto-approval
@@ -127,6 +127,7 @@ Nothing in that list changes application code (D-29 rule 2).
 | 0.59    | 2026-10-09 | Implementation-time amendment A-229 (A-228 follow-up): who reads job rows under RLS. `restore:verify` counts the job tables as `budmon_queue`; the rehearsal scan and the privacy suite read jobs as the owner (or the admin superuser); backups, monitoring, readiness, `db:reset` and the queue metrics need nothing. No `BYPASSRLS` anywhere. Tests: TP-2.20, TP-10.9 extended. Approval stands. |
 | 0.60    | 2026-10-09 | Implementation-time amendment A-230 (S-6 round-2 review G-1): capture's `INSERT`/`UPDATE` policies also pin `dead_letter` to the row queue's configured dead-letter queue and `source_name` to capture queues, closing the owner-run copy paths (expiry/dead-lettering and redrive); `redriveDeadLetter` refuses a `source_name` outside the role's queues. Tests: TP-6.8, TP-6.11 extended. Approval stands. |
 | 0.61    | 2026-10-09 | Implementation-time amendment A-231: `redriveDeadLetter`'s logger is a required fifth parameter. Approval stands. |
+| 0.62    | 2026-10-09 | Implementation-time amendments A-232 to A-236 (test-architect, S-7 tests `1528c7d`). F-102 takes its dependencies from the container and sets the replay header on `ctx.responseHeaders`; F-100 exports `requestHashOf` (TP-7.8 stays a unit test); a shared `createTestUser` fixture absorbs identity's future foreign key; the cursor codec uses the container's key and clock; TP-7.15's test table accepted. Tests: TP-7.8, TP-7.15 reworded. Approval stands. |
 
 ## Amendments
 
@@ -363,6 +364,11 @@ Nothing in that list changes application code (D-29 rule 2).
 | A-229 | With RLS on `pgboss.job` and `job_common` (A-228), only the owner `budmon_queue` and roles with a policy see job rows; `pg_read_all_data` doesn't bypass RLS, so `budmon_migrator` and `budmon_monitor` see none. Does anything expect to read jobs that way? (coordinator) | **Checked each reader; one function and two test paths change, no role gets `BYPASSRLS`.** **(1) F-150 `restore:verify`** (S-10) counts every `pgboss` table as `budmon_migrator`, so the job tables would read 0: it counts `pgboss.job` (the parent only, which includes `job_common`; the partition isn't counted separately) inside a transaction with `SET LOCAL ROLE budmon_queue` (the migrator holds `budmon_queue WITH SET TRUE`, F-15); amcheck (`bt_index_check` with `heapallindexed`) reads storage directly and is unaffected by RLS. **(2) Rehearsal step 8** (`SELECT output FROM pgboss.job`) runs as `budmon_admin` over the Postgres socket (`docker compose exec -T postgres psql -U budmon_admin`), the same superuser path `budmon-local` uses; superusers bypass RLS. **(3) The privacy canary suite** reads `pgboss.job.output` through `createTestDatabase("budmon_queue")`. **No change needed:** backups (`budmon-local`'s `pg_dump` runs as `budmon_admin`, a superuser, so all rows are dumped; stage 1's pgBackRest is physical); `budmon_monitor` (only `pg_monitor` statistics views, never job rows); the `queue_depth` gauge and F-81 (`budmon_queue` pg-boss instances); F-57 readiness (reads `drizzle.__drizzle_migrations` only); `db:reset` (superuser, drops the database); the test reset (`DELETE FROM pgboss.job` as `budmon_queue`, §10.1). | F-150, F-195 (step 8), §10.1 (privacy suite), TP-2.20, TP-10.9 | none | planner decision |
 | A-230 | G-1 (S-6 round-2 review): capture's `WITH CHECK` constrains only `name`, but owner-run pg-boss paths copy jobs into queues named by row columns capture writes: `failJobs`' `dlq_jobs` inserts into the row's `dead_letter` (the general supervisor runs `failJobsByTimeout` on every queue as `budmon_queue`), and redrive inserts into `COALESCE($2, j.source_name)`. Reproduced on `266c15e`: a capture-inserted `test.capture` row with `dead_letter = 'test.ok'`, expired, became a `test.ok` job for the general worker; likewise via `send(…, { deadLetter })`, by updating `dead_letter`, or by planting `source_name` in `dead-letter.capture` for an operator's redrive. | **Pin the routing columns in the policy, plus a redrive guard.** Capture's `INSERT` and `UPDATE` policies (on `pgboss.job` and `job_common`, step 6b) gain, in their `WITH CHECK`: (1) `dead_letter IS NOT DISTINCT FROM (SELECT q.dead_letter FROM pgboss.queue q WHERE q.name = name)`: a row may only carry its own queue's configured dead-letter queue (`dead-letter.capture` for capture queues, `dead-letter.general` for sendable general queues, `NULL` for the dead-letter queue itself), which is exactly what pg-boss's own send, retry and dead-letter inserts write; (2) `source_name IS NULL OR source_name = ANY(<capture queues>)`. The other per-row settings (`retry_limit`, `expire_seconds`, `start_after`, `priority`) affect only rows in capture's own (or a sendable) queue and stay unconstrained. **Redrive guard (defence in depth):** F-81 `redriveDeadLetter` first reads the dead-letter job (as `budmon_queue`) and, unless its `source_name` is one of `registry.forRole(role)`'s queue names, moves nothing, logs `warn("redrive_refused", { jobId: id })` and returns 0 (CLI exit 2). The policy is also built from the registry, so F-81 takes `registry` as a new parameter. A trigger was rejected: the policy already holds the queue lists and runs on the same statements. | F-81, F-19 (step 6b), A-227, A-228, TP-6.8, TP-6.11 | none | planner decision |
 | A-231 | F-81's `redriveDeadLetter` must log `redrive_refused` but had no logger; the engineer added an optional fifth parameter, so without one a refusal is silent (software-engineer, `492b091`). | **Required.** A refused redrive is a security-relevant event (it can mean a planted job), so it must never be silent: `redriveDeadLetter(boss: PgBoss, role: WorkerRole, id: string, registry: JobRegistry, logger: Logger): Promise<number>`. F-93 passes its stderr logger; tests pass a recording logger. | F-81, F-93 | none | planner decision |
+| A-232 | Where does `runIdempotentCreate` get its `Idempotency` and database; where does `Idempotent-Replayed` go? (test-architect, S-7) | **From the request's container:** `ctx.container.idempotency` and `ctx.container.database`; the header is set with `ctx.responseHeaders.set("Idempotent-Replayed", "true")` (the oRPC `ResponseHeadersPlugin` headers). S-7 adds the `ApiContainer` members F-96 lists: `idempotency = createIdempotency({ clock: c.clock, metrics: c.metrics })` and `cursors` (A-235). | F-96, F-102 | none | planner decision |
+| A-233 | TP-7.8 is listed as a unit test, but the request hash is observable only through F-101's SQL (test-architect). | **Stays a unit test:** F-100 exports `export function requestHashOf(input: unknown): Buffer` (`sha256(canonicalJson(input))`), which `run` uses; TP-7.8 calls it directly. The test-architect's integration check of the stored `request_hash` and replay stays as an extra case of TP-7.15. | F-100, TP-7.8, TP-7.15 | none | planner decision |
+| A-234 | `idempotency_records.user_id` will reference identity's `users`; once identity adds the foreign key, platform tests need a real user row. Whose fixture creates it, and whose migration owns the key? (test-architect) | **The foreign key is identity's** (§3.1's note: identity's schema adds it with `onDelete: cascade`). **Fixture:** `@budmon/test-support` exports `createTestUser(db: TestDatabase): Promise<string>`, the only way platform tests obtain a `userId`; until identity exists it returns a fresh UUIDv7 without touching the database; identity's S-0 changes its body to insert a real `users` row. So platform tests never change when the key arrives. Owned by the test-architect. | §3.1 (note), §10.1 (helpers) | none | planner decision |
+| A-235 | F-103's cursor codec: key and clock? (test-architect) | **Built by the API container:** `cursors = createCursorCodec({ key: config.api.cursorKey.reveal(), clock: c.clock })`; tests pass `fixedClock` through the container overrides or build the codec directly. | F-96, F-103 | none | planner decision |
+| A-236 | TP-7.15 writes to a test table the test creates as `budmon_migrator` and grants to `budmon_app` (test-architect). | **Accepted.** It lives only in that test file's database (§10.1 per-file databases), so the schema step's `table_without_grants` check never sees it; the test grants `budmon_app` `SELECT, INSERT` on it explicitly. | TP-7.15 | none | planner decision |
 
 ## 1. Deviations from the HLD, and decisions the HLD left open
 
@@ -1859,7 +1865,7 @@ Pure functions with no I/O. Imported by the server and the web app. Android mirr
   ```
 - **Behaviour:**
   - Precondition: `h.inTransaction` is true.
-  - `requestHash = sha256(canonicalJson(input))`, where `input` is the procedure's **validated** input (wire values, after zod defaults).
+  - `requestHash = requestHashOf(input)` = `sha256(canonicalJson(input))` (exported, A-233), where `input` is the procedure's **validated** input (wire values, after zod defaults).
   1. F-101 `insertIfAbsent(h, { userId, key, procedure, requestHash, expiresAt: now + 90 days })`.
      - **Inserted:** `result = await work()`, then F-101 `complete(h, userId, key, 201, { id, createdAt: createdAt.toString() })`. Returns `{ result, replayed: false, status: 201 }`.
      - **Not inserted** (an existing row; a concurrent duplicate waits on the primary key until the first transaction ends): F-101 `find(h, userId, key)`.
@@ -1876,11 +1882,11 @@ Pure functions with no I/O. Imported by the server and the web app. Android mirr
 
 #### F-102: `runIdempotentCreate`
 - **File:** `platform/idempotency/idempotency.ts` · **Layer:** router helper
-- **Signature:** `export async function runIdempotentCreate<I>(ctx: RequestContext & { principal: Principal }, procedure: string, input: I, work: (tx: DbHandle) => Promise<CreatedResult>): Promise<{ id: string; createdAt: string }>`
+- **Signature:** `export async function runIdempotentCreate<I>(ctx: RequestContext & { principal: Principal }, procedure: string, input: I, work: (tx: DbHandle) => Promise<CreatedResult>): Promise<{ id: string; createdAt: string }>`; dependencies come from `ctx.container.idempotency` and `ctx.container.database` (A-232).
 - **Behaviour:**
   1. Reads `ctx.headers["idempotency-key"]`, which must be a lower-case RFC 9562 UUID.
   2. `withTransaction(db, (tx) => idempotency.run(tx, { userId: ctx.principal.userId, key, procedure, input }, () => work(tx)), { tracker: ctx.commitTracker })`.
-  3. On a replay, sets the response header `Idempotent-Replayed: true`.
+  3. On a replay, `ctx.responseHeaders.set("Idempotent-Replayed", "true")` (A-232).
   4. Returns the wire shape `{ id, createdAt: createdAt.toString() }` (RFC 3339 with `Z`).
 - **Errors:** a missing or invalid header throws `ValidationFailedError([{ path: ["headers", "idempotency-key"], code: "invalid_idempotency_key", message: "Idempotency-Key must be a UUID" }])`. F-100's errors propagate.
 
@@ -1897,6 +1903,7 @@ Pure functions with no I/O. Imported by the server and the web app. Android mirr
   - Plaintext `canonicalJson({ v: 1, s: sortKey, id, f: filterHash, exp: nowEpochSeconds + 86400 })`.
   - AES-256-GCM with a 12-byte random nonce and no AAD.
   - Token `base64url(0x01 ‖ nonce ‖ ciphertext ‖ tag)`, no padding.
+  - Built by the API container with `config.api.cursorKey` and the container's clock (A-235).
   - `decode` reverses this and checks `exp ≥ now` and `f === expectedFilterHash`.
 - **Errors:** `decode` throws `ValidationFailedError([{ path: ["cursor"], code: "invalid_cursor", message: "Invalid cursor" }])` for any of: length > 512, a base64 failure, a wrong version byte, an authentication failure, malformed JSON, an expired cursor, or a filter mismatch. All are indistinguishable.
 
@@ -3639,6 +3646,7 @@ The repository has no test tooling yet. The test-architect sets it up in S-0 to 
   - `inMemoryTelemetry()` (an InMemorySpanExporter and metric reader);
   - `logCapture()` (a pino destination collecting lines);
   - `buildApiContainer(overrides)` and `buildWorkerContainer(overrides)` (F-96);
+  - `createTestUser(db): Promise<string>` (A-234), the only source of user ids in platform tests: a fresh UUIDv7 until identity exists, a real `users` row from identity's S-0;
   - `testPrincipal(overrides?: Partial<Principal>): Principal` (A-1), defaulting to `{ userId: <fixed UUIDv7>, isOwner: false, sessionId: <fixed UUIDv7> }`; every fixture or fake auth hook that builds a `Principal` uses it;
   - `injectJson(app, method, url, body?, headers?)` around Fastify's `inject`.
 - **Privacy canary suite** (`apps/server/test/privacy/`): `CANARIES` from F-198. Each flow puts canaries into every sensitive field, captures logs, spans, metrics, `ErrorReporter` events and `pgboss.job.output` (read through `createTestDatabase("budmon_queue")`, the owner, since RLS hides job rows from other roles, A-229), and asserts `scanForCanaries` finds nothing. Platform flows: TP-3.10, TP-4.9, TP-5.2, TP-6.7, TP-8.12, TP-9.11. Modules add flows in their LLDs.
@@ -3824,14 +3832,14 @@ Types: **U** unit, **I** integration (real Postgres and/or HTTP in-process), **E
 | TP-7.5 | S-7 | I | F-100 | two connections | Both start `run` with the same key; the first `work` waits on a latch | Second blocks until the first commits, then returns `replayed:true`; `work` called once |
 | TP-7.6 | S-7 | I | F-100 | `work` throws | `run`, then retry with a working `work` | First rethrows and leaves no record; second runs `work` |
 | TP-7.7 | S-7 | I | F-102 | test create procedure | Header missing; `not-a-uuid`; upper-case UUID | 400 `VALIDATION_FAILED`, path `["headers","idempotency-key"]`, code `invalid_idempotency_key` |
-| TP-7.8 | S-7 | U | F-100 hash | none | inputs `{a:1,b:2}` vs `{b:2,a:1}` | Same hash |
+| TP-7.8 | S-7 | U | F-100 `requestHashOf` (A-233) | none | inputs `{a:1,b:2}` vs `{b:2,a:1}`; `{a:1}` vs `{a:2}` | Same 32-byte hash; different hashes |
 | TP-7.9 | S-7 | U | F-100 | `h.inTransaction=false` | `run` | `Error("idempotency requires a transaction")` |
 | TP-7.10 | S-7 | U | F-103 | key, `fixedClock` | encode then decode; flip one byte; advance 24 h + 1 s; wrong filter hash; a 513-character token; a non-base64 token | Round trip; then `ValidationFailedError` with the identical issue `invalid_cursor` for each |
 | TP-7.11 | S-7 | U | F-103 | sortKey `[CANARIES.payee]` | Encode; inspect the token and its base64 decode | The canary doesn't appear |
 | TP-7.12 | S-7 | U | F-105 | 51 rows, limit 50; 50 rows | `paginate` | 50 items + cursor; 50 items + null |
 | TP-7.13 | S-7 | U | F-104 | none | `{a:1,b:[1,2]}` vs `{b:[1,2],a:1}`; `{b:[2,1]}` | Equal (22 chars); different |
 | TP-7.14 | S-7 | U | F-343 | test contract with `createRoute("/things")` | Emit and check rules | R5 satisfied; header required, `format: uuid`; 201 |
-| TP-7.15 | S-7 | I | F-102 end to end | test create procedure inserting into a test table | POST twice with the same key, then with a new key | 201 + body; 201 + same body + `Idempotent-Replayed: true`; 201 + a new id; the table has 2 rows |
+| TP-7.15 | S-7 | I | F-102 end to end | test create procedure inserting into a test table created by the test as `budmon_migrator` and granted `SELECT, INSERT` to `budmon_app` (A-236); the user from `createTestUser` (A-234) | POST twice with the same key, then with a new key | 201 + body; 201 + same body + `Idempotent-Replayed: true`; 201 + a new id; the table has 2 rows; the stored `request_hash` equals `requestHashOf(input)` (A-233) |
 | TP-8.1 | S-8 | U | F-110 | parts with keyVersion `local:1`, wrapped DEK 384 bytes, ciphertext 10 bytes | encode/decode; truncated buffers at each field; version byte 2; provider 9; L=0 | Exact byte layout per the table; round trip; `EnvelopeFormatError` for each malformed case |
 | TP-8.2 | S-8 | U | F-110 `aadFor` | none | `{table:"t",rowId:"r 1",purpose:"p"}` | `RangeError` |
 | TP-8.3 | S-8 | U | F-111, F-113 | RSA-3072 pair, version `local:1` | seal + unseal; unseal with `rowId` changed; flip a ciphertext byte | Plaintext equal; provider byte `0x02`; `EnvelopeAuthError` ×2 |
