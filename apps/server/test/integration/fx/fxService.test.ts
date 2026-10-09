@@ -6,12 +6,16 @@
 // is built on a general worker container's database and queue with a fixed clock.
 import { Money, Temporal, asCurrencyCode, fixedClock } from "@budmon/shared";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { createWorkerContainer } from "../../../src/platform/container.js";
 import { withTransaction } from "../../../src/platform/db/transaction.js";
-import { buildWorkerContainer, type BuiltWorker } from "../../support/worker.js";
+import { observed } from "../../support/api.js";
+import { TEST_FX_RATES_ADDED, TEST_JOBS, registryOf } from "../../support/jobs.js";
+import { buildWorkerContainer, testWorkerConfig, type BuiltWorker } from "../../support/worker.js";
 import {
   queuedJobs,
   s9,
   storeDay,
+  fxOverrides,
   storedRates,
   type ConversionResult,
   type FxService,
@@ -48,6 +52,8 @@ describe("TP-9.2 to TP-9.4, TP-9.6 to TP-9.8: conversion on one stored day (F-13
 
   beforeAll(async () => {
     built = await buildWorkerContainer("general");
+    // Enqueueing needs the container's pg-boss started (as F-90 does for the api).
+    await built.container.boss.start();
     // Day 2026-10-04: EGP 48.5, JPY 149.25 (no KWD, TP-9.6).
     await storeDay(built.testDb, "2026-10-04", { EGP: "48.5", JPY: "149.25" });
     fx = await serviceOn(built, "2026-10-05T12:00:00Z");
@@ -171,6 +177,8 @@ describe("TP-9.5: no stored day (F-132)", () => {
 
   beforeAll(async () => {
     built = await buildWorkerContainer("general");
+    // Enqueueing needs the container's pg-boss started (as F-90 does for the api).
+    await built.container.boss.start();
   }, 60_000);
 
   afterAll(async () => {
@@ -224,6 +232,8 @@ describe("TP-9.5b: a provisional past date enqueues a backfill (F-132, S-1)", ()
 
   beforeAll(async () => {
     built = await buildWorkerContainer("general");
+    // Enqueueing needs the container's pg-boss started (as F-90 does for the api).
+    await built.container.boss.start();
     await storeDay(built.testDb, "2026-09-28", { EGP: "48.4" });
     await storeDay(built.testDb, "2026-10-01", { EGP: "48.5" });
   }, 60_000);
@@ -253,6 +263,8 @@ describe("TP-9.16: stored days are final (F-131)", () => {
 
   beforeAll(async () => {
     built = await buildWorkerContainer("general");
+    // Enqueueing needs the container's pg-boss started (as F-90 does for the api).
+    await built.container.boss.start();
   }, 60_000);
 
   afterAll(async () => {
@@ -321,5 +333,43 @@ describe("TP-9.16: stored days are final (F-131)", () => {
     expect(currencies.get("JPY")).toEqual({ minorUnits: 0, active: true });
     expect(currencies.get("ZWL")).toEqual({ minorUnits: 2, active: false });
     expect(currencies.has("XAU")).toBe(false);
+  });
+});
+
+describe("TP-9.15 (c): subscribers must be in the job registry (F-96, A-266)", () => {
+  let built: BuiltWorker;
+
+  beforeAll(async () => {
+    built = await buildWorkerContainer("general");
+    // Enqueueing needs the container's pg-boss started (as F-90 does for the api).
+    await built.container.boss.start();
+  }, 60_000);
+
+  afterAll(async () => {
+    await built.close();
+  });
+
+  it("TP-9.15 (c): a general RatesAddedPayload subscriber missing from the registry makes createWorkerContainer throw TypeError naming it", async () => {
+    const { RatesAddedPayload } = await s9.fxService();
+    const fx = await serviceOn(built, "2026-10-05T12:00:00Z");
+    fx.registerRatesAddedSubscriber({ ...TEST_FX_RATES_ADDED, payload: RatesAddedPayload });
+    let made: { close(): Promise<void> } | undefined;
+
+    const build = () => {
+      made = createWorkerContainer(
+        testWorkerConfig(built.testDb.endpoint, built.testDb.name, "general"),
+        {
+          ...observed().overrides,
+          registry: registryOf([TEST_JOBS.ok]),
+          ...fxOverrides({ fx }),
+        },
+      );
+    };
+
+    try {
+      expect(build).toThrow(new TypeError("fx subscriber not registered: test.fx-rates-added"));
+    } finally {
+      await made?.close();
+    }
   });
 });

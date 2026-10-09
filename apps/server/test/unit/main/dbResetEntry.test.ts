@@ -84,7 +84,10 @@ describe("TP-2.62x: dbReset's entry guard and <repo>/.env (A-64)", () => {
 
     const { status, stderr } = runSeedOnly({ APP_ENV: "development" });
 
-    expect(status, stderr).toBe(0);
+    // The guard passed (production from .env would exit 2 with the phrase). From S-9 seeding then
+    // needs a worker configuration and a database (A-72), which this copy doesn't have.
+    expect(status, stderr).not.toBe(2);
+    expect(stderr).not.toContain("db:seed only runs against a local development or test database");
   });
 
   // Code review B-2 (round 2): .env is configuration for the CLI only. If it were loaded into

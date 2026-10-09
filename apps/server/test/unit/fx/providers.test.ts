@@ -98,7 +98,12 @@ describe("TP-9.12: Open Exchange Rates (F-133)", () => {
 
     expect(error).toBeInstanceOf(FxProviderError);
     expect(error.reason).toBe(reason);
-    if (status !== undefined) expect(error.status).toBe(status);
+    // A-267: the name, the message, and status only for http.
+    expect(error.name).toBe("FxProviderError");
+    expect(error.status).toBe(status);
+    expect(error.message).toBe(
+      status === undefined ? `fx provider: ${reason}` : `fx provider: http ${String(status)}`,
+    );
   });
 
   // "The logged URL has no query": the provider has no logger of its own (F-133 deps are

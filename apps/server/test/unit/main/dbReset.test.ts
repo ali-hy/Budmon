@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import { runDbResetCli, seedAll } from "../../../src/main/dbReset.js";
+import { ConfigError } from "../../../src/platform/config/loadConfig.js";
 import { createWorkerContainer } from "../../../src/platform/container.js";
 import { seeders } from "../../../src/platform/db/seed.js";
 import {
@@ -263,10 +264,13 @@ describe("TP-2.29: runDbResetCli arguments and environment", () => {
     expect(h.stderr).toEqual(["Unknown argument: ---"]);
   });
 
-  it("TP-2.29 (g): the real seedAll with an empty seeder list resolves without building a worker container (A-72)", async () => {
-    expect(seeders).toEqual([]);
+  // A-72: until S-9 the seeder list was empty and seedAll returned at once. From S-9
+  // (platform.fx-rates) it loads the worker configuration and builds a container, so an
+  // environment without a worker configuration is refused before any container is built.
+  it("TP-2.29 (g): with S-9's platform.fx-rates seeder, the real seedAll loads the worker configuration: an empty environment is a ConfigError and no container is built (A-72)", async () => {
+    expect(seeders.map((s) => s.name)).toEqual(["platform.fx-rates"]);
 
-    await expect(seedAll({})).resolves.toBeUndefined();
+    await expect(seedAll({})).rejects.toBeInstanceOf(ConfigError);
 
     expect(vi.mocked(createWorkerContainer)).not.toHaveBeenCalled();
   });

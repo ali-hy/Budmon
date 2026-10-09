@@ -2,8 +2,7 @@
 // copies. TP-9.17, TP-9.18 and TP-9.20, plus extra cases TP-9.21x. IDs ending in "x" are
 // test-architect additions, not LLD test-plan IDs.
 //
-// TP-9.17: the LLD names the gauge (F-42) but not who observes it; this test reads it from a
-// running general worker, where the other observable gauges (queue_depth, A-216) are fed.
+// TP-9.17 (A-265): the general worker observes the gauge, refreshed with the queue depths.
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -94,7 +93,8 @@ describe("TP-9.20: the start-up gap check (F-78, F-139)", () => {
         startWorkers(second, two.handlers, { heartbeatPath: heartbeatPath() }),
       ]);
       try {
-        expect(await queuedJobs(built.testDb, GAP_CHECK)).toHaveLength(1);
+        const jobs = await queuedJobs(built.testDb, GAP_CHECK);
+        expect(jobs, JSON.stringify(jobs)).toHaveLength(1);
       } finally {
         one.release();
         two.release();
@@ -145,6 +145,26 @@ describe("TP-9.17: the freshness gauge (F-42)", () => {
         ).catch(() => undefined);
 
         expect(seen).toEqual([expected]);
+      } finally {
+        release();
+        await w.stop();
+      }
+    } finally {
+      await built.close();
+    }
+  }, 120_000);
+});
+
+describe("TP-9.21x: the freshness gauge with no stored day (A-265)", () => {
+  it("TP-9.21x: an empty exchange_rates gives no fx_last_day_timestamp_seconds data point", async () => {
+    const built = await buildWorkerContainer("general");
+    const { handlers, release } = heldHandlers(built.container);
+    try {
+      const w = await startWorkers(built.container, handlers, { heartbeatPath: heartbeatPath() });
+      try {
+        const metric = (await built.obs.collect()).get("fx_last_day_timestamp_seconds");
+
+        expect(metric?.dataPoints ?? []).toEqual([]);
       } finally {
         release();
         await w.stop();

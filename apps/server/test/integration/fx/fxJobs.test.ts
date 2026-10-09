@@ -40,6 +40,8 @@ async function worker(now: string, primary: FxProvider, fallback: FxProvider) {
     registry: templateJobRegistry(),
     ...fxOverrides({ fxProviders: { primary, fallback } }),
   });
+  // Enqueueing needs the container's pg-boss started (no workers run here, A-271).
+  await built.container.boss.start();
   return built;
 }
 
@@ -208,7 +210,7 @@ describe("TP-9.11: bad provider data (F-137)", () => {
     const primary = fakeProvider("openexchangerates", () =>
       Promise.resolve(new Map(Object.entries(answer))),
     );
-    const b = await worker("2026-10-06T00:30:00Z", primary, fakeProvider("fawazahmed0", rates({})));
+    const b = await worker("2026-10-05T00:30:00Z", primary, fakeProvider("fawazahmed0", rates({})));
 
     await run(b, FETCH, {}, "2026-10-05T00:30:00Z");
 
@@ -225,6 +227,8 @@ describe("TP-9.11: bad provider data (F-137)", () => {
     );
 
     answer = { EUR: "0", GBP: "abc", JPY: "-1" };
+    // The next day's fetch, still within 6 h of its createdOn (primary).
+    (b.container.clock as ReturnType<typeof fixedClock>).advance({ hours: 24 });
     let caught: unknown;
     try {
       await run(b, FETCH, {}, "2026-10-06T00:30:00Z");
