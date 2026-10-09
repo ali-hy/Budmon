@@ -49,8 +49,8 @@ export async function redriveDeadLetter(
   role: WorkerRole,
   id: string,
   registry: JobRegistry,
-  /** For `redrive_refused`; F-81's signature has none, so it's optional. */
-  logger?: Logger,
+  /** For `redrive_refused` (A-231). */
+  logger: Logger,
 ): Promise<number> {
   const queue = `dead-letter.${role}`;
   const [job] = await boss.findJobs(queue, { id });
@@ -58,7 +58,7 @@ export async function redriveDeadLetter(
   // A-230: only back into one of this role's own queues, whatever the row claims.
   const own = new Set(registry.forRole(role).map((d) => d.name));
   if (job.sourceName === null || !own.has(job.sourceName)) {
-    logger?.warn("redrive_refused", { jobId: id });
+    logger.warn("redrive_refused", { jobId: id });
     return 0;
   }
   return boss.redrive(queue, { ids: [id] });
