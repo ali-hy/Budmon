@@ -85,7 +85,8 @@ export async function runWorker(
     // A-226: HEARTBEAT_FILE (absolute) or /tmp/heartbeat.
     workers = await startWorkers(container, handlers, { heartbeatPath: heartbeatFile(env) });
   } catch (error) {
-    await container.close().catch(() => undefined);
+    // A-225: within the budget, then the entry shuts telemetry down and exits 1.
+    await withDeadline(() => container.close(), 5_000);
     throw error;
   }
   await runGeneralStartHooks(container);

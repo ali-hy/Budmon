@@ -1,6 +1,7 @@
 // The healthcheck entry (F-175 "Health checks", A-208): `--heartbeat` for the workers, `--ready`
 // for the api. Run as `node dist/main/healthcheck.js <flag>`; exit 0 healthy, 1 not.
-import { readFileSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
+import { pathToFileURL } from "node:url";
 import { heartbeatFile } from "../platform/queue/heartbeat.js";
 
 const MAX_AGE_SECONDS = 60;
@@ -48,4 +49,9 @@ export async function runHealthcheck(
   return 64;
 }
 
-process.exitCode = await runHealthcheck(process.argv.slice(2), process.env);
+if (
+  process.argv[1] !== undefined &&
+  import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href
+) {
+  process.exitCode = await runHealthcheck(process.argv.slice(2), process.env);
+}

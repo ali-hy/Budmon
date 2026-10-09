@@ -27,6 +27,9 @@ async function withDeadline(fn: () => Promise<unknown>, ms: number): Promise<voi
   clearTimeout(timer);
 }
 
+/** The container once built, so a start-up failure can close it (A-225). */
+let started: { close(): Promise<void> } | undefined;
+
 async function main(): Promise<number | null> {
   const config = loadConfigOrReport("api", process.env, readFileSync, (line) =>
     process.stderr.write(`${line}\n`),
@@ -43,6 +46,7 @@ async function main(): Promise<number | null> {
   // Started by the `--import` preload (F-89, A-147); a no-op handle when it didn't run.
   const telemetry = getTelemetry();
   const container = createApiContainer(config, { logger });
+  started = container;
   state.reporter = container.reporter;
   // A-209: the send-only pg-boss; container.close() stops it.
   await container.boss.start();
@@ -74,7 +78,16 @@ main().then(
   },
   (error: unknown) => {
     state.logger.error("startup_failed", describeFailure(error), error);
-    // Started resources (the send-only pg-boss, A-209) would keep the process alive.
-    void withDeadline(() => getTelemetry().shutdown(), 2_000).then(() => process.exit(1));
+    // A-225: close what was started (the send-only pg-boss, A-209, and the pool), then telemetry,
+    // within the shutdown budget; then exit 1.
+    const deadline = Date.now() + SHUTDOWN_BUDGET_MS;
+    const remaining = (cap: number): number => Math.min(cap, deadline - Date.now());
+    setTimeout(() => process.exit(1), SHUTDOWN_BUDGET_MS).unref();
+    void (async () => {
+      const container = started;
+      if (container !== undefined) await withDeadline(() => container.close(), remaining(5_000));
+      await withDeadline(() => getTelemetry().shutdown(), remaining(2_000));
+      process.exit(1);
+    })();
   },
 );
