@@ -259,10 +259,11 @@ describe("TP-6.8: budmon_capture under row-level security (A-227)", () => {
     return query(testDb.urlAs("budmon_capture"), sql, values);
   }
 
+  /** Read as budmon_queue, the owner: RLS on pgboss.job (A-228) hides rows from other roles. */
   async function stateOf(id: string): Promise<string | undefined> {
     return (
       await query<{ state: string }>(
-        testDb.urlAs("budmon_migrator"),
+        testDb.urlAs("budmon_queue"),
         "SELECT state::text AS state FROM pgboss.job WHERE id = $1",
         [id],
       )
