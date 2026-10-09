@@ -22,8 +22,11 @@ export function testWorkerConfig(
   database: string,
   roles: RolesSpec,
   env: Record<string, string | undefined> = {},
+  files: Record<string, string> = {},
 ): Config {
   const f = devWorker();
+  // Secret-file variables given their content (e.g. CAPTURE_PUBLIC_KEY_FILE).
+  for (const [variable, content] of Object.entries(files)) withFile(f, variable, content);
   const dbUser = roles === "capture" ? "budmon_capture" : "budmon_app";
   Object.assign(f.env, {
     WORKER_ROLES: roles,
