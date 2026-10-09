@@ -1,9 +1,6 @@
 // F-65 rateLimited middleware and the coarse per-IP limit, and the trusted proxy (S-5). TP-5.6,
 // TP-5.7 and TP-5.10, plus extra cases TP-5.13x. IDs ending in "x" are test-architect additions,
 // not LLD test-plan IDs.
-//
-// rateLimiter.ts is written in S-5: it's loaded by a variable specifier so typecheck passes until
-// then, and typed here from F-65's signature.
 import { base, contract } from "@budmon/contract";
 import { implement } from "@orpc/server";
 import type { FastifyInstance } from "fastify";
@@ -12,6 +9,7 @@ import { z } from "zod";
 import type { RequestContext } from "../../../src/platform/http/context.js";
 import { metaRouter } from "../../../src/platform/http/meta.js";
 import { createApiServer } from "../../../src/platform/http/server.js";
+import { rateLimited } from "../../../src/platform/security/rateLimiter.js";
 import {
   buildApiContainer,
   injectJson,
@@ -19,26 +17,6 @@ import {
   type BuiltContainer,
   type Observed,
 } from "../../support/api.js";
-
-interface RateLimitSpec {
-  limiter: string;
-  limit: number;
-  windowSeconds: number;
-}
-interface RateLimiterModule {
-  rateLimited: (
-    ...rules: {
-      spec: RateLimitSpec;
-      subject: (input: unknown, ctx: RequestContext) => string | null;
-    }[]
-  ) => unknown;
-}
-
-const RATE_LIMITER = "../../../src/platform/security/rateLimiter.js";
-
-async function rateLimiterModule(): Promise<RateLimiterModule> {
-  return (await import(/* @vite-ignore */ RATE_LIMITER)) as RateLimiterModule;
-}
 
 const Ok = z.object({ ok: z.boolean() });
 
@@ -66,8 +44,7 @@ function ipRouter(): Record<string, unknown> {
 }
 
 /** TP-5.6's procedure behind rateLimited. */
-async function limitRouter(): Promise<Record<string, unknown>> {
-  const { rateLimited } = await rateLimiterModule();
+function limitRouter(): Record<string, unknown> {
   const os = implement(limitContract).$context<RequestContext>();
   return {
     meta: metaRouter,
@@ -77,7 +54,7 @@ async function limitRouter(): Promise<Record<string, unknown>> {
           rateLimited({
             spec: { limiter: "test", limit: 1, windowSeconds: 600 },
             subject: (_input, ctx) => ctx.ip,
-          }) as never,
+          }),
         )
         .handler(() => ({ ok: true })),
     },
@@ -92,14 +69,13 @@ const RATE_LIMITED_ENVELOPE = {
 };
 
 describe("TP-5.6: a rate-limited procedure (F-65)", () => {
-  // Undefined until rateLimiter.ts exists (beforeAll fails), so afterAll checks.
   let built: BuiltContainer | undefined;
   let app: FastifyInstance | undefined;
   let obs: Observed;
 
   beforeAll(async () => {
     obs = observed();
-    const router = await limitRouter();
+    const router = limitRouter();
     built = await buildApiContainer(obs.overrides);
     app = await createApiServer(built.container, {
       contract: limitContract,
