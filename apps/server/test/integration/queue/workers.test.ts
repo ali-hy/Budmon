@@ -3,6 +3,9 @@
 // ending in "x" are test-architect additions, not LLD test-plan IDs.
 //
 // Each container gets a registry of test jobs (support/jobs.ts), whose queues the template has.
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { CANARIES, scanForCanaries } from "@budmon/test-support";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -20,7 +23,12 @@ import {
   type WorkerContainer,
 } from "../../support/jobs.js";
 import { createTestDatabase } from "../../support/testDatabase.js";
-import { buildWorkerContainer, testWorkerConfig, type BuiltWorker } from "../../support/worker.js";
+import {
+  buildWorkerContainer,
+  testWorkerConfig,
+  testWorkerEnv,
+  type BuiltWorker,
+} from "../../support/worker.js";
 
 function queueBoss(c: WorkerContainer): PgBossLike {
   return c.queueBoss ?? c.boss;
@@ -358,6 +366,50 @@ describe("TP-6.11: dead-letter list and redrive (F-81)", () => {
     expect(await redriveDeadLetter(boss, "general", "0190a0b0-1c2d-7e3f-8a4b-5c6d7e8f9a0b")).toBe(
       0,
     );
+  });
+
+  it("TP-6.11: (A-218) jobs:dead list through runCli prints the entry; no schedule row or pg-boss maintenance happens during the command", async () => {
+    const { runCli } = await import("../../../src/main/cli.js");
+    const { testDb } = built;
+    const dir = mkdtempSync(path.join(tmpdir(), "budmon-cli-"));
+    const read = async (sql: string) =>
+      JSON.stringify((await testDb.database.handle.executeSql(sql)).rows);
+    try {
+      const versionBefore = await read("SELECT * FROM pgboss.version");
+      const schedulesBefore = await read("SELECT * FROM pgboss.schedule ORDER BY name");
+      const stdout: string[] = [];
+      const stderr: string[] = [];
+
+      const code = await runCli(
+        ["jobs:dead", "list", "--role", "general"],
+        testWorkerEnv(dir, testDb.endpoint, testDb.name, "general"),
+        { stdout: (l) => stdout.push(l), stderr: (l) => stderr.push(l) },
+      );
+
+      expect(code, stderr.join("\n")).toBe(0);
+      expect(stdout.map((l) => (JSON.parse(l) as { failure: unknown }).failure)).toEqual(["Error"]);
+      expect(await read("SELECT * FROM pgboss.version")).toBe(versionBefore);
+      expect(await read("SELECT * FROM pgboss.schedule ORDER BY name")).toBe(schedulesBefore);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  it("TP-6.11: (A-218) createPgBoss mode cli connects with the queue login as budmon-cli", async () => {
+    const { createPgBoss } = await s6.workers();
+    const cfg = testWorkerConfig(built.testDb.endpoint, built.testDb.name, "general");
+    const boss = (createPgBoss as (c: typeof cfg, mode: string) => PgBossLike)(cfg, "cli");
+    await boss.start();
+    try {
+      const [row] = await query<{ usename: string }>(
+        built.testDb.urlAs("budmon_migrator"),
+        "SELECT usename FROM pg_stat_activity WHERE application_name = 'budmon-cli' LIMIT 1",
+      );
+
+      expect(row?.usename).toBe("budmon_queue");
+    } finally {
+      await boss.stop({ graceful: false });
+    }
   });
 
   it("TP-6.19x: listDeadLetters without a role covers both roles; the capture list is empty", async () => {

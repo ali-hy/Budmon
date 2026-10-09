@@ -1,4 +1,6 @@
 // Worker configuration and containers on a test database (S-6), owned by the test-architect.
+import { writeFileSync } from "node:fs";
+import path from "node:path";
 import { loadConfig } from "../../src/platform/config/loadConfig.js";
 import type { Config } from "../../src/platform/config/schema.js";
 import { createWorkerContainer } from "../../src/platform/container.js";
@@ -68,5 +70,44 @@ export async function buildWorkerContainer(
       await container.close();
       await testDb.drop();
     },
+  };
+}
+
+/**
+ * The same development worker configuration as an environment, with its secret files written
+ * into `dir` (for entry points that take `env`, such as F-93's runCli).
+ */
+export function testWorkerEnv(
+  dir: string,
+  endpoint: Endpoint,
+  database: string,
+  roles: RolesSpec,
+): Record<string, string> {
+  const f = devWorker();
+  const dbUser = roles === "capture" ? "budmon_capture" : "budmon_app";
+  withFile(f, "DB_PASSWORD_FILE", `${TEST_ROLE_PASSWORDS[dbUser]}\n`);
+  withFile(f, "QUEUE_DB_PASSWORD_FILE", `${TEST_ROLE_PASSWORDS.budmon_queue}\n`);
+  const env: Record<string, string> = {};
+  for (const [key, value] of Object.entries(f.env)) {
+    if (value === undefined) continue;
+    const content = f.files.get(value);
+    if (content === undefined) {
+      env[key] = value;
+    } else {
+      const file = path.join(dir, key.toLowerCase());
+      writeFileSync(file, content);
+      env[key] = file;
+    }
+  }
+  return {
+    ...env,
+    WORKER_ROLES: roles,
+    APP_ENV: "test",
+    DB_HOST: endpoint.host,
+    DB_PORT: String(endpoint.port),
+    DB_NAME: database,
+    DB_USER: dbUser,
+    QUEUE_DB_USER: "budmon_queue",
+    OBJECT_STORE_FS_ROOT: path.join(dir, "objects"),
   };
 }

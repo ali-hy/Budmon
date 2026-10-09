@@ -815,7 +815,7 @@ describe("TP-6.13, TP-6.15: the built worker with test jobs (fixture worker.mjs,
     }
   }, 120_000);
 
-  it("TP-6.15: through the start command, the recorder gets a pg span (SELECT) whose parent is the job's span", async () => {
+  it("TP-6.15: through the start command, the recorder gets a pg span (SELECT) whose parent is pg-boss's CONSUMER span process test.select (A-219)", async () => {
     const received: OtlpRequest[] = [];
     const recorder = createHttpServer((req, res) => {
       const chunks: Buffer[] = [];
@@ -858,9 +858,12 @@ describe("TP-6.13, TP-6.15: the built worker with test jobs (fixture worker.mjs,
       expect(selects.length, seen).toBeGreaterThanOrEqual(1);
       const byId = new Map(all.map((s) => [s.spanId, s]));
       const parents = selects.map((s) => byId.get(s.parentSpanId));
-      // The job's span: the parent is exported, and it names the job.
+      // A-219: the job's span is pg-boss's CONSUMER span "process <queue>".
       expect(
-        parents.some((p) => p !== undefined && p.name.includes("test.select")),
+        parents.some(
+          (p) =>
+            p !== undefined && p.kind === SPAN_KIND_CONSUMER && p.name === "process test.select",
+        ),
         seen,
       ).toBe(true);
     } finally {
@@ -981,6 +984,7 @@ function unexpectedDrops(requests: readonly OtlpRequest[]): number[] {
 }
 
 const SPAN_KIND_SERVER = 2;
+const SPAN_KIND_CONSUMER = 5;
 
 /** The attributes of every recorded data point of the metric `name` (any point type). */
 function metricPointAttributes(
