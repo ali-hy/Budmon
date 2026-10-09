@@ -7,6 +7,7 @@ import { EXIT_CONFIG, loadConfigOrReport } from "../platform/config/startup.js";
 import { describeFailure } from "../platform/observability/describeFailure.js";
 import { createLogger } from "../platform/observability/logger.js";
 import { listDeadLetters, redriveDeadLetter } from "../platform/queue/deadLetter.js";
+import { buildJobRegistry } from "../platform/queue/appRegistry.js";
 import { createPgBoss } from "../platform/queue/workers.js";
 import type { WorkerRole } from "../platform/queue/jobs.js";
 
@@ -81,7 +82,13 @@ export async function runCli(
       return 0;
     }
     // Checked above: role and id are present for redrive.
-    const moved = await redriveDeadLetter(boss, r as WorkerRole, id as string);
+    const moved = await redriveDeadLetter(
+      boss,
+      r as WorkerRole,
+      id as string,
+      buildJobRegistry(),
+      logger,
+    );
     io.stdout(JSON.stringify({ moved }));
     return moved === 1 ? 0 : 2;
   } catch (error) {

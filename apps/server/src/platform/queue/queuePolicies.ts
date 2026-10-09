@@ -39,12 +39,18 @@ export function queuePolicyStatements(registry: JobRegistry): string[] {
   ]);
   const statements = ["SET LOCAL ROLE budmon_queue;"];
   for (const table of TABLES) {
+    // A-230: the routing columns pg-boss's owner-run paths follow. `<table>.name` is the row's
+    // column (unqualified, it would resolve to q.name inside the subquery).
+    const self = table.slice(table.indexOf(".") + 1);
+    const routing =
+      `dead_letter IS NOT DISTINCT FROM (SELECT q.dead_letter FROM pgboss.queue q WHERE q.name = ${self}.name)` +
+      ` AND (source_name IS NULL OR source_name = ANY(${own}))`;
     statements.push(
       `ALTER TABLE ${table} ENABLE ROW LEVEL SECURITY;`,
       ...POLICIES.map((p) => `DROP POLICY IF EXISTS ${p} ON ${table};`),
       `CREATE POLICY capture_select ON ${table} FOR SELECT TO budmon_capture USING (name = ANY(${visible}));`,
-      `CREATE POLICY capture_insert ON ${table} FOR INSERT TO budmon_capture WITH CHECK (name = ANY(${visible}));`,
-      `CREATE POLICY capture_update ON ${table} FOR UPDATE TO budmon_capture USING (name = ANY(${own})) WITH CHECK (name = ANY(${own}));`,
+      `CREATE POLICY capture_insert ON ${table} FOR INSERT TO budmon_capture WITH CHECK (name = ANY(${visible}) AND ${routing});`,
+      `CREATE POLICY capture_update ON ${table} FOR UPDATE TO budmon_capture USING (name = ANY(${own})) WITH CHECK (name = ANY(${own}) AND ${routing});`,
       `CREATE POLICY capture_delete ON ${table} FOR DELETE TO budmon_capture USING (name = ANY(${own}));`,
       `CREATE POLICY app_select ON ${table} FOR SELECT TO budmon_app USING (true);`,
       `CREATE POLICY app_insert ON ${table} FOR INSERT TO budmon_app WITH CHECK (true);`,
