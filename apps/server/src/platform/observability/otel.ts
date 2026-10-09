@@ -416,7 +416,9 @@ export function startTelemetry(
       }),
       new UndiciInstrumentation(),
       new PgInstrumentation({ enhancedDatabaseReporting: false, requireParentSpan: true }),
-      new FastifyOtelInstrumentation(),
+      // @fastify/otel patches nothing through module hooks: it adds its plugin to each Fastify
+      // instance from the `fastify.initialization` diagnostics channel, which needs this option.
+      new FastifyOtelInstrumentation({ registerOnInitialization: true }),
     ],
   });
   sdk.start();
