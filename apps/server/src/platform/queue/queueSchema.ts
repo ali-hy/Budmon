@@ -48,13 +48,27 @@ function asQueueRole(plan: string): string {
       .replace(begin, "")
       .replace(commit, "")
       .replace(`CREATE SCHEMA IF NOT EXISTS ${SCHEMA};`, ""),
-    `GRANT USAGE ON SCHEMA ${SCHEMA} TO ${USERS};`,
-    `GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA ${SCHEMA} TO ${USERS};`,
-    `GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA ${SCHEMA} TO ${USERS};`,
-    `ALTER DEFAULT PRIVILEGES IN SCHEMA ${SCHEMA} GRANT SELECT, INSERT, UPDATE ON TABLES TO ${USERS};`,
-    `ALTER DEFAULT PRIVILEGES IN SCHEMA ${SCHEMA} GRANT EXECUTE ON FUNCTIONS TO ${USERS};`,
+    ...GRANTS,
   ].join("\n");
 }
+
+/**
+ * F-74 step 3 (A-227): least privilege. Both roles read the schema and run its functions; on
+ * pgboss.job_common (every queue is non-partitioned, F-75) budmon_app may only send (INSERT) and
+ * budmon_capture works its own jobs (INSERT, UPDATE, DELETE; which rows, F-75b's policies decide).
+ * Earlier, broader grants are revoked first, so an existing database converges.
+ */
+const GRANTS: readonly string[] = [
+  `REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON ALL TABLES IN SCHEMA ${SCHEMA} FROM ${USERS};`,
+  `ALTER DEFAULT PRIVILEGES IN SCHEMA ${SCHEMA} REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON TABLES FROM ${USERS};`,
+  `GRANT USAGE ON SCHEMA ${SCHEMA} TO ${USERS};`,
+  `GRANT SELECT ON ALL TABLES IN SCHEMA ${SCHEMA} TO ${USERS};`,
+  `GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA ${SCHEMA} TO ${USERS};`,
+  `GRANT INSERT ON ${SCHEMA}.job_common TO budmon_app;`,
+  `GRANT INSERT, UPDATE, DELETE ON ${SCHEMA}.job_common TO budmon_capture;`,
+  `ALTER DEFAULT PRIVILEGES IN SCHEMA ${SCHEMA} GRANT SELECT ON TABLES TO ${USERS};`,
+  `ALTER DEFAULT PRIVILEGES IN SCHEMA ${SCHEMA} GRANT EXECUTE ON FUNCTIONS TO ${USERS};`,
+];
 
 export async function installOrUpgradeQueueSchema(
   migrator: DbHandle,
@@ -70,7 +84,11 @@ export async function installOrUpgradeQueueSchema(
   const { rows } = await migrator.executeSql("SELECT version FROM pgboss.version");
   const current = Number.parseInt(String(rows[0]?.["version"]), 10);
   if (current > target) throw new SchemaStepError("queue_schema_ahead");
-  if (current === target) return "current";
+  if (current === target) {
+    // The grants converge on every run (A-227), as one implicit transaction.
+    await migrator.executeSql(["SET LOCAL ROLE budmon_queue;", ...GRANTS].join("\n"));
+    return "current";
+  }
   await migrator.executeSql(asQueueRole(getMigrationPlans(SCHEMA, current)));
   return "upgraded";
 }

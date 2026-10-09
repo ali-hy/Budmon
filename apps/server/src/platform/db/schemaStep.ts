@@ -4,6 +4,7 @@ import { PgBoss } from "pg-boss";
 import type { AppEnv, DbLoginRole } from "../config/schema.js";
 import type { Logger } from "../observability/logger.js";
 import { installOrUpgradeQueueSchema } from "../queue/queueSchema.js";
+import { applyQueuePolicies } from "../queue/queuePolicies.js";
 import { syncQueues } from "../queue/queueSync.js";
 import type { JobRegistry } from "../queue/registry.js";
 import { applyTableGrants, grantMigrationsTableRead, tableGrants } from "./grants.js";
@@ -132,6 +133,8 @@ export async function runSchemaStep(input: {
 
   // 6.
   const queues = await timed("queues", () => syncAsQueueRole(database, input.jobRegistry, logger));
+  // 6b (A-227).
+  await timed("queue_policies", () => applyQueuePolicies(database.handle, input.jobRegistry));
   return {
     migrationsApplied,
     pushedStatements,

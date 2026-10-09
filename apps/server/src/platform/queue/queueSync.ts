@@ -23,6 +23,8 @@ export async function syncQueues(
     if ((await boss.getQueue(name)) === null) {
       await boss.createQueue(name, {
         policy: "standard",
+        // A-227: every job lives in pgboss.job_common, which carries the row-level policies.
+        partition: false,
         retentionSeconds: DEAD_LETTER_RETENTION_SECONDS,
         deleteAfterSeconds: DEAD_LETTER_RETENTION_SECONDS,
       });
@@ -42,7 +44,7 @@ export async function syncQueues(
     };
     const existing = await boss.getQueue(def.name);
     if (existing === null) {
-      await boss.createQueue(def.name, { ...options, policy: def.policy });
+      await boss.createQueue(def.name, { ...options, policy: def.policy, partition: false });
       created += 1;
       continue;
     }

@@ -16,6 +16,8 @@ export interface JobDefinition<P> {
   readonly expireInSeconds: number;
   readonly policy: QueuePolicy;
   readonly cron?: string;
+  /** A-227: a general job that worker-capture may enqueue (F-75b's INSERT policy). */
+  readonly sendableFromCapture?: boolean;
 }
 
 /** `<module>.<job>`, the same rule as F-30's job names. */
@@ -44,6 +46,7 @@ export function defineJob<P>(
     retryBackoff: true,
     expireInSeconds: 900,
     policy: "standard",
+    sendableFromCapture: false,
     ...def,
   };
 }
