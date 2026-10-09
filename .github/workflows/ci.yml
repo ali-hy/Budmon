@@ -9,6 +9,9 @@ on:
 permissions:
   contents: read
 
+env:
+  TESTCONTAINERS_HUB_IMAGE_NAME_PREFIX: mirror.gcr.io/
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
