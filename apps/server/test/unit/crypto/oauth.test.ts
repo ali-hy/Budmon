@@ -185,6 +185,21 @@ describe("TP-8.12: exchangeAuthorizationCode (F-120)", () => {
     });
   });
 
+  it("TP-8.12 (A-262): expires_in 31622400 (366 days, the bound) is accepted", async () => {
+    const tokens = await exchange(() =>
+      Promise.resolve(
+        json(200, {
+          access_token: "a",
+          refresh_token: "r",
+          expires_in: 31622400,
+          scope: "openid",
+        }),
+      ),
+    );
+
+    expect(tokens.expiresAt.toString()).toBe("2027-10-10T12:00:00Z");
+  });
+
   const cases: [string, () => Promise<Response>, string, boolean][] = [
     [
       "200 without refresh_token",
@@ -224,9 +239,9 @@ describe("TP-8.12: exchangeAuthorizationCode (F-120)", () => {
       "rejected",
       false,
     ],
-    ...([0, -5, "abc"] as const).map(
+    ...([0, -5, "abc", 1e300, 31622401] as const).map(
       (expiresIn): [string, () => Promise<Response>, string, boolean] => [
-        `200 with expires_in ${JSON.stringify(expiresIn)} (A-259)`,
+        `200 with expires_in ${JSON.stringify(expiresIn)} (A-259, A-262)`,
         () =>
           Promise.resolve(
             json(200, {
