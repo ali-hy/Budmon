@@ -5,6 +5,7 @@ import { createDatabase } from "./client.js";
 import { bootstrapCluster } from "./clusterBootstrap.js";
 import { createLogger } from "../observability/logger.js";
 import { Secret } from "../observability/redaction.js";
+import { buildJobRegistry } from "../queue/appRegistry.js";
 import { serverRoot } from "../config/serverRoot.js";
 import iso4217 from "../fx/iso4217.json" with { type: "json" };
 import path from "node:path";
@@ -142,6 +143,7 @@ export async function resetDevelopmentDatabase(
       migrationsFolder: path.join(serverRoot(), "drizzle"),
       roleSecrets: input.roleSecrets,
       appEnv: input.appEnv,
+      jobRegistry: buildJobRegistry(),
       referenceData: { currencies: iso4217 },
       logger: createLogger({
         service: "db-reset",

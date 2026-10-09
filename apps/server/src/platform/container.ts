@@ -1,9 +1,12 @@
 // F-96: the composition root. S-2 built the base members; S-4 adds the reporter, the metrics and
-// the API members used so far (auth hook, module routes, A-26). Later slices add the rest.
+// the API members used so far (auth hook, module routes, A-26); S-6 the jobs (registry, queue,
+// pg-boss) and the worker members. Later slices add the rest.
 import { metrics as metricsApi } from "@opentelemetry/api";
 import { systemClock, uuidv7Generator, type Clock, type IdGenerator } from "@budmon/shared";
 import type { FastifyInstance } from "fastify";
-import type { Config } from "./config/schema.js";
+import type { PgBoss } from "pg-boss";
+import type { Config, WorkerRole } from "./config/schema.js";
+import { createSealedColumnRegistry, type SealedColumnRegistry } from "./crypto/sealedColumns.js";
 import { createDatabase } from "./db/client.js";
 import type { Database } from "./db/types.js";
 import { noAuthHook, type AuthHook } from "./http/context.js";
@@ -15,6 +18,10 @@ import {
   type PlatformMetrics,
 } from "./observability/metrics.js";
 import { initSentry } from "./observability/sentry.js";
+import { buildJobRegistry } from "./queue/appRegistry.js";
+import { createJobQueue, type JobQueue } from "./queue/jobQueue.js";
+import type { JobRegistry } from "./queue/registry.js";
+import { createPgBoss, workerServiceName } from "./queue/workers.js";
 import { createRateLimiter, type RateLimiter } from "./security/rateLimiter.js";
 
 export interface BaseContainer {
@@ -25,10 +32,28 @@ export interface BaseContainer {
   database: Database;
   metrics: PlatformMetrics;
   reporter: ErrorReporter;
+  registry: JobRegistry;
+  queue: JobQueue;
+  /** The api's send-only pg-boss; a worker's queue (general) or capture instance. */
+  boss: PgBoss;
+  /** A-26 (F-115). */
+  sealedColumns: SealedColumnRegistry;
   close(): Promise<void>;
 }
 
-export type WorkerContainer = BaseContainer;
+/** A-26 (F-146): what erasing a user means for the modules; null until a module provides it. */
+export type ErasureHandler = (userId: string) => Promise<void>;
+
+export interface WorkerContainer extends BaseContainer {
+  roles: ReadonlySet<WorkerRole>;
+  /** General-only: pg-boss as budmon_queue (supervision and schedules). */
+  queueBoss: PgBoss | null;
+  /** Capture-only: pg-boss as budmon_capture. */
+  captureBoss: PgBoss | null;
+  erasureHandler: ErasureHandler | null;
+  /** A-26 (F-78b). */
+  onGeneralStarted: (() => Promise<void>)[];
+}
 
 export interface ApiContainer extends BaseContainer {
   authHook: AuthHook;
@@ -52,11 +77,9 @@ function platformMetrics(): PlatformMetrics {
   return holder.metrics;
 }
 
-function createBase(
-  config: Config,
-  service: string,
-  overrides: Partial<BaseContainer>,
-): BaseContainer {
+type BaseCore = Omit<BaseContainer, "registry" | "queue" | "boss" | "sealedColumns" | "close">;
+
+function createCore(config: Config, service: string, overrides: Partial<BaseContainer>): BaseCore {
   const logger =
     overrides.logger ??
     createLogger({
@@ -88,9 +111,16 @@ function createBase(
         release: config.release,
         service,
       }),
-    close: async () => {
-      await database.close();
-    },
+  };
+}
+
+/** Stops the pg-boss instances (none is waited for: workers stop gracefully first), then the pool. */
+function closer(database: Database, bosses: readonly (PgBoss | null)[]): () => Promise<void> {
+  return async () => {
+    for (const boss of new Set(bosses)) {
+      if (boss !== null) await boss.stop({ graceful: false });
+    }
+    await database.close();
   };
 }
 
@@ -98,13 +128,20 @@ export function createApiContainer(
   config: Config,
   overrides: Partial<ApiContainer> = {},
 ): ApiContainer {
-  const base = createBase(config, "api", overrides);
+  const base = createCore(config, "api", overrides);
   const rateLimitKey = config.api?.rateLimitKey;
   if (overrides.rateLimiter === undefined && rateLimitKey === undefined) {
     throw new Error("api config required");
   }
+  const registry = overrides.registry ?? buildJobRegistry();
+  const boss = overrides.boss ?? createPgBoss(config, "send-only", base.logger);
   return {
     ...base,
+    registry,
+    boss,
+    queue: overrides.queue ?? createJobQueue({ boss, registry }),
+    sealedColumns: overrides.sealedColumns ?? createSealedColumnRegistry(),
+    close: closer(base.database, [boss]),
     authHook: overrides.authHook ?? noAuthHook,
     rateLimiter:
       overrides.rateLimiter ??
@@ -122,5 +159,35 @@ export function createWorkerContainer(
   config: Config,
   overrides: Partial<WorkerContainer> = {},
 ): WorkerContainer {
-  return createBase(config, "worker", overrides);
+  const roles = config.worker?.roles;
+  if (roles === undefined || roles.size === 0) throw new Error("worker config required");
+  const base = createCore(config, workerServiceName(roles), overrides);
+  const registry = overrides.registry ?? buildJobRegistry();
+  const queueBoss =
+    overrides.queueBoss !== undefined
+      ? overrides.queueBoss
+      : roles.has("general")
+        ? createPgBoss(config, "general", base.logger)
+        : null;
+  const captureBoss =
+    overrides.captureBoss !== undefined
+      ? overrides.captureBoss
+      : roles.has("capture")
+        ? createPgBoss(config, "capture", base.logger)
+        : null;
+  // Checked above: at least one role, so at least one instance.
+  const boss = overrides.boss ?? ((queueBoss ?? captureBoss) as PgBoss);
+  return {
+    ...base,
+    roles,
+    registry,
+    boss,
+    queue: overrides.queue ?? createJobQueue({ boss, registry }),
+    sealedColumns: overrides.sealedColumns ?? createSealedColumnRegistry(),
+    queueBoss,
+    captureBoss,
+    erasureHandler: overrides.erasureHandler ?? null,
+    onGeneralStarted: overrides.onGeneralStarted ?? [],
+    close: closer(base.database, [boss, queueBoss, captureBoss]),
+  };
 }

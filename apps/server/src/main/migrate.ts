@@ -4,6 +4,7 @@ import { pathToFileURL } from "node:url";
 import path from "node:path";
 import { EXIT_CONFIG, loadConfigOrReport } from "../platform/config/startup.js";
 import type { Config, DbLoginRole } from "../platform/config/schema.js";
+import { buildJobRegistry } from "../platform/queue/appRegistry.js";
 import { serverRoot } from "../platform/config/serverRoot.js";
 import { createDatabase } from "../platform/db/client.js";
 import {
@@ -94,6 +95,7 @@ export async function runMigrate(
       migrationsFolder,
       roleSecrets,
       appEnv: config.appEnv,
+      jobRegistry: buildJobRegistry(),
       referenceData: { currencies: iso4217 },
       logger,
     });

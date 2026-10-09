@@ -1,0 +1,94 @@
+// F-93: operator commands (`node dist/main/cli.js <command>`). S-6 delivers `jobs:dead`; later
+// slices add the rest of F-93's table.
+import { readFileSync, realpathSync } from "node:fs";
+import { pathToFileURL } from "node:url";
+import { isUuid } from "@budmon/shared";
+import { EXIT_CONFIG, loadConfigOrReport } from "../platform/config/startup.js";
+import { createWorkerContainer } from "../platform/container.js";
+import { describeFailure } from "../platform/observability/describeFailure.js";
+import { listDeadLetters, redriveDeadLetter } from "../platform/queue/deadLetter.js";
+import type { WorkerRole } from "../platform/queue/jobs.js";
+
+const EXIT_USAGE = 64;
+const USAGE = [
+  "Usage:",
+  "  jobs:dead list [--role capture|general] [--limit n]",
+  "  jobs:dead redrive --role capture|general --id <uuid>",
+].join("\n");
+
+interface Io {
+  stdout: (line: string) => void;
+  stderr: (line: string) => void;
+}
+
+function option(args: readonly string[], name: string): string | undefined {
+  const index = args.indexOf(name);
+  return index >= 0 ? args[index + 1] : undefined;
+}
+
+function role(value: string | undefined): WorkerRole | undefined | null {
+  if (value === undefined) return undefined;
+  return value === "capture" || value === "general" ? value : null;
+}
+
+export async function runCli(
+  argv: readonly string[],
+  env: Readonly<Record<string, string | undefined>>,
+  io: Io,
+): Promise<number> {
+  const [command, sub, ...args] = argv;
+  if (command !== "jobs:dead" || (sub !== "list" && sub !== "redrive")) {
+    io.stderr(`Unknown command: ${[command, sub].filter((x) => x !== undefined).join(" ")}`);
+    io.stderr(USAGE);
+    return EXIT_USAGE;
+  }
+  const r = role(option(args, "--role"));
+  const limitText = option(args, "--limit");
+  const id = option(args, "--id");
+  if (r === null || (limitText !== undefined && !/^[1-9]\d{0,3}$/.test(limitText))) {
+    io.stderr(USAGE);
+    return EXIT_USAGE;
+  }
+  if (sub === "redrive" && (r === undefined || id === undefined || !isUuid(id))) {
+    io.stderr(USAGE);
+    return EXIT_USAGE;
+  }
+
+  // Every jobs:dead command runs as the general worker (F-93).
+  const config = loadConfigOrReport(
+    "worker",
+    { ...env, WORKER_ROLES: "general" },
+    readFileSync,
+    io.stderr,
+  );
+  if (config === null) return EXIT_CONFIG;
+  const container = createWorkerContainer(config);
+  try {
+    const boss = container.boss;
+    await boss.start();
+    if (sub === "list") {
+      const limit = limitText === undefined ? undefined : Number.parseInt(limitText, 10);
+      for (const entry of await listDeadLetters(boss, r, limit)) io.stdout(JSON.stringify(entry));
+      return 0;
+    }
+    // Checked above: role and id are present for redrive.
+    const moved = await redriveDeadLetter(boss, r as WorkerRole, id as string);
+    io.stdout(JSON.stringify({ moved }));
+    return moved === 1 ? 0 : 2;
+  } catch (error) {
+    container.logger.error("cli_failed", describeFailure(error), error);
+    return 1;
+  } finally {
+    await container.close();
+  }
+}
+
+if (
+  process.argv[1] !== undefined &&
+  import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href
+) {
+  process.exitCode = await runCli(process.argv.slice(2), process.env, {
+    stdout: (line) => process.stdout.write(`${line}\n`),
+    stderr: (line) => process.stderr.write(`${line}\n`),
+  });
+}

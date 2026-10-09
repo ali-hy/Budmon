@@ -1,0 +1,172 @@
+// F-77 createPgBoss, F-78 startWorkers and F-78b runGeneralStartHooks.
+import { PgBoss } from "pg-boss";
+import type { Config } from "../config/schema.js";
+import type { WorkerContainer } from "../container.js";
+import type { Logger } from "../observability/logger.js";
+import { startHeartbeat } from "./heartbeat.js";
+import { wrapHandler, type JobContext } from "./wrapper.js";
+
+export type JobHandler = (payload: unknown, ctx: JobContext) => Promise<unknown>;
+
+export class MissingQueueError extends Error {
+  constructor(readonly queue: string) {
+    super(`queue missing: ${queue}`);
+    this.name = "MissingQueueError";
+  }
+}
+
+/**
+ * F-77. send-only (api) and capture use the configured database login (`budmon_app` for the api,
+ * `budmon_capture` for worker-capture); general uses the queue login, `budmon_queue`.
+ */
+export function createPgBoss(
+  cfg: Config,
+  mode: "send-only" | "capture" | "general",
+  logger?: Logger,
+): PgBoss {
+  const queue = cfg.worker?.queue;
+  if (mode === "general" && queue === undefined) {
+    throw new Error("a general pg-boss needs the queue login");
+  }
+  const login =
+    mode === "general" && queue !== undefined
+      ? { user: queue.user, password: queue.password.reveal(), max: queue.poolMax }
+      : {
+          user: cfg.db.user,
+          password: cfg.db.password.reveal(),
+          max: mode === "send-only" ? 2 : 3,
+        };
+  const boss = new PgBoss({
+    host: cfg.db.host,
+    port: cfg.db.port,
+    database: cfg.db.name,
+    ...login,
+    application_name: `budmon-${mode}`,
+    ssl:
+      cfg.db.sslmode === "verify-full"
+        ? { ca: cfg.db.sslRootCert, rejectUnauthorized: true, servername: cfg.db.host }
+        : false,
+    schema: "pgboss",
+    migrate: false,
+    createSchema: false,
+    useListenNotify: false,
+    supervise: mode === "general",
+    schedule: mode === "general",
+  });
+  boss.on("error", (error) => {
+    logger?.error("queue_error", {}, error);
+  });
+  return boss;
+}
+
+function rolesBosses(c: WorkerContainer): { role: "general" | "capture"; boss: PgBoss }[] {
+  const out: { role: "general" | "capture"; boss: PgBoss }[] = [];
+  if (c.roles.has("general") && c.queueBoss !== null)
+    out.push({ role: "general", boss: c.queueBoss });
+  if (c.roles.has("capture") && c.captureBoss !== null) {
+    out.push({ role: "capture", boss: c.captureBoss });
+  }
+  return out;
+}
+
+/** The service name (A-157): `worker-<role>` for one role, `worker` for several. */
+export function workerServiceName(roles: ReadonlySet<string>): string {
+  return roles.size === 1 ? `worker-${[...roles][0] ?? "general"}` : "worker";
+}
+
+export async function startWorkers(
+  c: WorkerContainer,
+  handlers: ReadonlyMap<string, JobHandler>,
+): Promise<{ stop(): Promise<void> }> {
+  const started: PgBoss[] = [];
+  let heartbeat: { stop(): void } | undefined;
+  let depthTimer: NodeJS.Timeout | undefined;
+  let depths: { value: number; labels: Record<string, string> }[] = [];
+  const stop = async (): Promise<void> => {
+    heartbeat?.stop();
+    clearInterval(depthTimer);
+    for (const boss of started) await boss.stop({ graceful: true, timeout: 30_000 });
+  };
+  try {
+    for (const { role, boss } of rolesBosses(c)) {
+      // 1.
+      await boss.start();
+      started.push(boss);
+      for (const def of c.registry.forRole(role)) {
+        // 2.
+        if ((await boss.getQueue(def.name)) === null) {
+          c.logger.error("queue_missing", { queue: def.name });
+          throw new MissingQueueError(def.name);
+        }
+        const handler = handlers.get(def.name);
+        if (handler === undefined) throw new Error(`no handler for ${def.name}`);
+        // 3.
+        await boss.work(
+          def.name,
+          { batchSize: 1, pollingIntervalSeconds: 2, includeMetadata: true },
+          wrapHandler(def, handler, {
+            logger: c.logger,
+            metrics: c.metrics,
+            reporter: c.reporter,
+            clock: c.clock,
+          }),
+        );
+      }
+      if (role === "general") {
+        // 4.
+        for (const def of c.registry.forRole("general")) {
+          if (def.cron !== undefined) await boss.schedule(def.name, def.cron, {}, { tz: "UTC" });
+        }
+        c.metrics.observeQueueDepth(() => depths);
+        const refresh = async (): Promise<void> => {
+          try {
+            depths = (await boss.getQueues()).map((q) => ({
+              value: q.queuedCount,
+              labels: { queue: q.name },
+            }));
+          } catch {
+            // The gauge keeps its last values.
+          }
+        };
+        await refresh();
+        depthTimer = setInterval(() => void refresh(), 60_000);
+        depthTimer.unref();
+        // A-203: only when the fx module has registered it.
+        const gapCheck = c.registry.get("platform.fx-gap-check");
+        if (gapCheck !== undefined) {
+          await c.queue.enqueue(c.database.handle, gapCheck, {}, { singletonKey: "startup" });
+        }
+      }
+    }
+    // 5.
+    heartbeat = startHeartbeat({
+      metrics: c.metrics,
+      logger: c.logger,
+      clock: c.clock,
+      service: workerServiceName(c.roles),
+    });
+  } catch (error) {
+    await stop().catch(() => undefined);
+    throw error;
+  }
+  return { stop };
+}
+
+/** F-78b (A-26): the general role's start-up hooks, in order; a failing hook doesn't stop the rest. */
+export async function runGeneralStartHooks(
+  c: Pick<WorkerContainer, "roles" | "onGeneralStarted" | "logger" | "reporter">,
+): Promise<void> {
+  if (!c.roles.has("general")) return;
+  for (const [index, hook] of c.onGeneralStarted.entries()) {
+    try {
+      await hook();
+    } catch (err) {
+      c.reporter.report(err, { route: "worker:onGeneralStarted" });
+      c.logger.error(
+        "worker_start_hook_failed",
+        { step: `onGeneralStarted:${String(index)}` },
+        err,
+      );
+    }
+  }
+}

@@ -44,6 +44,8 @@ async function main(): Promise<number | null> {
   const telemetry = getTelemetry();
   const container = createApiContainer(config, { logger });
   state.reporter = container.reporter;
+  // A-209: the send-only pg-boss; container.close() stops it.
+  await container.boss.start();
   const app = await createApiServer(container);
   await app.listen({ port: config.api.port, host: config.api.host });
   // service and release are fixed keys on every line (A-113).

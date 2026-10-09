@@ -1,8 +1,12 @@
-// F-19: the schema step as the migrator, in the S-2 shape (A-49): roles, schema, grants and
-// reference data. S-6 adds the queue steps.
+// F-19: the schema step as the migrator: roles, schema, queue schema, grants, reference data and
+// queues (S-6 adds steps 3 and 6, A-49).
+import { PgBoss } from "pg-boss";
 import type { AppEnv, DbLoginRole } from "../config/schema.js";
 import type { Logger } from "../observability/logger.js";
-import { applyTableGrants, grantMigrationsTableRead } from "./grants.js";
+import { installOrUpgradeQueueSchema } from "../queue/queueSchema.js";
+import { syncQueues } from "../queue/queueSync.js";
+import type { JobRegistry } from "../queue/registry.js";
+import { applyTableGrants, grantMigrationsTableRead, tableGrants } from "./grants.js";
 import { applyCommittedMigrations, readJournal } from "./migrations.js";
 import { loadReferenceData, type ReferenceData } from "./referenceData.js";
 import { applyRolesAndPrivileges } from "./roles.js";
@@ -13,7 +17,54 @@ export { SchemaStepError, type SchemaStepCode } from "./schemaStepError.js";
 export interface SchemaStepReport {
   migrationsApplied: number;
   pushedStatements: number;
+  queueSchema: "installed" | "upgraded" | "current";
   currenciesUpserted: number;
+  queuesCreated: number;
+  queuesUpdated: number;
+}
+
+/** F-75's pg-boss: the migrator's own connection settings, acting as budmon_queue. */
+async function syncAsQueueRole(
+  database: Database,
+  registry: JobRegistry,
+  logger: Logger,
+): Promise<{ created: number; updated: number }> {
+  const o = database.pool.options;
+  const boss = new PgBoss({
+    ...(o.host === undefined ? {} : { host: o.host }),
+    ...(o.port === undefined ? {} : { port: o.port }),
+    ...(o.database === undefined ? {} : { database: o.database }),
+    ...(o.user === undefined ? {} : { user: o.user }),
+    ...(typeof o.password === "string" ? { password: o.password } : {}),
+    ssl: o.ssl ?? false,
+    options: "-c role=budmon_queue",
+    max: 1,
+    application_name: "budmon-migrate-queues",
+    schema: "pgboss",
+    migrate: false,
+    createSchema: false,
+    supervise: false,
+    schedule: false,
+    useListenNotify: false,
+  });
+  boss.on("error", (error) => {
+    logger.error("queue_error", {}, error);
+  });
+  await boss.start();
+  try {
+    return await syncQueues(boss, registry, logger);
+  } finally {
+    await boss.stop({ graceful: false });
+  }
+}
+
+/** A-204: a fresh database: none of the granted tables exists yet. */
+async function noGrantedTables(database: Database): Promise<boolean> {
+  const { rows } = await database.handle.executeSql(
+    "SELECT count(*)::int AS n FROM pg_tables WHERE schemaname = 'public' AND tablename = ANY($1)",
+    [Object.keys(tableGrants)],
+  );
+  return rows[0]?.["n"] === 0;
 }
 
 export async function runSchemaStep(input: {
@@ -22,6 +73,7 @@ export async function runSchemaStep(input: {
   migrationsFolder: string;
   roleSecrets: Record<DbLoginRole, { verifier: string } | { password: string }>;
   appEnv: AppEnv;
+  jobRegistry: JobRegistry;
   referenceData: ReferenceData;
   logger: Logger;
 }): Promise<SchemaStepReport> {
@@ -39,6 +91,7 @@ export async function runSchemaStep(input: {
 
   let migrationsApplied = 0;
   let pushedStatements = 0;
+  let fresh = false;
   if (input.mode === "push") {
     // Loaded on demand: drizzle-kit is a development dependency, so the production bundle
     // never contains or imports it.
@@ -52,17 +105,39 @@ export async function runSchemaStep(input: {
       applyCommittedMigrations(database, input.migrationsFolder),
     );
     migrationsApplied = migrations.applied;
-    // 2b (A-179): an empty journal and nothing recorded means no tables yet (every build before
-    // the first release): only the migrations table's grant applies, and the step stops here.
-    if (readJournal(input.migrationsFolder).length === 0 && migrations.verified === 0) {
-      await timed("grants", () => grantMigrationsTableRead(database.handle));
-      return { migrationsApplied: 0, pushedStatements: 0, currenciesUpserted: 0 };
-    }
+    // 2b (A-179, A-204): a fresh database (empty journal, nothing recorded, no tables; every
+    // build before the first release) has nothing to grant or load yet.
+    fresh =
+      readJournal(input.migrationsFolder).length === 0 &&
+      migrations.verified === 0 &&
+      (await noGrantedTables(database));
   }
 
-  await timed("grants", () => applyTableGrants(database.handle));
-  const { upserted } = await timed("reference_data", () =>
-    loadReferenceData(database.handle, input.referenceData),
+  // 3.
+  const queueSchema = await timed("queue_schema", () =>
+    installOrUpgradeQueueSchema(database.handle),
   );
-  return { migrationsApplied, pushedStatements, currenciesUpserted: upserted };
+
+  let currenciesUpserted = 0;
+  if (fresh) {
+    // Only F-16's step 5 (A-130).
+    await timed("grants", () => grantMigrationsTableRead(database.handle));
+  } else {
+    // 4, 5.
+    await timed("grants", () => applyTableGrants(database.handle));
+    currenciesUpserted = (
+      await timed("reference_data", () => loadReferenceData(database.handle, input.referenceData))
+    ).upserted;
+  }
+
+  // 6.
+  const queues = await timed("queues", () => syncAsQueueRole(database, input.jobRegistry, logger));
+  return {
+    migrationsApplied,
+    pushedStatements,
+    queueSchema,
+    currenciesUpserted,
+    queuesCreated: queues.created,
+    queuesUpdated: queues.updated,
+  };
 }

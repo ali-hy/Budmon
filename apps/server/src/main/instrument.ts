@@ -11,7 +11,8 @@ export { getTelemetry, type TelemetryHandle } from "../platform/observability/te
 
 /** `api` or `worker` from the entry's file name; anything else gets no telemetry. */
 function processKind(): "api" | "worker" | undefined {
-  const base = path.basename(process.argv[1] ?? "", ".js").replace(/\.ts$/, "");
+  // A-201: .js, .mjs or .ts removed, so a test fixture named worker.mjs counts as a worker.
+  const base = path.basename(process.argv[1] ?? "").replace(/\.(m?js|ts)$/, "");
   return base === "api" || base === "worker" ? base : undefined;
 }
 

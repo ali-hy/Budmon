@@ -1,45 +1,130 @@
 // F-91: the worker process, started as `node --import ./dist/main/instrument.js
-// dist/main/worker.js` (A-147). S-2 and S-3 deliver start-up, configuration handling and the process's
-// fatal-error handlers (A-118); the rest arrives with S-4 (api) and S-6 (worker).
-import { readFileSync } from "node:fs";
+// dist/main/worker.js` (A-147). `runWorker` is the testable entry (A-201): importing this module
+// doesn't start anything; the entry guard at the bottom does.
+import { readFileSync, realpathSync } from "node:fs";
+import { pathToFileURL } from "node:url";
 import { EXIT_CONFIG, loadConfigOrReport } from "../platform/config/startup.js";
+import { createWorkerContainer } from "../platform/container.js";
 import { describeFailure } from "../platform/observability/describeFailure.js";
 import { installFatalHandlers, startupState } from "../platform/observability/fatal.js";
 import { createLogger } from "../platform/observability/logger.js";
 import { initSentry } from "../platform/observability/sentry.js";
 import { getTelemetry } from "../platform/observability/telemetryHandle.js";
+import { buildHandlerMap } from "../platform/queue/handlers.js";
+import type { JobRegistry } from "../platform/queue/registry.js";
+import {
+  runGeneralStartHooks,
+  startWorkers,
+  workerServiceName,
+  type JobHandler,
+} from "../platform/queue/workers.js";
 
 const state = startupState("worker", process.env);
-installFatalHandlers(state);
 
-function main(): void {
-  const config = loadConfigOrReport("worker", process.env, readFileSync, (line) =>
+/** A-180: pg-boss's graceful stop gets 30 s, the rest 5 s, inside Compose's 45 s grace. */
+const STOP_BUDGET_MS = 35_000;
+const GRACEFUL_STOP_MS = 30_000;
+
+/** The configuration is invalid; its problems were written to stderr (exit 78). */
+export class WorkerConfigError extends Error {
+  constructor() {
+    super("worker configuration invalid");
+    this.name = "WorkerConfigError";
+  }
+}
+
+async function withDeadline(fn: () => Promise<unknown>, ms: number): Promise<void> {
+  let timer: NodeJS.Timeout | undefined;
+  await Promise.race([
+    fn().catch(() => undefined),
+    new Promise((resolve) => {
+      timer = setTimeout(resolve, Math.max(0, ms));
+    }),
+  ]);
+  clearTimeout(timer);
+}
+
+export async function runWorker(
+  env: Readonly<Record<string, string | undefined>>,
+  overrides: { registry?: JobRegistry; handlers?: ReadonlyMap<string, JobHandler> } = {},
+): Promise<{ stop(): Promise<void> }> {
+  const config = loadConfigOrReport("worker", env, readFileSync, (line) =>
     process.stderr.write(`${line}\n`),
   );
-  if (config === null) {
-    process.exitCode = EXIT_CONFIG;
-    return;
-  }
-  state.logger = createLogger({
-    service: "worker",
+  const roles = config?.worker?.roles;
+  if (config === null || roles === undefined) throw new WorkerConfigError();
+  // A-157: worker-general, worker-capture, or worker for several roles.
+  const service = workerServiceName(roles);
+  const logger = createLogger({
+    service,
     release: config.release,
     level: config.logLevel,
     appEnv: config.appEnv,
   });
-  state.reporter = initSentry({
+  state.logger = logger;
+  const reporter = initSentry({
     ...(config.sentryDsn === undefined ? {} : { dsn: config.sentryDsn }),
     environment: config.appEnv,
     release: config.release,
-    service: "worker",
+    service,
   });
-  process.stderr.write("worker: configuration is valid; the queue workers arrive with S-6\n");
-  // Telemetry was started by the `--import` preload (F-89, A-147); nothing runs yet, so it stops.
-  void getTelemetry().shutdown();
+  state.reporter = reporter;
+
+  const container = createWorkerContainer(config, {
+    logger,
+    reporter,
+    ...(overrides.registry === undefined ? {} : { registry: overrides.registry }),
+  });
+  const handlers = new Map<string, JobHandler>([
+    ...buildHandlerMap(container),
+    ...(overrides.handlers ?? []),
+  ]);
+  let workers: { stop(): Promise<void> };
+  try {
+    workers = await startWorkers(container, handlers);
+  } catch (error) {
+    await container.close().catch(() => undefined);
+    throw error;
+  }
+  await runGeneralStartHooks(container);
+  logger.info("worker_started");
+
+  let stopping: Promise<void> | undefined;
+  const stop = (): Promise<void> => {
+    stopping ??= (async () => {
+      const deadline = Date.now() + STOP_BUDGET_MS;
+      const remaining = (cap: number): number => Math.min(cap, deadline - Date.now());
+      await withDeadline(() => workers.stop(), remaining(GRACEFUL_STOP_MS));
+      await withDeadline(() => container.close(), remaining(3_000));
+      await withDeadline(() => getTelemetry().shutdown(), remaining(2_000));
+    })();
+    return stopping;
+  };
+  // F-91: SIGTERM/SIGINT → stop() within the budget, then exit 0 (also for runWorker's callers,
+  // such as the bundle test fixture).
+  const onSignal = (): void => {
+    setTimeout(() => process.exit(0), STOP_BUDGET_MS).unref();
+    void stop().then(() => process.exit(0));
+  };
+  process.once("SIGTERM", onSignal);
+  process.once("SIGINT", onSignal);
+  return { stop };
 }
 
-try {
-  main();
-} catch (error) {
-  state.logger.error("startup_failed", describeFailure(error));
-  process.exitCode = 1;
+if (
+  process.argv[1] !== undefined &&
+  import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href
+) {
+  installFatalHandlers(state);
+  try {
+    await runWorker(process.env);
+  } catch (error) {
+    if (error instanceof WorkerConfigError) {
+      process.exitCode = EXIT_CONFIG;
+    } else {
+      state.logger.error("startup_failed", describeFailure(error), error);
+      await withDeadline(() => getTelemetry().shutdown(), 2_000);
+      process.exit(1);
+    }
+  }
 }
