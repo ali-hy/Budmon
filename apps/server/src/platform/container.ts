@@ -15,6 +15,7 @@ import {
   type PlatformMetrics,
 } from "./observability/metrics.js";
 import { initSentry } from "./observability/sentry.js";
+import { createRateLimiter, type RateLimiter } from "./security/rateLimiter.js";
 
 export interface BaseContainer {
   config: Config;
@@ -31,6 +32,8 @@ export type WorkerContainer = BaseContainer;
 
 export interface ApiContainer extends BaseContainer {
   authHook: AuthHook;
+  /** F-63 (S-5): shared rate limits; F-55 also registers the coarse per-IP limit with it. */
+  rateLimiter: RateLimiter;
   /** A-26: plain Fastify routes modules register (F-55 step 4b). */
   moduleRoutes: ((app: FastifyInstance) => void)[];
 }
@@ -95,9 +98,22 @@ export function createApiContainer(
   config: Config,
   overrides: Partial<ApiContainer> = {},
 ): ApiContainer {
+  const base = createBase(config, "api", overrides);
+  const rateLimitKey = config.api?.rateLimitKey;
+  if (overrides.rateLimiter === undefined && rateLimitKey === undefined) {
+    throw new Error("an api container needs the api configuration");
+  }
   return {
-    ...createBase(config, "api", overrides),
+    ...base,
     authHook: overrides.authHook ?? noAuthHook,
+    rateLimiter:
+      overrides.rateLimiter ??
+      createRateLimiter({
+        db: base.database,
+        // Checked above: present unless rateLimiter was given.
+        key: (rateLimitKey as NonNullable<typeof rateLimitKey>).reveal(),
+        clock: base.clock,
+      }),
     moduleRoutes: overrides.moduleRoutes ?? [],
   };
 }

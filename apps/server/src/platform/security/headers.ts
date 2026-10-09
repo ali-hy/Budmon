@@ -96,6 +96,17 @@ export function registerBodyHandling(
         .code(400)
         .send(validationFailed("invalid_json", "Request body is not valid JSON."));
     }
+    // F-65's coarse limit (Retry-After is already set).
+    if (error.code === "BUDMON_RATE_LIMITED") {
+      const retryAfterSeconds = (error as { retryAfterSeconds?: unknown }).retryAfterSeconds;
+      return reply.code(429).send({
+        defined: true,
+        code: "RATE_LIMITED",
+        status: 429,
+        message: "Too many requests",
+        data: { retryAfterSeconds },
+      });
+    }
     if (error.code === "FST_ERR_CTP_BODY_TOO_LARGE") {
       return reply.code(413).send({
         defined: true,

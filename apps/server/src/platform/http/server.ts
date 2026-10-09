@@ -8,7 +8,8 @@ import { OpenAPIHandler } from "@orpc/openapi/fastify";
 import type { Router } from "@orpc/server";
 import { RequestHeadersPlugin, ResponseHeadersPlugin } from "@orpc/server/plugins";
 import { ZodToJsonSchemaConverter } from "@orpc/zod/zod4";
-import { trace } from "@opentelemetry/api";
+import { context, trace } from "@opentelemetry/api";
+import { getRPCMetadata, RPCType } from "@opentelemetry/core";
 import type { Socket } from "node:net";
 import Fastify, {
   type FastifyError,
@@ -36,6 +37,7 @@ import { appRouter } from "./appRouter.js";
 import { clientVersionMiddleware, parseClientHeader } from "./clientVersion.js";
 import type { RequestContext } from "./context.js";
 import { registerHealthRoutes } from "./health.js";
+import { registerCoarseRateLimit } from "../security/rateLimiter.js";
 
 const PREFIX = "/api/v1";
 const NOT_FOUND = { defined: true, code: "NOT_FOUND", status: 404, message: "Not found" };
@@ -158,6 +160,8 @@ export async function createApiServer(
   // 2. Headers, body handling (A-124), the coarse rate limit once S-5 provides it, cookies.
   await registerSecurityHeaders(app);
   registerBodyHandling(app, { reporter: c.reporter, logger: c.logger });
+  // F-65's coarse per-IP limit (S-5), only when the container has a rate limiter (A-124).
+  if ((c as Partial<ApiContainer>).rateLimiter !== undefined) await registerCoarseRateLimit(app);
   await app.register(cookie);
 
   // 3. The request context.
@@ -242,6 +246,9 @@ export async function createApiServer(
           options.context.matched.route = procedureRoute;
           // A-176: the route template on the active span, in place of the raw path.
           trace.getActiveSpan()?.setAttribute("budmon.route", procedureRoute);
+          // A-186: the http SERVER span and its http.route use the template too.
+          const rpcMetadata = getRPCMetadata(context.active());
+          if (rpcMetadata?.type === RPCType.HTTP) rpcMetadata.route = `${PREFIX}${procedureRoute}`;
         }
         return errors({
           next: () =>
