@@ -216,9 +216,7 @@ function captureUnsealerFor(config: Config, metrics: PlatformMetrics): CaptureUn
     : createKmsCaptureUnsealer({
         client: lazyKmsClient(kms.credentials.reveal()),
         metrics,
-        ...(config.capture === undefined
-          ? {}
-          : { configuredKeyVersion: config.capture.keyVersion }),
+        configuredKeyVersion: (config.capture as NonNullable<Config["capture"]>).keyVersion,
       });
 }
 

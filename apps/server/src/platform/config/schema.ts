@@ -301,8 +301,10 @@ const ROLES: readonly DbLoginRole[] = [
   "budmon_monitor",
   "budmon_migrator",
 ];
-const KMS_VERSION =
-  /^(projects\/[^/]+\/locations\/[^/]+\/keyRings\/[^/]+\/cryptoKeys\/[^/]+\/cryptoKeyVersions\/\d+|local:\d+)$/;
+/** F-10's KMS key version (without the `local:<n>` development form); A-260 reuses it. */
+export const KMS_KEY_VERSION_PATTERN =
+  /^projects\/[^/]+\/locations\/[^/]+\/keyRings\/[^/]+\/cryptoKeys\/[^/]+\/cryptoKeyVersions\/\d+$/;
+const KMS_VERSION = new RegExp(`^(?:${KMS_KEY_VERSION_PATTERN.source.slice(1, -1)}|local:\\d+)$`);
 
 class Reader {
   readonly problems: ConfigProblem[] = [];

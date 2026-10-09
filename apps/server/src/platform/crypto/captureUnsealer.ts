@@ -1,5 +1,6 @@
 // F-112 and F-113: unsealing capture secrets (worker-capture only).
 import { constants, privateDecrypt } from "node:crypto";
+import { KMS_KEY_VERSION_PATTERN } from "../config/schema.js";
 import type { PlatformMetrics } from "../observability/metrics.js";
 import { gcmOpen } from "./aead.js";
 import {
@@ -41,21 +42,17 @@ export function createKmsCaptureUnsealer(deps: {
   client: KmsDecryptClient;
   timeoutMs?: number;
   metrics: PlatformMetrics;
-  /**
-   * A-258: config.capture.keyVersion. An envelope must name a version of the same key; the
-   * signature in F-112 has no such field, so it's optional (the container always passes it).
-   */
-  configuredKeyVersion?: string;
+  /** A-258, A-260: config.capture.keyVersion; envelopes must name a version of the same key. */
+  configuredKeyVersion: string;
 }): CaptureUnsealer {
   const configured = deps.configuredKeyVersion;
+  if (!KMS_KEY_VERSION_PATTERN.test(configured)) {
+    throw new TypeError("configured key version required");
+  }
   const marker = "/cryptoKeyVersions/";
-  const keyName =
-    configured === undefined || !configured.includes(marker)
-      ? undefined
-      : configured.slice(0, configured.indexOf(marker));
+  const keyName = configured.slice(0, configured.indexOf(marker));
   /** `^<key name>/cryptoKeyVersions/\d+$`: any version of the configured key. */
   const sameKey = (keyVersion: string): boolean =>
-    keyName !== undefined &&
     keyVersion.startsWith(`${keyName}${marker}`) &&
     /^\d+$/.test(keyVersion.slice(keyName.length + marker.length));
   return {
@@ -63,7 +60,7 @@ export function createKmsCaptureUnsealer(deps: {
       const parts = decodeEnvelope(envelope);
       if (parts.provider !== "kms-capture") throw new EnvelopeFormatError();
       // A-258: never ask KMS to decrypt with a key the row merely names.
-      if (configured !== undefined && !sameKey(parts.keyVersion)) {
+      if (!sameKey(parts.keyVersion)) {
         throw new UnknownKeyVersionError();
       }
       const aad = aadFor(ctx);
