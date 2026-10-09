@@ -1,4 +1,5 @@
 // F-52: every error leaving a procedure becomes a platform envelope; unexpected ones are reported.
+import { PLATFORM_ERRORS } from "@budmon/contract";
 import { ValidationError } from "@orpc/contract";
 import { ORPCError } from "@orpc/server";
 import type { ErrorReporter } from "../observability/errorReporter.js";
@@ -48,9 +49,26 @@ function defined(
   return new ORPCError(code, { status, message, data, defined: true });
 }
 
+/** A declared error as the contract states it: its message and whether it has a data schema. */
+type DeclaredErrors = Readonly<Record<string, { message?: string; data?: unknown } | undefined>>;
+
+/** Rule 3b (A-166): the declared error with the declared message, and data only when declared. */
+function declaredError(
+  err: ORPCError<string, unknown>,
+  declared?: DeclaredErrors,
+): ORPCError<string, unknown> {
+  const platform: DeclaredErrors = PLATFORM_ERRORS;
+  const entry = Object.hasOwn(platform, err.code) ? platform[err.code] : declared?.[err.code];
+  const message = entry?.message ?? err.code;
+  const data = entry?.data === undefined ? undefined : err.data;
+  return defined(err.code, err.status, message, data);
+}
+
 export function mapError(
   err: unknown,
   state: { committed: boolean },
+  /** The procedure's declared error map (rule 3b); platform keys use §6's messages regardless. */
+  declared?: DeclaredErrors,
 ): { error: ORPCError<string, unknown>; report: boolean } {
   const outcome = state.committed ? "unknown" : "not_applied";
 
@@ -58,11 +76,6 @@ export function mapError(
     return { error: defined(err.key, err.status, err.message, err.details), report: false };
   }
   if (err instanceof ORPCError) {
-    // Rule 1b (A-149): a contract-defined error (oRPC sets `defined` only for errors the contract
-    // declares, with their data validated) passes through with its own status and data.
-    if (err.defined) {
-      return { error: err as ORPCError<string, unknown>, report: false };
-    }
     if (err.code === "BAD_REQUEST" && err.cause instanceof ValidationError) {
       return {
         error: defined("VALIDATION_FAILED", 400, "Validation failed", {
@@ -74,7 +87,13 @@ export function mapError(
     if (err.code === "INTERNAL_SERVER_ERROR" && err.cause instanceof ValidationError) {
       return { error: defined("INTERNAL", 500, "Internal error", { outcome }), report: true };
     }
-    if (err.code !== "INTERNAL_SERVER_ERROR") {
+    // Rule 3b (A-149, A-166): a contract-declared error keeps its code and status, never the
+    // thrown message, and its data only when declared with a schema. INTERNAL and
+    // SERVICE_UNAVAILABLE fall through to rules 5 and 6.
+    if (err.defined && err.code !== "INTERNAL" && err.code !== "SERVICE_UNAVAILABLE") {
+      return { error: declaredError(err as ORPCError<string, unknown>, declared), report: false };
+    }
+    if (!err.defined && err.code !== "INTERNAL_SERVER_ERROR") {
       // Unmatched routes and oRPC's other built-in errors (METHOD_NOT_SUPPORTED, …).
       return { error: defined("NOT_FOUND", 404, "Not found"), report: false };
     }
@@ -106,11 +125,12 @@ export function createErrorInterceptor(deps: { reporter: ErrorReporter; logger: 
     context: ErrorInterceptorContext;
     path: readonly string[];
     route?: string;
+    errorMap?: DeclaredErrors;
   }): Promise<T> => {
     try {
       return await options.next();
     } catch (err) {
-      const { error, report } = mapError(err, options.context.commitTracker);
+      const { error, report } = mapError(err, options.context.commitTracker, options.errorMap);
       const route = options.route;
       if (report) {
         const userId = options.context.principal?.userId;

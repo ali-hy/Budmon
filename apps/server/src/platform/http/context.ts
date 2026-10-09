@@ -19,6 +19,8 @@ export interface RequestContext {
   readonly clientKind: ClientKind;
   readonly clientVersion: number | null;
   readonly ip: string;
+  /** The HTTP method (A-165: only GET, HEAD and DELETE inputs are coerced). Set by the server. */
+  readonly method?: string;
   /** Lower-cased names. */
   readonly headers: Readonly<Record<string, string | undefined>>;
   /** oRPC's ResponseHeadersPlugin merges these into the response. */

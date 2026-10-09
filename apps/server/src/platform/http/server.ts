@@ -3,7 +3,7 @@ import path from "node:path";
 import cookie from "@fastify/cookie";
 import { API_VERSION } from "@budmon/contract";
 import type { AnyContractRouter } from "@orpc/contract";
-import { SmartCoercionPlugin } from "@orpc/json-schema";
+import { JsonSchemaCoercer, type JsonSchema } from "@orpc/json-schema";
 import { OpenAPIHandler } from "@orpc/openapi/fastify";
 import type { Router } from "@orpc/server";
 import { RequestHeadersPlugin, ResponseHeadersPlugin } from "@orpc/server/plugins";
@@ -38,6 +38,11 @@ function requestId(ids: ApiContainer["ids"]): string {
     return span.traceId;
   }
   return ids.next().replaceAll("-", "");
+}
+
+/** A-168: the matched route is the oRPC catch-all or a module route under /api/v1/. */
+function isApiRoute(request: FastifyRequest): boolean {
+  return request.routeOptions.url?.startsWith(`${PREFIX}/`) === true;
 }
 
 function lowerCaseHeaders(request: FastifyRequest): Record<string, string | undefined> {
@@ -81,8 +86,9 @@ export async function createApiServer(
   app.addHook("onRequest", async (request) => {
     const headers = lowerCaseHeaders(request);
     const client = parseClientHeader(headers["x-budmon-client"]);
-    // A-154: only the API is authenticated; /health/* and other routes get no principal.
-    const principal = request.url.startsWith(`${PREFIX}/`)
+    // A-154, A-168: only routes under /api/v1/ are authenticated, keyed on the matched route (so
+    // a percent-encoded path is treated like its decoded match); others get no principal.
+    const principal = isApiRoute(request)
       ? await c.authHook.authenticate({
           headers,
           cookies: request.cookies as Record<string, string>,
@@ -95,6 +101,7 @@ export async function createApiServer(
       clientKind: client.kind,
       clientVersion: client.version,
       ip: request.ip,
+      method: request.method,
       headers,
       responseHeaders: resHeaders,
       resHeaders,
@@ -121,12 +128,36 @@ export async function createApiServer(
     api?.clientVersions ?? { minAndroid: 0, latestAndroid: 0, minWeb: 0 },
     c.metrics,
   );
+  // A-148, A-165: query and path strings become the integer, boolean or date the input schema
+  // declares, only for methods without a body; JSON bodies are never coerced.
+  const converter = new ZodToJsonSchemaConverter();
+  const coercer = new JsonSchemaCoercer();
+  const inputJsonSchemas = new WeakMap<object, JsonSchema>();
+  const coerceInput = (options: {
+    procedure: { "~orpc": { inputSchema?: unknown } };
+    input: unknown;
+    context: RequestContext;
+  }): unknown => {
+    const schema = options.procedure["~orpc"].inputSchema;
+    const method = options.context.method;
+    if (
+      typeof schema !== "object" ||
+      schema === null ||
+      (method !== "GET" && method !== "HEAD" && method !== "DELETE")
+    ) {
+      return options.input;
+    }
+    let json = inputJsonSchemas.get(schema);
+    if (json === undefined) {
+      json = converter.convert(schema as Parameters<typeof converter.convert>[0], {
+        strategy: "input",
+      })[1];
+      inputJsonSchemas.set(schema, json);
+    }
+    return coercer.coerce(json, options.input);
+  };
   const handler = new OpenAPIHandler<RequestContext>(opts.router ?? appRouter, {
     plugins: [
-      // A-148: query and path strings become the integer, boolean or date the schema declares.
-      new SmartCoercionPlugin<RequestContext>({
-        schemaConverters: [new ZodToJsonSchemaConverter()],
-      }),
       new ResponseHeadersPlugin<RequestContext>(),
       new RequestHeadersPlugin<RequestContext>(),
     ],
@@ -137,12 +168,13 @@ export async function createApiServer(
         return errors({
           next: () =>
             versions({
-              next: () => options.next(),
+              next: () => options.next({ ...options, input: coerceInput(options) }),
               path: options.path,
               context: options.context,
             }),
           context: options.context,
           path: options.path,
+          errorMap: options.procedure["~orpc"].errorMap,
           ...(procedureRoute === undefined ? {} : { route: procedureRoute }),
         });
       },
@@ -193,7 +225,7 @@ export async function createApiServer(
   // 8. Response headers.
   app.addHook("onSend", async (request, reply, payload) => {
     reply.header("x-request-id", request.id);
-    if (request.url.startsWith(`${PREFIX}/`)) reply.header("x-budmon-api-version", API_VERSION);
+    if (isApiRoute(request)) reply.header("x-budmon-api-version", API_VERSION);
     return payload;
   });
 

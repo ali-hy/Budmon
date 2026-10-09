@@ -104,6 +104,18 @@ function allowedParameterSchema(doc: Json, schema: unknown): boolean {
   );
 }
 
+/** A-165: a path parameter of an operation with a body isn't coerced, so it must be a string. */
+function stringParameterSchema(doc: Json, schema: unknown): boolean {
+  const s = resolve(doc, schema);
+  if (s === undefined || !types(s).includes("string")) return false;
+  return (
+    s["format"] === "uuid" ||
+    Array.isArray(s["enum"]) ||
+    s["format"] === "date" ||
+    s["pattern"] === DATE_PATTERN
+  );
+}
+
 function isCreatedResult(doc: Json, schema: unknown): boolean {
   const s = resolve(doc, schema);
   const properties = record(s?.["properties"]);
@@ -176,8 +188,11 @@ export function checkContractRules(document: OpenAPIV3_1.Document): Violation[] 
         });
         const where = parameter["in"];
         if (
-          (where === "query" || where === "path") &&
-          !allowedParameterSchema(doc, parameter["schema"])
+          ((where === "query" || where === "path") &&
+            !allowedParameterSchema(doc, parameter["schema"])) ||
+          (where === "path" &&
+            op["requestBody"] !== undefined &&
+            !stringParameterSchema(doc, parameter["schema"]))
         ) {
           violations.push({ rule: "R4", location: p });
         }
