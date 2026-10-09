@@ -1,8 +1,8 @@
 // The healthcheck entry (F-175 "Health checks", A-208): `--heartbeat` for the workers, `--ready`
 // for the api. Run as `node dist/main/healthcheck.js <flag>`; exit 0 healthy, 1 not.
 import { readFileSync } from "node:fs";
+import { heartbeatFile } from "../platform/queue/heartbeat.js";
 
-const HEARTBEAT_FILE = "/tmp/heartbeat";
 const MAX_AGE_SECONDS = 60;
 const READY_TIMEOUT_MS = 2000;
 
@@ -36,7 +36,9 @@ export async function runHealthcheck(
   env: Readonly<Record<string, string | undefined>>,
 ): Promise<number> {
   if (argv.includes("--heartbeat")) {
-    return heartbeatHealthy(Date.now(), () => readFileSync(HEARTBEAT_FILE, "utf8")) ? 0 : 1;
+    // A-226: the same file the worker writes.
+    const file = heartbeatFile(env);
+    return heartbeatHealthy(Date.now(), () => readFileSync(file, "utf8")) ? 0 : 1;
   }
   if (argv.includes("--ready")) {
     const port = env["PORT"] === undefined || env["PORT"] === "" ? "3000" : env["PORT"];

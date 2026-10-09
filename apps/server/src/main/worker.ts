@@ -11,6 +11,7 @@ import { createLogger } from "../platform/observability/logger.js";
 import { initSentry } from "../platform/observability/sentry.js";
 import { getTelemetry } from "../platform/observability/telemetryHandle.js";
 import { buildHandlerMap } from "../platform/queue/handlers.js";
+import { heartbeatFile } from "../platform/queue/heartbeat.js";
 import type { JobRegistry } from "../platform/queue/registry.js";
 import {
   runGeneralStartHooks,
@@ -81,7 +82,8 @@ export async function runWorker(
   ]);
   let workers: { stop(): Promise<void> };
   try {
-    workers = await startWorkers(container, handlers);
+    // A-226: HEARTBEAT_FILE (absolute) or /tmp/heartbeat.
+    workers = await startWorkers(container, handlers, { heartbeatPath: heartbeatFile(env) });
   } catch (error) {
     await container.close().catch(() => undefined);
     throw error;

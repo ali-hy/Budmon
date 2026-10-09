@@ -87,6 +87,7 @@ export function workerServiceName(roles: ReadonlySet<string>): string {
 export async function startWorkers(
   c: WorkerContainer,
   handlers: ReadonlyMap<string, JobHandler>,
+  opts: { heartbeatPath?: string } = {},
 ): Promise<{ stop(): Promise<void> }> {
   const started: PgBoss[] = [];
   let heartbeat: { stop(): void } | undefined;
@@ -158,6 +159,7 @@ export async function startWorkers(
       logger: c.logger,
       clock: c.clock,
       service: workerServiceName(c.roles),
+      ...(opts.heartbeatPath === undefined ? {} : { path: opts.heartbeatPath }),
     });
   } catch (error) {
     await stop().catch(() => undefined);

@@ -4,6 +4,15 @@ import type { Clock } from "@budmon/shared";
 import type { Logger } from "../observability/logger.js";
 import type { PlatformMetrics } from "../observability/metrics.js";
 
+export const DEFAULT_HEARTBEAT_FILE = "/tmp/heartbeat";
+
+/** A-226: `HEARTBEAT_FILE` when it's an absolute path, else the default. Read directly, not
+ * through Config, so the healthcheck needn't load the configuration. */
+export function heartbeatFile(env: Readonly<Record<string, string | undefined>>): string {
+  const value = env["HEARTBEAT_FILE"];
+  return value !== undefined && value.startsWith("/") ? value : DEFAULT_HEARTBEAT_FILE;
+}
+
 export function startHeartbeat(deps: {
   metrics: PlatformMetrics;
   logger: Logger;
@@ -14,7 +23,7 @@ export function startHeartbeat(deps: {
   writeFile?: (path: string, data: string) => void;
   path?: string;
 }): { stop(): void; last(): number } {
-  const file = deps.path ?? "/tmp/heartbeat";
+  const file = deps.path ?? DEFAULT_HEARTBEAT_FILE;
   const write =
     deps.writeFile ??
     ((p: string, data: string) => {
