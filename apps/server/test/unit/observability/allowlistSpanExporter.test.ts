@@ -499,8 +499,14 @@ describe("TP-3.7: pg.query span names rewritten to keyword + database (A-237)", 
     [
       "a prepared statement name",
       `pg.query:GET-PAYEE-${CANARIES.payee.toUpperCase()} budmon`,
-      "pg.query:GET budmon",
+      "pg.query:OTHER budmon",
     ],
+    [
+      "a letters-only statement name (A-240)",
+      "pg.query:CANARYPAYEE budmon",
+      "pg.query:OTHER budmon",
+    ],
+    ["a token without leading letters (A-240)", "pg.query:1abc budmon", "pg.query:OTHER budmon"],
     ["an ordinary name", "pg.query:SELECT budmon", "pg.query:SELECT budmon"],
   ])("TP-3.7: %s: %j becomes %j, with no drop", (_label, name, expected) => {
     const { inner, sums } = exportThrough(makeSpans([{ attributes: {} }], name, PG));
@@ -523,7 +529,7 @@ describe("TP-3.7: pg.query span names rewritten to keyword + database (A-237)", 
   );
 
   it.each([
-    ["a token with no leading letters", "pg.query:(SELECT budmon", "pg.query:UNKNOWN budmon"],
+    ["a token with no leading letters", "pg.query:(SELECT budmon", "pg.query:OTHER budmon"],
     ["a database name outside [a-z0-9_]", "pg.query:SELECT Bad-DB", "pg.query:SELECT"],
     ["no database", "pg.query:INSERT", "pg.query:INSERT"],
     ["a lower-case keyword", "pg.query:select budmon", "pg.query:SELECT budmon"],
