@@ -35,29 +35,37 @@ export function createIdempotency(deps: { clock: Clock; metrics: PlatformMetrics
       if (!h.inTransaction) throw new Error("idempotency requires a transaction");
       // The validated input (wire values, after zod defaults).
       const requestHash = requestHashOf(req.input);
-      const inserted = await insertIfAbsent(h, {
+      const record = {
         userId: req.userId,
         key: req.key,
         procedure: req.procedure,
         requestHash,
         expiresAt: new Date(deps.clock.now().epochMilliseconds + RECORD_LIFETIME_MS),
-      });
-      if (inserted) {
+      };
+      const fresh = async (): Promise<{
+        result: CreatedResult;
+        replayed: false;
+        status: 201;
+      }> => {
         const result = await work();
         await complete(h, req.userId, req.key, 201, {
           id: result.id,
           createdAt: result.createdAt.toString(),
         });
         return { result, replayed: false, status: 201 };
-      }
+      };
+      if (await insertIfAbsent(h, record)) return fresh();
       // An existing row (a concurrent duplicate waited on the primary key until the first
       // transaction ended).
-      const existing = await find(h, req.userId, req.key);
-      if (
-        existing === null ||
-        existing.procedure !== req.procedure ||
-        !existing.requestHash.equals(requestHash)
-      ) {
+      let existing = await find(h, req.userId, req.key);
+      if (existing === null) {
+        // A-239: the conflicting row went away (its transaction rolled back, or it was purged):
+        // try once more.
+        if (await insertIfAbsent(h, record)) return fresh();
+        existing = await find(h, req.userId, req.key);
+        if (existing === null) throw new Error("idempotency record vanished");
+      }
+      if (existing.procedure !== req.procedure || !existing.requestHash.equals(requestHash)) {
         throw new IdempotencyKeyReusedError();
       }
       if (existing.responseStatus === null || existing.result === null) {

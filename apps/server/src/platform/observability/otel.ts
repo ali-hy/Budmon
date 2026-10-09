@@ -118,16 +118,64 @@ export const METRIC_ATTRIBUTE_ALLOWLIST: readonly string[] = [
 export const SPAN_NAME = /^[A-Za-z0-9_.:/{}* -]{1,120}$/;
 
 const PG_DATABASE = /^[a-z0-9_]{1,63}$/;
+/** A-240: SQL command keywords; anything else (a letters-only statement name) is OTHER. */
+const PG_KEYWORDS: ReadonlySet<string> = new Set([
+  "SELECT",
+  "INSERT",
+  "UPDATE",
+  "DELETE",
+  "MERGE",
+  "WITH",
+  "VALUES",
+  "BEGIN",
+  "START",
+  "COMMIT",
+  "ROLLBACK",
+  "SAVEPOINT",
+  "RELEASE",
+  "SET",
+  "RESET",
+  "SHOW",
+  "LOCK",
+  "CREATE",
+  "ALTER",
+  "DROP",
+  "GRANT",
+  "REVOKE",
+  "TRUNCATE",
+  "ANALYZE",
+  "VACUUM",
+  "REINDEX",
+  "CLUSTER",
+  "REFRESH",
+  "COMMENT",
+  "COPY",
+  "DO",
+  "CALL",
+  "EXPLAIN",
+  "LISTEN",
+  "NOTIFY",
+  "UNLISTEN",
+  "DECLARE",
+  "FETCH",
+  "CLOSE",
+  "PREPARE",
+  "EXECUTE",
+  "DEALLOCATE",
+  "DISCARD",
+]);
 
 /**
  * A-237: `instrumentation-pg` names query spans `pg.query:<first token or statement name>
  * <database>`; the token can carry anything up to the first space (a newline, quoted text). The
- * name is rebuilt from safe parts only: the token's leading letters upper-cased (else UNKNOWN)
+ * name is rebuilt from safe parts only: the token's leading letters upper-cased when they are a
+ * SQL keyword (else OTHER, A-240)
  * and the database when it has a plain name.
  */
 function pgQueryName(name: string): string {
   const rest = name.startsWith("pg.query:") ? name.slice("pg.query:".length) : name.slice(8);
-  const keyword = /^[A-Za-z]+/.exec(rest)?.[0].toUpperCase() ?? "UNKNOWN";
+  const letters = /^[A-Za-z]+/.exec(rest)?.[0].toUpperCase();
+  const keyword = letters !== undefined && PG_KEYWORDS.has(letters) ? letters : "OTHER";
   const space = rest.lastIndexOf(" ");
   const database = space === -1 ? "" : rest.slice(space + 1);
   return PG_DATABASE.test(database) ? `pg.query:${keyword} ${database}` : `pg.query:${keyword}`;
