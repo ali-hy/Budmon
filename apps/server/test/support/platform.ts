@@ -81,15 +81,15 @@ export function schemaStepInput(
   migrationsFolder: string = path.join(SERVER_DIR, "drizzle"),
   jobRegistry: JobRegistry = TEST_JOB_REGISTRY,
 ): SchemaStepInput {
-  const input: SchemaStepInput = {
+  return {
     mode,
     database,
     migrationsFolder,
     roleSecrets: testRoleSecrets(),
     appEnv: "test",
+    // S-6 (A-49): the queue definitions for steps 3 and 6.
+    jobRegistry,
     referenceData: referenceData(),
     logger,
   };
-  // S-6 (A-49): F-19's input gains jobRegistry; assigned so this compiles before and after.
-  return Object.assign(input, { jobRegistry });
 }
