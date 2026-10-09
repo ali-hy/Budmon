@@ -234,6 +234,29 @@ describe("TP-9.11: bad provider data (F-137)", () => {
   });
 });
 
+describe("TP-9.11 (B-1): a rate too small for 12 decimal places", () => {
+  it("TP-9.11 (B-1): a day with EUR 0.0000000000001 stores every other code and records rejected 1 in the metric and the log", async () => {
+    const primary = fakeProvider(
+      "openexchangerates",
+      rates({ EGP: "48.5", JPY: "149.25", EUR: "0.0000000000001" }),
+    );
+    const b = await worker("2026-10-05T00:30:00Z", primary, fakeProvider("fawazahmed0", rates({})));
+
+    await run(b, FETCH, {}, "2026-10-05T00:30:00Z");
+
+    expect((await storedRates(b.testDb)).map((r) => [r.code, r.unitsPerUsd])).toEqual([
+      ["EGP", "48.500000000000"],
+      ["JPY", "149.250000000000"],
+    ]);
+    expect(await metricSum(b, "fx_rates_rejected_total", { provider: "openexchangerates" })).toBe(
+      1,
+    );
+    expect(events(b, "fx_day_stored")).toEqual([
+      expect.objectContaining({ rateDate: "2026-10-04", inserted: 2, rejected: 1 }),
+    ]);
+  });
+});
+
 describe("TP-9.14: backfill (F-137)", () => {
   it("TP-9.14: a fallback 404 completes with fx_backfill_missing_total 1 and an fx_backfill_missing line; a fallback 200 stores the day with fawazahmed0", async () => {
     let answer: (date: string) => Promise<Map<string, string>> = failWith("not_found");
