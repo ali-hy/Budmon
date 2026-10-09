@@ -13,16 +13,24 @@ export function parseJsonKeepingNumberText(text: string): unknown {
 
 const UPPER_BOUND: Rational = { num: 10n ** 12n, den: 1n };
 
-/** The rate at 12 decimal places, or null when it isn't a decimal, is ≤ 0 or is ≥ 10^12. */
+/**
+ * The rate at 12 decimal places, or null when it isn't a decimal or the normalised value is ≤ 0 or
+ * ≥ 10^12 (B-1: checked after rounding, so a tiny positive rate that rounds to zero is refused
+ * rather than failing the day's insert on `exchange_rates_positive`).
+ */
 export function normaliseRate(raw: string): string | null {
-  let r: Rational;
+  let parsed: Rational;
   try {
-    r = parseDecimal(raw);
+    parsed = parseDecimal(raw);
   } catch {
     return null;
   }
+  // Early out before rounding, so huge exponents don't build huge strings.
+  if (parsed.num <= 0n || parsed.num >= UPPER_BOUND.num * parsed.den * 10n) return null;
+  const text = toFixedDecimalString(parsed, 12);
+  const r = parseDecimal(text);
   // Denominators are positive (F-300 normalises them).
   if (r.num <= 0n) return null;
   if (r.num * UPPER_BOUND.den >= UPPER_BOUND.num * r.den) return null;
-  return toFixedDecimalString(r, 12);
+  return text;
 }
