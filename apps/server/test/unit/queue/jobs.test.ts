@@ -9,7 +9,6 @@ import {
   assertPayloadSafe,
 } from "../../../src/platform/queue/payloadSafety.js";
 import { createJobRegistry } from "../../../src/platform/queue/registry.js";
-import { NOT_SENDABLE } from "../../support/jobs.js";
 
 const payload = z.object({});
 
@@ -80,7 +79,6 @@ describe("TP-6.2: createJobRegistry (F-71)", () => {
   it("TP-6.2: a name starting with dead-letter. throws TypeError", () => {
     // defineJob refuses the name already, so the definition is a literal.
     const dead = {
-      ...NOT_SENDABLE,
       name: "dead-letter.x",
       role: "general" as const,
       payload,

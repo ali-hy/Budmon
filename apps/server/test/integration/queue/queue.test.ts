@@ -10,18 +10,17 @@ import { z } from "zod";
 import { bootstrapCluster } from "../../../src/platform/db/clusterBootstrap.js";
 import { applyRolesAndPrivileges } from "../../../src/platform/db/roles.js";
 import { SchemaStepError } from "../../../src/platform/db/schemaStep.js";
+import { applyQueuePolicies } from "../../../src/platform/queue/queuePolicies.js";
 import { withTransaction } from "../../../src/platform/db/transaction.js";
 import type { Database } from "../../../src/platform/db/types.js";
 import { testApiConfigFor } from "../../support/api.js";
 import {
   TEST_JOBS,
   policyQueues,
-  queuePolicies,
   jobRows,
   registryOf,
   type JobDefinition,
   type PgBossLike,
-  NOT_SENDABLE,
 } from "../../support/jobs.js";
 import { connectDatabase, recordingLogger } from "../../support/platform.js";
 import {
@@ -104,6 +103,30 @@ describe("TP-6.4: the queue schema (F-74)", () => {
     const id = await (await startBoss()).send(TEST_JOBS.ok.name, { n: 2 });
 
     expect(typeof id).toBe("string");
+  });
+
+  it("TP-6.4: (A-228) budmon_app sees every queue's jobs through pgboss.job; a direct INSERT into pgboss.job is 42501", async () => {
+    const boss = await startBoss();
+    await boss.send(TEST_JOBS.ok.name, { n: 7 });
+    await boss.send(TEST_JOBS.capture.name, { n: 8 });
+
+    const names = (
+      await query<{ name: string }>(
+        testDb.urlAs("budmon_app"),
+        "SELECT DISTINCT name FROM pgboss.job",
+      )
+    ).map((r) => r.name);
+    const insert = await query(
+      testDb.urlAs("budmon_app"),
+      "INSERT INTO pgboss.job (name, data) VALUES ($1, '{}')",
+      [TEST_JOBS.ok.name],
+    ).then(
+      () => "allowed",
+      (error: unknown) => String((error as { code?: unknown }).code),
+    );
+
+    expect(names).toEqual(expect.arrayContaining([TEST_JOBS.ok.name, TEST_JOBS.capture.name]));
+    expect(insert).toBe("42501");
   });
 
   it("TP-6.18x: budmon_capture and budmon_app can use the schema; budmon_monitor can't", async () => {
@@ -214,7 +237,6 @@ describe("TP-6.6: syncQueues (F-75)", () => {
   let boss: PgBossLike | undefined;
 
   const a: JobDefinition<unknown> = {
-    ...NOT_SENDABLE,
     name: "sync.a",
     role: "general",
     payload: z.object({}),
@@ -256,6 +278,31 @@ describe("TP-6.6: syncQueues (F-75)", () => {
     return boss;
   }
 
+  /**
+   * A-227, A-228: RLS enabled and not forced on pgboss.job and pgboss.job_common, with the same
+   * budmon_capture lists: SELECT and INSERT cover the capture queues, dead-letter.capture and the
+   * sendable general queues; UPDATE and DELETE only the capture queues.
+   */
+  async function expectPolicies(
+    db: Database,
+    captureQueues: string[],
+    sendable: string[],
+  ): Promise<void> {
+    const own = [...captureQueues, "dead-letter.capture"].sort();
+    const reach = [...own, ...sendable].sort();
+    for (const table of ["job", "job_common"] as const) {
+      const { rows } = await db.handle.executeSql(
+        `SELECT relrowsecurity, relforcerowsecurity FROM pg_class WHERE oid = 'pgboss.${table}'::regclass`,
+      );
+      expect(rows[0], table).toEqual({ relrowsecurity: true, relforcerowsecurity: false });
+      expect(await policyQueues(db, table, "budmon_capture"), table).toEqual({
+        select: reach,
+        modify: own,
+        insert: reach,
+      });
+    }
+  }
+
   it("TP-6.6: sync creates the 2 queues and both dead-letter queues; again creates none; the options match", async () => {
     const registry = registryOf([a, b]);
 
@@ -288,23 +335,15 @@ describe("TP-6.6: syncQueues (F-75)", () => {
     }
   });
 
-  it("TP-6.6: (A-227) step 6b: RLS on job_common (not forced), capture's policy lists match the registry and follow it, every queue non-partitioned", async () => {
+  it("TP-6.6: (A-227, A-228) step 6b: RLS on job and job_common (not forced) with the same policies; capture's lists match the registry and follow it; every queue non-partitioned", async () => {
     if (migrator === undefined) throw new Error("no migrator");
     const db = migrator;
-    const { applyQueuePolicies } = await queuePolicies();
     const registry = registryOf([a, b]);
 
     await syncQueues(started(), registry, recordingLogger());
     await applyQueuePolicies(db.handle, registry);
 
-    const { rows: rls } = await db.handle.executeSql(
-      "SELECT relrowsecurity, relforcerowsecurity FROM pg_class WHERE oid = 'pgboss.job_common'::regclass",
-    );
-    expect(rls[0]).toEqual({ relrowsecurity: true, relforcerowsecurity: false });
-    expect(await policyQueues(db, "budmon_capture")).toEqual({
-      using: ["dead-letter.capture", "sync.b"],
-      check: ["dead-letter.capture", "sync.b"],
-    });
+    await expectPolicies(db, ["sync.b"], []);
     const { rows: partitioned } = await db.handle.executeSql(
       "SELECT name FROM pgboss.queue WHERE partition IS DISTINCT FROM false",
     );
@@ -312,15 +351,12 @@ describe("TP-6.6: syncQueues (F-75)", () => {
 
     // A capture job and a general one marked sendableFromCapture: the lists follow.
     const c: JobDefinition<unknown> = { ...b, name: "sync.c", policy: "standard" };
-    const d = { ...a, name: "sync.d", sendableFromCapture: true } as JobDefinition<unknown>;
+    const d: JobDefinition<unknown> = { ...a, name: "sync.d", sendableFromCapture: true };
     const grown = registryOf([a, b, c, d]);
     await syncQueues(started(), grown, recordingLogger());
     await applyQueuePolicies(db.handle, grown);
 
-    expect(await policyQueues(db, "budmon_capture")).toEqual({
-      using: ["dead-letter.capture", "sync.b", "sync.c"],
-      check: ["dead-letter.capture", "sync.b", "sync.c", "sync.d"],
-    });
+    await expectPolicies(db, ["sync.b", "sync.c"], ["sync.d"]);
     const { rows: still } = await db.handle.executeSql(
       "SELECT name FROM pgboss.queue WHERE partition IS DISTINCT FROM false",
     );

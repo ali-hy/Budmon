@@ -9,11 +9,10 @@ import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { BudmonError } from "../../../src/platform/errors/BudmonError.js";
 import { observed } from "../../support/api.js";
-import { NOT_SENDABLE, type JobDefinition } from "../../support/jobs.js";
+import { type JobDefinition } from "../../support/jobs.js";
 import { JobFailure, wrapHandler } from "../../../src/platform/queue/wrapper.js";
 
 const DEF: JobDefinition<{ n: number }> = {
-  ...NOT_SENDABLE,
   name: "test.wrapped",
   role: "general",
   payload: z.object({ n: z.number().int() }),

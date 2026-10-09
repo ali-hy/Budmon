@@ -20,7 +20,6 @@ import {
   type JobHandler,
   type PgBossLike,
   type WorkerContainer,
-  NOT_SENDABLE,
 } from "../../support/jobs.js";
 import { testApiConfigFor } from "../../support/api.js";
 import { createTestDatabase, type TestDatabase } from "../../support/testDatabase.js";
@@ -301,11 +300,11 @@ describe("TP-6.8: budmon_capture under row-level security (A-227)", () => {
     await boss.fail(name, second?.id ?? "");
 
     expect(await stateOf(id ?? "")).toBe("failed");
-    const dead = await query<{ n: number }>(
-      testDb.urlAs("budmon_migrator"),
+    // A-228: the dead-letter copy goes through pgboss.job, and capture can see it there.
+    const dead = await asCapture(
       "SELECT count(*)::int AS n FROM pgboss.job WHERE name = 'dead-letter.capture'",
     );
-    expect(dead[0]?.n).toBeGreaterThanOrEqual(1);
+    expect(Number(dead[0]?.["n"])).toBeGreaterThanOrEqual(1);
   }, 30_000);
 
   it("TP-6.8: (A-227) sending to a general queue without sendableFromCapture is 42501, row-level security", async () => {
@@ -323,27 +322,33 @@ describe("TP-6.8: budmon_capture under row-level security (A-227)", () => {
   it("TP-6.8: (A-227) sending to a general queue marked sendableFromCapture succeeds", async () => {
     const id = await bosses().capture.send(TEST_JOBS.fromCapture.name, { n: 4 });
 
-    expect(typeof id).toBe("string");
+    // A-228: send's INSERT … RETURNING needs the SELECT policy to cover the sendable queue.
+    expect(id).toMatch(/^[0-9a-f-]{36}$/);
   });
 
-  it("TP-6.8: (A-227) with general jobs present, budmon_capture sees only capture-queue rows and updates no general job", async () => {
+  it("TP-6.8: (A-227, A-228) with general jobs present, budmon_capture sees only capture and sendable rows (pgboss.job and job_common) and updates no general job", async () => {
     const generalId = await bosses().app.send(TEST_JOBS.ok.name, { n: 5 });
     await bosses().capture.send(TEST_JOBS.capture.name, { n: 6 });
 
-    const visible = await asCapture("SELECT DISTINCT name FROM pgboss.job_common");
     const updated = await asCapture(
       "UPDATE pgboss.job_common SET name = name WHERE id = $1 RETURNING id",
       [generalId],
     );
 
-    const names = visible.map((r) => String(r["name"]));
-    expect(names.length).toBeGreaterThan(0);
-    for (const name of names) {
-      expect([
-        TEST_JOBS.capture.name,
-        TEST_JOBS.captureRetry.name,
-        "dead-letter.capture",
-      ]).toContain(name);
+    // A-228: through the partitioned parent as well as the physical table.
+    const allowed = [
+      TEST_JOBS.capture.name,
+      TEST_JOBS.captureRetry.name,
+      TEST_JOBS.fromCapture.name,
+      "dead-letter.capture",
+    ];
+    for (const table of ["pgboss.job", "pgboss.job_common"]) {
+      const names = (await asCapture(`SELECT DISTINCT name FROM ${table}`)).map((r) =>
+        String(r["name"]),
+      );
+      expect(names.length, table).toBeGreaterThan(0);
+      expect(names, table).not.toContain(TEST_JOBS.ok.name);
+      for (const name of names) expect(allowed, `${table}: ${name}`).toContain(name);
     }
     expect(updated).toEqual([]);
   });
@@ -351,7 +356,6 @@ describe("TP-6.8: budmon_capture under row-level security (A-227)", () => {
 
 describe("TP-6.9: start-up checks and schedules (F-78)", () => {
   const cron: JobDefinition<unknown> = {
-    ...NOT_SENDABLE,
     name: "test.cron",
     role: "general",
     payload: z.object({}),
