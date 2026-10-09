@@ -2,7 +2,7 @@
 module: platform
 doc: lld
 status: approved # draft | in-review | approved
-version: 0.77
+version: 0.78
 hld_version: 1.3
 author: planner
 approved_by: the user (project owner), delegated auto-approval
@@ -143,6 +143,7 @@ Nothing in that list changes application code (D-29 rule 2).
 | 0.75    | 2026-10-09 | Implementation-time amendments A-265 to A-272 (test-architect, S-9 tests `53951cd`, `e07ff0d`). The general worker observes `fx_last_day_timestamp_seconds` (F-78); subscriber checks split between F-132 (role, payload identity) and F-96 (registered); `FxProviderError(reason, status?)` pinned; no provider URL is logged; TP-9.10 reworded; seeder window, `xmin` check and held gap-check handler confirmed. |
 | 0.76    | 2026-10-09 | Implementation-time amendments A-273 to A-278 (S-9 build `d5b63f8`). `platform.fx-gap-check` uses policy `stately`, superseding A-272's reasoning; only `normaliseRate` refusals count as rejected; `platform.fx-backfill` is sendable from capture, with a date-range guard; `FX_PROVIDER` defaults to `fixed` outside prod and is required in prod; a failed backfill enqueue in `convert` is logged, not thrown; `--seed-only` building a worker container is accepted. |
 | 0.77    | 2026-10-09 | Text-only amendment A-279: TP-2.29(g) reworded for S-9's `platform.fx-rates` seeder. |
+| 0.78    | 2026-10-09 | Implementation-time amendments A-280 to A-283 (S-9 review). `normaliseRate` checks the normalised value (B-1); provider rates must be JSON numbers (`JsonNumber`); rates-added is enqueued only after an insert of > 0 rows; capture's backfill inserts are pinned to `singleton_key = rateDate`, `state 'created'` and the queue's policy. |
 
 ## Amendments
 
@@ -427,6 +428,10 @@ Nothing in that list changes application code (D-29 rule 2).
 | A-277 | A backfill enqueue failure inside `convert` propagates to the caller. Confirm? (software-engineer) | **No, it's logged and swallowed.** The enqueue is a best-effort side effect, outside the caller's transaction, of a result that is already correct (`no_rate` or provisional). Failing a user request or a capture job over it would be worse, and the next `convert` for that date retries it. `convert` logs `warn("fx_backfill_enqueue_failed", { rateDate, ...describeFailure(err) })` and returns its result. | F-132, TP-9.5 | none | planner decision |
 | A-278 | FYI: the S-9 seeder makes `db:reset --seed-only` open the database and build a worker container; the test-architect is updating TP-2.29(g) and TP-2.62x (coordinator). | **Accepted,** on these conditions. `--seed-only` stays development-only (F-94's existing refusal). It needs no environment variables beyond `.env.example` (A-276's `fixed` default covers FX). It starts no pg-boss instance or workers. It closes the container before exiting. | none (tests only) | none | planner decision |
 | A-279 | TP-2.29(g) still assumes an empty `seeders` list, but since S-9 the list is `["platform.fx-rates"]` (coordinator). | **Text-only:** (g) uses the real `seedAll` with that seeder and `createWorkerContainer`/`runSeeders` spies. An empty env rejects with `ConfigError` and builds nothing. A development env without `FX_PROVIDER` builds one container (`fx: fixed`, A-276), runs the seeders, closes the container afterwards and starts no pg-boss (A-72, A-278). | TP-2.29 | none | planner decision |
+| A-280 | B-1 (S-9 review): `normaliseRate` checked `≤ 0` before rounding, so a rate below 5×10⁻¹³ became `"0.000000000000"` and failed the whole day's insert. | **Reworded as fixed:** `null` when the normalised 12-place value ≤ 0. That rejects the one code, counted as rejected; it doesn't fail the day. | F-130, TP-9.1, TP-9.11 | none | planner decision |
+| A-281 | N-1: the reviver turns every number into its source text, so a JSON string `"0.92"` is accepted as a rate, although F-133 says numbers. | **Require real JSON numbers.** The reviver wraps numbers in an exported `JsonNumber { source }`, so strings stay distinguishable. Both adapters' shape checks require every rate to be a `JsonNumber`, else the body is `invalid` (a provider sending strings has changed its format, and the fallback or retry handles that). | F-130, F-133, TP-9.1, TP-9.12, TP-9.13 | none | planner decision |
+| A-282 | N-2: `enqueueRatesAdded` runs even when `insertDay` inserted 0 rows, when a fetch and a backfill race, so subscribers get a duplicate. | **Only when > 0 rows were inserted.** Subscribers must still be idempotent, because a partly overlapping insert or a retry can repeat a delivery; F-138 now says so. | F-137, F-138, TP-9.9 | none | planner decision |
+| A-283 | N-3 (A-275 follow-up): capture writes `singleton_key` itself, so a compromised capture can queue unlimited backfills for a date the fallback lacks. Should capture's `INSERT` policy pin `singleton_key = data->>'rateDate'`? | **Yes, generically, plus two more pins.** `JobDefinition.captureSingletonKeyField` (only with `sendableFromCapture`, else F-71 throws `TypeError`); `platform.fx-backfill` sets `"rateDate"`. The policy builder adds a per-queue clause to capture's `INSERT` `WITH CHECK` (both `job` and `job_common`, as A-228): the key pin, plus `state = 'created'` and `policy` equal to the queue's. Without those two, a planted `retry`/`active` row or a row claiming `policy 'standard'` would escape `job_i1` (`WHERE state = 'created' AND policy = 'short'`), and the key pin would cap nothing. It fits A-230's builder: the same `pgboss.queue` subquery pattern, `INSERT` only (capture can't `UPDATE` general rows), and honest pg-boss sends already write `created` and `q.policy`. **Residual, accepted:** a compromised capture can still cause about one fallback request per in-range date per completion cycle, or park a far-future `start_after` row that delays a date's backfill; both are stale-rate nuisances with no data exposure. | F-70, F-71, F-75 step 6b, F-137, S-9, TP-9.22 | none | planner decision |
 
 ## 1. Deviations from the HLD, and decisions the HLD left open
 
@@ -1244,7 +1249,7 @@ Pure functions with no I/O. Imported by the server and the web app. Android mirr
   4. F-16, plus `pgboss` default privileges (F-74).
   5. F-21.
   6. F-75 (queue sync).
-  6b. `applyQueuePolicies(migrator, registry)` (`platform/queue/queuePolicies.ts`, A-227, A-228), as `budmon_queue`: enables row-level security (not forced) on **`pgboss.job` and `pgboss.job_common`** and recreates identical policies on both from the registry: capture `SELECT` and `INSERT` on its queues and the sendable general queues, `UPDATE`/`DELETE` on its queues only, and every capture `INSERT`/`UPDATE` `WITH CHECK` also requires `dead_letter IS NOT DISTINCT FROM` the row queue's configured dead letter (from `pgboss.queue`) and `source_name IS NULL OR source_name = ANY(<capture queues>)` (A-230); app `SELECT` and `INSERT` on all.
+  6b. `applyQueuePolicies(migrator, registry)` (`platform/queue/queuePolicies.ts`, A-227, A-228), as `budmon_queue`: enables row-level security (not forced) on **`pgboss.job` and `pgboss.job_common`** and recreates identical policies on both from the registry: capture `SELECT` and `INSERT` on its queues and the sendable general queues, `UPDATE`/`DELETE` on its queues only, and every capture `INSERT`/`UPDATE` `WITH CHECK` also requires `dead_letter IS NOT DISTINCT FROM` the row queue's configured dead letter (from `pgboss.queue`) and `source_name IS NULL OR source_name = ANY(<capture queues>)` (A-230). **Sendable general queues (A-283):** capture's `INSERT` `WITH CHECK` adds, for each such queue `n`, `(name <> 'n' OR (state = 'created' AND policy IS NOT DISTINCT FROM (SELECT q.policy FROM pgboss.queue q WHERE q.name = n) [AND singleton_key IS NOT DISTINCT FROM data->>'<captureSingletonKeyField>']))`. Without the state and policy pins, a planted row could escape the policy's unique index (`job_i1` for `short` matches only `state = 'created' AND policy = 'short'`). pg-boss's own `send` always writes `state` `created` (the default) and `q.policy`, so honest sends pass. App `SELECT` and `INSERT` on all.
 
   Each step is logged with `event: "schema_step"`, `step` and `durationMs`. The step stops at the first failure; earlier steps aren't undone (each is idempotent).
 - **Errors:** propagates the step's error.
@@ -1693,7 +1698,8 @@ Pure functions with no I/O. Imported by the server and the web app. Android mirr
   export interface JobDefinition<P> { readonly name: string; readonly role: WorkerRole; readonly payload: z.ZodType<P>;
     readonly retryLimit: number; readonly retryDelaySeconds: number; readonly retryBackoff: boolean;
     readonly expireInSeconds: number; readonly policy: "standard" | "stately" | "singleton" | "short"; readonly cron?: string;
-    readonly sendableFromCapture?: boolean /* A-227: general queues only; default false */ }
+    readonly sendableFromCapture?: boolean /* A-227: general queues only; default false */;
+    readonly captureSingletonKeyField?: string /* A-283: only with sendableFromCapture; capture's rows must have singleton_key = data->>field */ }
   export function defineJob<P>(def: { name: string; role: WorkerRole; payload: z.ZodType<P> } & Partial<Omit<JobDefinition<P>, "name" | "role" | "payload">>): JobDefinition<P>;
   ```
 - **Behaviour:** defaults `retryLimit 5`, `retryDelaySeconds 30`, `retryBackoff true`, `expireInSeconds 900`, `policy "standard"`. A `cron` makes it a scheduled job (general role only).
@@ -1703,7 +1709,7 @@ Pure functions with no I/O. Imported by the server and the web app. Android mirr
 - **File:** `platform/queue/registry.ts`
 - **Signature:** `export interface JobRegistry { all(): readonly JobDefinition<unknown>[]; forRole(r: WorkerRole): readonly JobDefinition<unknown>[]; get(name: string): JobDefinition<unknown> | undefined; deadLetterQueue(r: WorkerRole): string }; export function createJobRegistry(defs: readonly JobDefinition<unknown>[]): JobRegistry`
 - **Behaviour:** dead-letter queues are named `dead-letter.capture` and `dead-letter.general`. They aren't definitions and have no workers.
-- **Errors:** a duplicate name or a name starting with `dead-letter.` throws `TypeError`.
+- **Errors:** a duplicate name or a name starting with `dead-letter.` throws `TypeError`; so does `captureSingletonKeyField` on a definition without `sendableFromCapture: true` (A-283).
 - **`buildJobRegistry()` (A-202):** `platform/queue/appRegistry.ts` exports `buildJobRegistry(): JobRegistry` = `createJobRegistry([...platformJobDefinitions, ...<modules' definitions>])`, used by F-92, `createApiContainer` and `createWorkerContainer`.
 
 #### F-72: `assertPayloadSafe`
@@ -2119,10 +2125,10 @@ Pure functions with no I/O. Imported by the server and the web app. Android mirr
 
 #### F-130: provider decimal parsing
 - **File:** `platform/fx/decimal.ts`
-- **Signatures:** `export function parseJsonKeepingNumberText(text: string): unknown`, `export function normaliseRate(raw: string): string | null`
+- **Signatures:** `export class JsonNumber { constructor(readonly source: string) }` (A-281), `export function parseJsonKeepingNumberText(text: string): unknown`, `export function normaliseRate(raw: string): string | null`
 - **Behaviour:**
-  - `parseJsonKeepingNumberText` uses `JSON.parse(text, (key, value, context) => typeof value === "number" ? context.source : value)`, so numbers become their exact source text.
-  - `normaliseRate` parses with F-300 `parseDecimal` and returns `toFixedDecimalString(r, 12)`. It returns `null` for unparseable input, `r ≤ 0`, or `r ≥ 10^12`.
+  - `parseJsonKeepingNumberText` uses `JSON.parse(text, (key, value, context) => typeof value === "number" ? new JsonNumber(context.source) : value)`, so numbers become `JsonNumber`s holding their exact source text, distinguishable from JSON strings (A-281).
+  - `normaliseRate` parses with F-300 `parseDecimal` and returns `toFixedDecimalString(r, 12)`. It returns `null` for unparseable input, for `r ≥ 10^12`, or when the **normalised (12-place) value ≤ 0**, which includes positive rates below 5×10⁻¹³ that round to zero (A-280). A `null` rejects that one code (F-137 step 3); it never fails the day.
 
 #### F-131: `fxRepo`
 - **File:** `platform/fx/fxRepo.ts` · **Layer:** repo
@@ -2181,10 +2187,10 @@ Pure functions with no I/O. Imported by the server and the web app. Android mirr
   ```
 - **Behaviour:**
   - **Open Exchange Rates:** `GET {baseUrl}/historical/{date}.json?app_id=…&base=USD&show_alternative=false`, timeout 10 s.
-    - 200 → F-130 parse. The body must be `{ base: "USD", rates: { CODE: number } }`, otherwise `invalid`.
+    - 200 → F-130 parse. The body must be `{ base: "USD", rates: { CODE: number } }`, where every rate is a `JsonNumber` (a JSON string such as `"0.92"` doesn't count, A-281), otherwise `invalid`.
     - 400/404 → `not_found`; other non-2xx → `http` with status; network → `network`.
   - **fawazahmed0:** `GET {baseUrl with {date}}/currencies/usd.json`; on `network` or 5xx, retries once on `{mirrorUrl with {date}}/currencies/usd.json`.
-    - 200 → parse `{ date, usd: { eur: n, … } }`; `date` must equal the requested date (else `invalid`); keys are upper-cased.
+    - 200 → F-130 parse `{ date, usd: { eur: n, … } }`, every rate a `JsonNumber` or the whole body is `invalid` (A-281); `date` must equal the requested date (else `invalid`); keys are upper-cased.
     - 404 → `not_found`.
   - **Fixed:** returns `USD 1`, `EUR 0.92`, `GBP 0.79`, `EGP 48.5`, `JPY 149.25`, `KWD 0.307`, `SAR 3.75` for any date.
   - **`FxProviderError` (A-267):** `name = "FxProviderError"`; `message` = `fx provider: <reason>` or `fx provider: http <status>`; `status` is set only for `http`. It never carries the request URL, the `app_id`, a response body or the underlying `fetch` error (no `cause`).
@@ -2194,13 +2200,13 @@ Pure functions with no I/O. Imported by the server and the web app. Android mirr
 - **File:** `platform/fx/fxJobs.ts`
 - **Definitions:**
   - `platform.fx-rates-fetch`: general, `cron "30 0 * * *"`, payload `z.object({})`, `retryLimit 14`, `retryDelaySeconds 1800`, `retryBackoff false`, `expireInSeconds 300`, `policy "singleton"`.
-  - `platform.fx-backfill`: general, payload `z.object({ rateDate: isoDate })`, `retryLimit 5`, `retryBackoff true`, `expireInSeconds 300`, `policy "short"`, **`sendableFromCapture: true`** (A-275: F-132 `convert` in worker-capture enqueues backfills; the A-227 to A-230 row-level security lets `budmon_capture` insert only into this queue among general ones, with `dead_letter` pinned).
+  - `platform.fx-backfill`: general, payload `z.object({ rateDate: isoDate })`, `retryLimit 5`, `retryBackoff true`, `expireInSeconds 300`, `policy "short"`, **`sendableFromCapture: true`**, `captureSingletonKeyField: "rateDate"` (A-283: with `short`, capture can hold at most one queued backfill per date; F-132 already sends `singletonKey = rateDate`) (A-275: F-132 `convert` in worker-capture enqueues backfills; the A-227 to A-230 row-level security lets `budmon_capture` insert only into this queue among general ones, with `dead_letter` pinned).
 - **Behaviour, fetch:**
   1. `rateDate = utcDateOf(ctx.createdOn) − 1 day`, so retries keep the same day. If `dayExists(rateDate)`, complete.
   2. `elapsed = now − ctx.createdOn`; provider = primary if `elapsed < 6 h`, else fallback.
   3. `fetchDay`, keeping codes that are **active** in `currencies`, each through F-130 `normaliseRate`. Codes not in `currencies`, or inactive, are skipped silently (providers return far more currencies than Budmon keeps). Only a kept code whose value `normaliseRate` refuses is **rejected**: it increments `fx_rates_rejected_total{provider}` and counts in the logged `rejected` (A-274).
   4. Zero valid rows → throws `FxProviderError("invalid")`.
-  5. In one transaction: F-131 `insertDay`, then F-138.
+  5. In one transaction: F-131 `insertDay`, then F-138 **only when `insertDay` returned > 0** (A-282). A fetch and a backfill that race on the same day insert it once, so subscribers get one `rates-added` for it.
   6. Increments `fx_rates_fetched_total{provider}` and logs `info("fx_day_stored", { rateDate, provider, inserted, rejected })`.
 - **Behaviour, backfill:**
   - **Range guard (A-275):** `rateDate < FX_FALLBACK_FIRST_DATE` or `rateDate ≥ utcDateOf(now)` → logs `warn("fx_backfill_out_of_range", { rateDate })` and completes without fetching. F-132 and F-139 never send such dates, so this only stops a planted job from driving provider calls.
@@ -2213,7 +2219,7 @@ Pure functions with no I/O. Imported by the server and the web app. Android mirr
 #### F-138: `enqueueRatesAdded`
 - **File:** `platform/fx/fxJobs.ts`
 - **Signature:** `export async function enqueueRatesAdded(h: DbHandle, fx: FxService, queue: JobQueue, rateDate: string): Promise<number>`
-- **Behaviour:** `next = nextStoredDayAfter(rateDate)`; `affectedTo = next ? next − 1 day : null`. For each subscriber, `queue.enqueue(h, def, { rateDate, affectedFrom: rateDate, affectedTo })`. Returns the count. Runs in the inserting transaction.
+- **Behaviour:** `next = nextStoredDayAfter(rateDate)`; `affectedTo = next ? next − 1 day : null`. For each subscriber, `queue.enqueue(h, def, { rateDate, affectedFrom: rateDate, affectedTo })`. Returns the count. Runs in the inserting transaction, and only after an insert of > 0 rows (A-282). Subscribers must still be idempotent: a partly overlapping insert or a job retry can deliver the same `rates-added` twice.
 
 #### F-139: FX gap check
 - **File:** `platform/fx/fxJobs.ts`
@@ -3499,7 +3505,7 @@ The platform's slices are **capability slices** rather than one story each. Each
 
 ### S-9: FX rates and conversion (US-8)
 - **Depends on:** S-6
-- **Functions:** F-130 to F-139, F-23 (FX seeder), `fx_last_day_timestamp_seconds` (F-42); F-78 gains the startup enqueue of F-139 and the freshness gauge (A-265); F-96 gains the FX subscriber check (A-266).
+- **Functions:** F-130 to F-139, F-23 (FX seeder), `fx_last_day_timestamp_seconds` (F-42); F-78 gains the startup enqueue of F-139 and the freshness gauge (A-265); F-96 gains the FX subscriber check (A-266); F-71 and the F-75 step 6b policies gain `captureSingletonKeyField` (A-283).
 - **Scenarios:**
 
 | Scenario | Happy / unhappy | Expected | Tests |
@@ -3516,6 +3522,7 @@ The platform's slices are **capability slices** rather than one story each. Each
 | Backfill; date not available | happy and unhappy | Stored; completes with metric. | TP-9.14 |
 | Subscriber validation; stored days final; freshness gauge | unhappy and happy | As stated. | TP-9.15 to TP-9.17 |
 | `FX_PROVIDER` absent | happy and unhappy | `fixed` outside prod; `required` in prod (A-276). | TP-9.21 |
+| Capture's backfill sends pinned to one queued job per date | unhappy | Row-level security refuses other keys, states and policies (A-283). | TP-9.22 |
 | Gap check after the laptop was off; startup enqueue | happy and unhappy | As in F-139; policy `stately` (A-273). | TP-9.19, TP-9.20 |
 
 ### S-10: Object storage, erasure log and restore verification (US-15 part, D-35)
@@ -3924,7 +3931,7 @@ Types: **U** unit, **I** integration (real Postgres and/or HTTP in-process), **E
 | TP-8.14 | S-8 | I | F-122 | local HTTPS target and a CONNECT proxy recording hosts (test helper) | (a) `HTTPS_PROXY` set; (b) set with `NO_PROXY` including the target; (c) unset — each in a child process calling `installProxySupport` then `fetch` | (a) the proxy saw a CONNECT to the target; (b), (c) no CONNECT; requests succeed |
 | TP-8.16 | S-8 | I | F-96, F-117 `rewrapApiSecretsCommand`, F-93 (A-26) | `sealed_test` as in TP-8.7 with 2 rows sealed under k1; config current `k2`; an API container whose `sealedColumns` override has `sealed_test` registered (provider api) | `rewrapApiSecretsCommand(c)`; `createApiContainer(config).sealedColumns.all()`; CLI `secrets:rewrap-api` on that database (nothing registered); (A-250) the CLI run uses kind `api` with the test helpers' minimal api environment, `DB_*` for the test database as `budmon_app` and `API_SECRETS_KEYS_FILE` = `{ current: k2, keys: { k1, k2 } }` | `{rewrapped:2, skipped:0}` and both rows under `k2`; `[]`; stdout `{"rewrapped":0,"skipped":0}`, exit 0 |
 | TP-8.15 | S-8 | U | F-96, F-10 | API config | Build an `ApiContainer`; `configKeysFor("api")`; `loadConfig("api", env, readFileSpy)` with every capture variable set; (A-251, A-261) `parseConfig` for `api`, `migrate`, worker `capture`, worker `general`, its `input.env` wrapped in a `Proxy` recording reads and holding every known variable, including those outside the list | No `captureUnsealer` member; the key list has no `KMS_PROVIDER`, `GCP_CREDENTIALS_FILE`, `CAPTURE_PRIVATE_KEY_FILE` or `MAILBOX_HMAC_KEY_FILE`; `readFileSpy` never called with those files' paths (A-248); (A-251) each recorded set ⊆ `configKeysFor(kind, roles)` |
-| TP-9.1 | S-9 | U | F-130 | none | `{"rates":{"EGP":48.123456789012345,"X":1e-3}}`; `normaliseRate("48.123456789012345")`, `("0")`, `("-1")`, `("1e12")`, `("abc")` | `"48.123456789012345"`, `"1e-3"` as strings; `"48.123456789012"`; null ×4 |
+| TP-9.1 | S-9 | U | F-130 | none | `{"rates":{"EGP":48.123456789012345,"X":1e-3,"S":"0.92"}}`; `normaliseRate("48.123456789012345")`, `("0")`, `("-1")`, `("1e12")`, `("abc")`, (A-280) `("0.0000000000004")` | `JsonNumber("48.123456789012345")`, `JsonNumber("1e-3")`, and `"S"` the plain string `"0.92"` (A-281); `"48.123456789012"`; null ×5 |
 | TP-9.2 | S-9 | I | F-132 | currencies loaded | `convert(EGP 100.00, EGP, d)` | Same money; provisional false; rateDate d |
 | TP-9.3 | S-9 | I | F-132 | day 2026-10-04: EGP 48.5, JPY 149.25 | `convert(EGP 123.45, JPY, 2026-10-04)` | JPY 380; provisional false |
 | TP-9.4 | S-9 | I | F-132 | only 2026-10-04 stored | `convert(…, 2026-10-05)` | rateDate 2026-10-04, provisional true |
@@ -3933,11 +3940,11 @@ Types: **U** unit, **I** integration (real Postgres and/or HTTP in-process), **E
 | TP-9.6 | S-9 | I | F-132 | day stored without KWD | `convert(USD, KWD, day)` | `no_rate/currency_missing`; no job |
 | TP-9.7 | S-9 | I | F-132 | none | `convert` to `ZZZ` (a valid code, not in the table) | `UnknownCurrencyError` |
 | TP-9.8 | S-9 | I | F-132 | day with EGP 48.5 | `convertSum` of 3 × EGP 0.30 to USD; items on a stored day and an unstored later day; empty | USD 0.03 (each item 0.6186 cents → 1 cent; sum-then-round would give 0.02); `provisional: true`; USD 0.00, `provisional: false` |
-| TP-9.9 | S-9 | I | F-137, F-138 | clock 2026-10-05T00:30Z; fake primary; subscriber `test.fx-rates-added` with no worker running on its queue; stored day 2026-10-07 exists (simulated backfill) | Run the fetch handler | Day 2026-10-04 stored with provider `openexchangerates`; one subscriber job `{rateDate:"2026-10-04", affectedFrom:"2026-10-04", affectedTo:"2026-10-06"}` in the same transaction: the `xmin` of the day's `exchange_rates` rows equals the `xmin` of the subscriber's `pgboss.job` row (A-271); a second run doesn't fetch |
+| TP-9.9 | S-9 | I | F-137, F-138 | clock 2026-10-05T00:30Z; fake primary; subscriber `test.fx-rates-added` with no worker running on its queue; stored day 2026-10-07 exists (simulated backfill) | Run the fetch handler | Day 2026-10-04 stored with provider `openexchangerates`; one subscriber job `{rateDate:"2026-10-04", affectedFrom:"2026-10-04", affectedTo:"2026-10-06"}` in the same transaction: the `xmin` of the day's `exchange_rates` rows equals the `xmin` of the subscriber's `pgboss.job` row (A-271); a second run doesn't fetch; (A-282) a backfill for 2026-10-04 that finds the day already inserted (its `dayExists` check bypassed by inserting between check and insert) enqueues no second subscriber job |
 | TP-9.10 | S-9 | I | F-137 | job `createdOn` 6 h 1 min before now; fake primary and fallback | Run | The primary isn't called (A-269); the fallback is called once; stored `provider = fawazahmed0` |
-| TP-9.11 | S-9 | I | F-137 | provider returns EGP valid, XAU (not in table), ZWL inactive, EUR `0`, GBP `"abc"` | Run; then a provider with only invalid values | EGP stored only; `fx_rates_rejected_total` = 2 and logged `rejected: 2` (EUR, GBP; XAU and ZWL skipped uncounted, A-274); second run throws `FxProviderError("invalid")` and stores nothing |
-| TP-9.12 | S-9 | U | F-133 OXR | `fakeFetch` | 200; base EUR; 400; 500; network | Map with exact strings; `invalid`; `not_found`; `http` status 500; `network`; each an `FxProviderError(reason, status?)` (A-267). The URL carries `app_id` and `base=USD`; no error's properties, message or stack contain the `app_id` value, `app_id` or the query (A-268) |
-| TP-9.13 | S-9 | U | F-133 fawazahmed0 | `fakeFetch` | primary 503 then mirror 200; date mismatch; 404 | Mirror used; `invalid`; `not_found` |
+| TP-9.11 | S-9 | I | F-137 | provider returns EGP valid, XAU (not in table), ZWL inactive, EUR `0`, GBP `"abc"`, (A-280) JPY `4e-13` | Run; then a provider with only invalid values | EGP stored only; `fx_rates_rejected_total` = 3 and logged `rejected: 3` (EUR, GBP, JPY; the day still stores, A-280; XAU and ZWL skipped uncounted, A-274); second run throws `FxProviderError("invalid")` and stores nothing |
+| TP-9.12 | S-9 | U | F-133 OXR | `fakeFetch` | 200; base EUR; (A-281) a rate given as the string `"0.92"`; 400; 500; network | Map with exact strings; `invalid`; (A-281) `invalid`; `not_found`; `http` status 500; `network`; each an `FxProviderError(reason, status?)` (A-267). The URL carries `app_id` and `base=USD`; no error's properties, message or stack contain the `app_id` value, `app_id` or the query (A-268) |
+| TP-9.13 | S-9 | U | F-133 fawazahmed0 | `fakeFetch` | primary 503 then mirror 200; date mismatch; (A-281) a rate given as a string; 404 | Mirror used; `invalid`; (A-281) `invalid`; `not_found` |
 | TP-9.14 | S-9 | I | F-137 backfill | fallback 404; fallback 200; (A-275) clock 2026-10-05, a fake fallback | Run; (A-275) run with `rateDate` 2024-03-01 and with 2026-10-05 | Completes, `fx_backfill_missing_total` 1; day stored with `fawazahmed0`; (A-275) both complete, the fallback isn't called, one `warn("fx_backfill_out_of_range")` each |
 | TP-9.15 | S-9 | U, I | F-132, F-96 | (a)–(b) none; (c) a worker container whose registry lacks the subscriber | (a) register a subscriber with role capture; (b) a general subscriber whose payload is an equivalent schema, not `RatesAddedPayload`; (c) register a general `RatesAddedPayload` subscriber not in the registry, then build the container (A-266) | (a), (b) `TypeError`, nothing stored; (c) `createWorkerContainer` throws `TypeError` naming the subscriber |
 | TP-9.16 | S-9 | I | F-131 | stored day | `insertDay` again with different values | Returns 0; values unchanged |
@@ -3946,6 +3953,7 @@ Types: **U** unit, **I** integration (real Postgres and/or HTTP in-process), **E
 | TP-9.19 | S-9 | I | F-139 | clock 2026-10-07T10:00Z; (a) empty `exchange_rates`; (b) latest day 2026-10-03; (c) latest day 2026-10-06; (d) latest day 2026-08-01 | `fxGapCheck` | (a) `enqueued: []`; (b) `["2026-10-04","2026-10-05","2026-10-06"]`, three `platform.fx-backfill` jobs with those `singletonKey`s; (c) `[]`; (d) 31 dates, the earliest 2026-09-06, the latest 2026-10-06; running (b) twice leaves three jobs |
 | TP-9.20 | S-9 | I | F-78, F-139 startup | fresh queue; gap-check handler held (A-272); (a) one general-role worker; (b1) no worker; (b2) two general-role workers started together; (c) a capture-role worker | `startWorkers`; (b1) `queue.enqueue(gapCheck, {}, { singletonKey: "startup" })` twice | (a) one `platform.fx-gap-check` job with `singletonKey "startup"`, and the schedule `45 6 * * *` (tz UTC) registered; (b1) the second enqueue returns `null`, one job row; (b2) at most one `created` and at most one `active` gap-check job with key `startup` (A-273; the queue's policy is `stately`); (c) none |
 | TP-9.21 | S-9 | U | F-10 `FX_PROVIDER` (A-276) | worker with `WORKER_ROLES=general` | `FX_PROVIDER` absent with `APP_ENV` development, test, rehearsal, production | development/test: `fx.provider = "fixed"`; rehearsal/production: one problem `FX_PROVIDER` `required` |
+| TP-9.22 | S-9 | I, U | F-75 6b policies, F-71 (A-283) | migrated template; production registry; as `budmon_capture` | (a) `send` `platform.fx-backfill {rateDate:"2026-10-01"}` with `singletonKey "2026-10-01"`, then again; (b) with `singletonKey "x"`; (c) with no singleton key; (d) a direct `INSERT` into `pgboss.job` with matching key but `state 'retry'`; (e) one with `policy 'standard'`; (f) `createJobRegistry` with `captureSingletonKeyField` on a definition without `sendableFromCapture` | (a) the first returns an id, the second `null` (one queued row); (b)–(e) 42501; (f) `TypeError`; TP-6.8's capture cases still pass |
 | TP-10.1 | S-10 | U | F-140 (A-22) | memory store | Valid and invalid keys per bucket; prefix `users/`; ttl 30 and 901; `presignGet` with `downloadName` `budmon-export-2026-10-07.zip`, a 100-character name, `""`, a 101-character name, `a b.zip`, `a"b.zip`, `x/y.zip`, `é.zip` | Pass/`RangeError` as per the rules; names: pass ×2, `RangeError` ×6 |
 | TP-10.2 | S-10 | I | F-142, F-145 (A-22) | temp directory, dev API | put/list/delete/deletePrefix; presign then GET; presign with `downloadName "budmon-export-2026-10-07.zip"` then GET; GET after expiry; tampered token; a token correctly signed (test signing key) whose `n` is `a"b` | Behaviour per F-140; 200 with exactly `Content-Disposition: attachment` and a token payload without `n`; 200 with `Content-Disposition: attachment; filename="budmon-export-2026-10-07.zip"`; 404 envelope ×3 |
 | TP-10.3 | S-10 | I | F-141 (A-22) | MinIO Testcontainer | Same operations; GET the presigned URL; after `ttlSeconds`; presign with and without `downloadName "budmon-export-2026-10-07.zip"` and GET each | Works; 403 after expiry; `delete` of a missing key is fine; `put` to an unknown bucket → `ObjectStoreError`; the URL's `response-content-disposition` is `attachment; filename="budmon-export-2026-10-07.zip"` and MinIO answers with that header; without a name, `attachment` |
