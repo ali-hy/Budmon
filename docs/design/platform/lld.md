@@ -2,7 +2,7 @@
 module: platform
 doc: lld
 status: approved # draft | in-review | approved
-version: 0.72
+version: 0.73
 hld_version: 1.3
 author: planner
 approved_by: the user (project owner), delegated auto-approval
@@ -138,6 +138,7 @@ Nothing in that list changes application code (D-29 rule 2).
 | 0.70    | 2026-10-09 | Implementation-time amendment A-260: `createKmsCaptureUnsealer` takes a required `configuredKeyVersion`; the A-258 check can't be skipped. Tests: TP-8.5 extended. Approval stands. |
 | 0.71    | 2026-10-09 | Implementation-time amendment A-261 (text only): TP-8.15's drift guard records reads on `parseConfig`'s `env` (F-10 now names `parseConfig` and `RawConfigInput`); F-112's signature already has the required `configuredKeyVersion`. Approval stands. |
 | 0.72    | 2026-10-09 | Implementation-time amendment A-262 (S-8 round-2 note): `expires_in` must be finite with 0 < value ≤ 31 622 400 (366 days), else `rejected`. Tests: TP-8.12 extended. Approval stands. |
+| 0.73    | 2026-10-09 | Implementation-time amendment A-263 (S-8 QA observation): F-113 requires the envelope's key-version label to equal its configured `local:<n>`, mirroring A-258. Tests: TP-8.3 extended. Approval stands. |
 
 ## Amendments
 
@@ -405,6 +406,7 @@ Nothing in that list changes application code (D-29 rule 2).
 | A-260 | A-258's check needs the configured key; the engineer added an optional `configuredKeyVersion` to `createKmsCaptureUnsealer`'s deps, and the check is skipped when it's absent (software-engineer, `c40abe4`). | **Required.** It's a security boundary, so it can't be skippable: `createKmsCaptureUnsealer(deps: { client; configuredKeyVersion: string; timeoutMs?; metrics })`. The factory throws `TypeError("configured key version required")` when it doesn't match F-10's KMS key-version pattern, so a misconfiguration fails at container build, not at the first unseal. The container passes `config.capture.keyVersion`; tests pass a value. | F-112, TP-8.5 | none | planner decision |
 | A-261 | (1) A-251's drift guard, a recording `Proxy` passed to `loadConfig`, proves nothing: `loadConfig` enumerates `env` with `Object.entries` to scope it, so every key is recorded; (2) is `configuredKeyVersion` required in F-112's signature? (test-architect) | **Text only.** (1) F-10 names its pure parsing entry, which `loadConfig` calls after scoping `env` to `configKeysFor` and reading the `*_FILE` files: `export interface RawConfigInput { env: Readonly<Record<string, string \| undefined>>; files: Readonly<Record<string, string \| null>> }; export function parseConfig(kind: ProcessKind, input: RawConfigInput): { ok: true; config: Config } \| { ok: false; problems: ConfigProblem[] }`. TP-8.15's guard wraps `input.env` given to **`parseConfig`** in the recording `Proxy`, with every known variable outside the list also set, and asserts the recorded reads ⊆ `configKeysFor(kind, roles)`. A-251's wording is superseded. (2) Checked: F-112's signature line has `configuredKeyVersion: string` as a required member (A-260); no change. | F-10, A-251, TP-8.15 | none | planner decision |
 | A-262 | A finite but huge `expires_in` (e.g. `1e300`) makes `Temporal.Instant.add` throw `RangeError` instead of `OAuthExchangeError` (S-8 round-2 review, non-blocking). | **Upper bound:** a 200 is well-formed only when `expires_in` is a finite number with `0 < expires_in ≤ 86400 × 366` (31 622 400 s); anything else is `rejected`, not retryable (the code is spent, A-259). Google's access tokens last an hour, so the bound never refuses a real answer. | F-120, A-259, TP-8.12 | none | planner decision |
+| A-263 | F-113 ignores the envelope's key-version label, so a relabelled `local:1` still decrypts; the label isn't in the AAD, so a database writer could relabel envelopes and change which rows re-wrap selects (S-8 QA, low priority). | **Check the label, as A-258 does for KMS.** `createLocalCaptureUnsealer(cfg: { privateKeyPem: string; keyVersion: string })` (`keyVersion` = `config.capture.keyVersion`, required, must match `^local:\d+$` else `TypeError`); `unseal` throws `UnknownKeyVersionError` when the envelope's label isn't exactly `keyVersion`, before decrypting. Adding the label to the AAD was rejected: it changes the envelope format for a development-and-rehearsal-only provider, and the check gives the same guarantee. | F-113, TP-8.3 | none | planner decision |
 
 ## 1. Deviations from the HLD, and decisions the HLD left open
 
@@ -2011,8 +2013,8 @@ Pure functions with no I/O. Imported by the server and the web app. Android mirr
 
 #### F-113: `createLocalCaptureUnsealer`
 - **File:** `platform/crypto/captureUnsealer.ts`
-- **Signature:** `export function createLocalCaptureUnsealer(cfg: { privateKeyPem: string }): CaptureUnsealer`
-- **Behaviour:** as F-112, with `crypto.privateDecrypt` (OAEP SHA-256) and provider `local-capture` only. F-96 picks it when `KMS_PROVIDER=local`, which F-10 refuses in `production`.
+- **Signature:** `export function createLocalCaptureUnsealer(cfg: { privateKeyPem: string; keyVersion: string /* A-263: config.capture.keyVersion, ^local:\d+$ else TypeError */ }): CaptureUnsealer`
+- **Behaviour:** as F-112, with `crypto.privateDecrypt` (OAEP SHA-256) and provider `local-capture` only; the envelope's key-version label must equal `cfg.keyVersion`, else `UnknownKeyVersionError` before decrypting (A-263). F-96 picks it when `KMS_PROVIDER=local`, which F-10 refuses in `production`.
 
 #### F-114: `createApiSecretsCipher`
 - **File:** `platform/crypto/apiSecrets.ts`
@@ -3883,7 +3885,7 @@ Types: **U** unit, **I** integration (real Postgres and/or HTTP in-process), **E
 | TP-7.15 | S-7 | I | F-102 end to end | test create procedure inserting into a test table created by the test as `budmon_migrator` and granted `SELECT, INSERT` to `budmon_app` (A-236); the user from `createTestUser` (A-234) | POST twice with the same key, then with a new key; (A-242) the `createdAt` of each response | 201 + body; 201 + same body + `Idempotent-Replayed: true`; 201 + a new id; the table has 2 rows; the stored `request_hash` equals `requestHashOf(input)` (A-233); (A-242) matches `^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$` |
 | TP-8.1 | S-8 | U | F-110 | parts with keyVersion `local:1`, wrapped DEK 384 bytes, ciphertext 10 bytes | encode/decode; truncated buffers at each field; version byte 2; provider 9; L=0 | Exact byte layout per the table; round trip; `EnvelopeFormatError` for each malformed case |
 | TP-8.2 | S-8 | U | F-110 `aadFor` | none | `{table:"t",rowId:"r 1",purpose:"p"}` | `RangeError` |
-| TP-8.3 | S-8 | U | F-111, F-113 | RSA-3072 pair, version `local:1` | seal + unseal; unseal with `rowId` changed; flip a ciphertext byte; (A-256) unseal with a different RSA-3072 private key | Plaintext equal; provider byte `0x02`; `EnvelopeAuthError` ×2; (A-256) `EnvelopeAuthError` |
+| TP-8.3 | S-8 | U | F-111, F-113 | RSA-3072 pair, version `local:1` | seal + unseal; unseal with `rowId` changed; flip a ciphertext byte; (A-256) unseal with a different RSA-3072 private key; (A-263) the unsealer configured `local:1`: an envelope relabelled `local:2` (bytes otherwise unchanged); `createLocalCaptureUnsealer` with `keyVersion` `projects/p/…/1` | Plaintext equal; provider byte `0x02`; `EnvelopeAuthError` ×2; (A-256) `EnvelopeAuthError`; (A-263) `UnknownKeyVersionError`; `TypeError` |
 | TP-8.4 | S-8 | U | F-111 | RSA-2048 key | construct | `TypeError` |
 | TP-8.5 | S-8 | U | F-112 | fake KMS client decrypting with a local private key; envelope with version `projects/p/…/cryptoKeyVersions/1` | unseal; client rejects; envelope with provider local; (A-247) the fake returns `[{ plaintext: Uint8Array }]`; then `[{ plaintext: "str" }]`; (A-258) configured `projects/p/locations/l/keyRings/r/cryptoKeys/capture/cryptoKeyVersions/1`; envelopes with `…/cryptoKeys/capture/cryptoKeyVersions/2` and `…/cryptoKeys/other/cryptoKeyVersions/1`; (A-260) `createKmsCaptureUnsealer` with `configuredKeyVersion` `""` and `local:1` | Plaintext; `asymmetricDecrypt` called with `{name, ciphertext}` and `timeout: 5000`; `KmsUnavailableError` + `kms_errors_total` 1; `EnvelopeFormatError`; (A-247) plaintext; `KmsUnavailableError`; (A-258) the first reaches the fake client; the second throws `UnknownKeyVersionError` and the client isn't called; (A-260) `TypeError("configured key version required")` ×2 |
 | TP-8.6 | S-8 | U | F-114 | keys `{k1}`, then `{k1,k2}` current `k2` | seal with k1; unseal with the k1-only cipher; unseal the k1 envelope with the {k1,k2} cipher; unseal with the cipher holding only k2 | ok; ok; `UnknownKeyVersionError` |
