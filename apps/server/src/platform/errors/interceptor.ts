@@ -108,6 +108,19 @@ export function mapError(
       report: true,
     };
   }
+  // Rule 5b (A-172): a defined SERVICE_UNAVAILABLE keeps 503 with §6's message; its data is the
+  // outcome from the commit tracker, never the thrown data.
+  if (err instanceof ORPCError && err.defined && err.code === "SERVICE_UNAVAILABLE") {
+    return {
+      error: defined(
+        "SERVICE_UNAVAILABLE",
+        PLATFORM_ERRORS.SERVICE_UNAVAILABLE.status,
+        PLATFORM_ERRORS.SERVICE_UNAVAILABLE.message,
+        { outcome },
+      ),
+      report: true,
+    };
+  }
   return { error: defined("INTERNAL", 500, "Internal error", { outcome }), report: true };
 }
 
