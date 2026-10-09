@@ -65,6 +65,7 @@ export class OAuthExchangeError extends Error {
 }
 
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
+const MAX_EXPIRES_IN_SECONDS = 86_400 * 366;
 
 export async function exchangeAuthorizationCode(
   deps: { fetch: typeof fetch; clientId: string; clientSecret: Secret<string>; clock: Clock },
@@ -106,7 +107,9 @@ export async function exchangeAuthorizationCode(
       typeof access !== "string" ||
       typeof expiresIn !== "number" ||
       !Number.isFinite(expiresIn) ||
-      expiresIn <= 0
+      expiresIn <= 0 ||
+      // A-262: at most a year (366 days), checked before Temporal arithmetic.
+      expiresIn > MAX_EXPIRES_IN_SECONDS
     ) {
       throw new OAuthExchangeError("rejected");
     }
