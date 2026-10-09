@@ -1,6 +1,6 @@
 // F-348 checkContractRules. TP-4.5: one fixture document violating each of R1 to R6, and a clean
-// one; plus extra cases TP-4.29x (the real contract's emitted document is clean). IDs ending in "x"
-// are test-architect additions, not LLD test-plan IDs.
+// one, with R4's A-165 and A-173 cases; plus extra cases TP-4.29x (the real contract's emitted
+// document is clean). IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 //
 // The clean document is generated (F-347's configuration) from a small contract built with F-343's
 // createRoute and F-344's list schemas, so it has exactly the shapes the rules expect; each
@@ -169,6 +169,81 @@ describe("TP-4.5: checkContractRules", () => {
 
     expect(violations.map((v) => v.rule)).toEqual(["R4"]);
     expect(pointer(violations[0]?.location ?? "")).toMatch(/^\/paths\/~1things~1\{id\}\/patch/);
+  });
+
+  // A-173: a DELETE takes its input from path parameters only, and they are strings.
+  const UUID_PARAM = {
+    name: "id",
+    in: "path",
+    required: true,
+    schema: { type: "string", format: "uuid" },
+  };
+  function withDelete(doc: JsonObject, operation: JsonObject): JsonObject {
+    obj(doc, "paths")["/things/{id}"] = {
+      delete: {
+        operationId: "things.remove",
+        parameters: [UUID_PARAM],
+        responses: {
+          "200": {
+            description: "OK",
+            content: {
+              "application/json": {
+                schema: { type: "object", properties: { ok: { type: "boolean" } } },
+              },
+            },
+          },
+        },
+        ...operation,
+      },
+    };
+    return doc;
+  }
+  const DELETE_AT = /^\/paths\/~1things~1\{id\}\/delete/;
+
+  it("TP-4.5: (A-173) a DELETE with only a uuid path parameter is clean", async () => {
+    expect(check(withDelete(await clean(), {}))).toEqual([]);
+  });
+
+  it.each([
+    [
+      "a query parameter",
+      {
+        parameters: [
+          UUID_PARAM,
+          { name: "force", in: "query", required: false, schema: { type: "boolean" } },
+        ],
+      },
+    ],
+    [
+      "a request body",
+      {
+        requestBody: {
+          content: {
+            "application/json": {
+              schema: { type: "object", properties: { force: { type: "boolean" } } },
+            },
+          },
+        },
+      },
+    ],
+    [
+      "an integer path parameter",
+      {
+        parameters: [
+          {
+            name: "id",
+            in: "path",
+            required: true,
+            schema: { type: "integer", minimum: 1, maximum: 1000 },
+          },
+        ],
+      },
+    ],
+  ])("TP-4.5: (A-173) R4, a DELETE with %s", async (_label, operation: JsonObject) => {
+    const violations = check(withDelete(await clean(), operation));
+
+    expect(violations.map((v) => v.rule)).toEqual(["R4"]);
+    expect(pointer(violations[0]?.location ?? "")).toMatch(DELETE_AT);
   });
 
   it("TP-4.5: R5, a create without its Idempotency-Key header", async () => {

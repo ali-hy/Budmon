@@ -3,7 +3,6 @@
 // oRPC, so their handlers can throw what each test needs. Owned by the test-architect.
 import {
   CreatedResultSchema,
-  UuidSchema,
   base,
   contract,
   createRoute,
@@ -46,11 +45,6 @@ export const testContract = {
         flag: z.boolean().optional(),
       }),
     ),
-    // TP-4.25 (A-165): a DELETE, whose query is coerced.
-    remove: base
-      .route({ method: "DELETE", path: "/t/{id}" })
-      .input(z.object({ id: UuidSchema, force: z.boolean().optional() }))
-      .output(z.object({ ok: z.boolean() })),
     // TP-4.26 (A-166): the same CONFLICT thrown with a custom message.
     conflictCustom: base
       .route({ method: "GET", path: "/test/conflict-custom" })
@@ -66,10 +60,9 @@ export interface TestRouter {
   createHandler: ReturnType<typeof vi.fn>;
   /** What test.boom throws. */
   boomError: Error;
-  /** The inputs test.list, test.createTyped, test.remove and test.createLoose received. */
+  /** The inputs test.list, test.createTyped and test.createLoose received. */
   listInputs: unknown[];
   typedInputs: unknown[];
-  removeInputs: unknown[];
   looseInputs: unknown[];
 }
 
@@ -78,7 +71,6 @@ export function testRouter(boomError: Error = new Error("boom")): TestRouter {
   const listInputs: unknown[] = [];
   const looseInputs: unknown[] = [];
   const typedInputs: unknown[] = [];
-  const removeInputs: unknown[] = [];
   const createHandler = vi.fn(() => ({
     id: "0190a0b0-1c2d-7e3f-8a4b-5c6d7e8f9a0d",
     createdAt: "2026-10-05T12:00:00.000Z",
@@ -109,10 +101,6 @@ export function testRouter(boomError: Error = new Error("boom")): TestRouter {
         typedInputs.push(input);
         return CreatedResultSchema.parse(createHandler());
       }),
-      remove: os.test.remove.handler(({ input }) => {
-        removeInputs.push(input);
-        return { ok: true };
-      }),
       conflictCustom: os.test.conflictCustom.handler(({ errors }) => {
         throw errors.CONFLICT({
           message: "custom " + CANARIES.payee,
@@ -131,7 +119,6 @@ export function testRouter(boomError: Error = new Error("boom")): TestRouter {
     boomError,
     listInputs,
     typedInputs,
-    removeInputs,
     looseInputs,
   };
 }

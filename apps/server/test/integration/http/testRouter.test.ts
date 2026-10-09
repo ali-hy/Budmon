@@ -1,9 +1,11 @@
 // The API server with a test contract and router (S-4 AC 1). TP-4.10 (F-52's interceptor),
 // TP-4.11's integration part (F-56's middleware), TP-4.19 (body handling, F-55 step 5 with F-62)
-// TP-4.25 (query coercion, A-148; bodies never coerced, A-165; no method, no coercion, A-171),
+// TP-4.25 (query coercion, A-148; bodies never coerced, A-165; no method, no coercion, A-171;
+// HEAD unsupported, A-175),
 // TP-4.26 (defined errors, A-149; declared message, A-166) and TP-5.2 to TP-5.4 (F-62,
 // moved to S-4, A-124; A-152), plus extra cases TP-4.39x.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
+import { request, type IncomingHttpHeaders } from "node:http";
 import { CANARIES, scanForCanaries } from "@budmon/test-support";
 import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -328,7 +330,7 @@ describe("TP-4.25: query strings are coerced to the declared types (A-148)", () 
   });
 });
 
-describe("TP-4.25: request bodies are never coerced; DELETE queries are (A-165)", () => {
+describe("TP-4.25: request bodies are never coerced (A-165)", () => {
   const post = (body: unknown) =>
     app.inject({
       method: "POST",
@@ -360,23 +362,34 @@ describe("TP-4.25: request bodies are never coerced; DELETE queries are (A-165)"
     expect(res.json<{ code: string }>().code).toBe("VALIDATION_FAILED");
     expect(routes.typedInputs).toEqual([]);
   });
+});
 
-  // OPEN QUESTION (reported to the planner): oRPC 1.15.4's compact input structure reads the query
-  // only for GET (OpenAPICodec.decode); a DELETE's input is its path params plus its body, so
-  // ?force=true never reaches the handler. Marked it.fails until the LLD settles how DELETE query
-  // parameters arrive; it turns red when they do, and then becomes a plain it().
-  it.fails(
-    "TP-4.25: DELETE /t/{id}?force=true reaches the handler with force true (boolean)",
-    async () => {
-      routes.removeInputs.length = 0;
-      const id = "0190a0b0-1c2d-7e3f-8a4b-5c6d7e8f9a0d";
+describe("TP-4.25: HEAD isn't supported on /api/v1 (A-175)", () => {
+  // Over a real socket: Node's HTTP server drops a HEAD response's body (inject doesn't).
+  it("TP-4.25: HEAD /t/list?limit=5 is 404 with no body and the version header; the handler isn't called", async () => {
+    routes.listInputs.length = 0;
+    const address = await app.listen({ host: "127.0.0.1", port: 0 });
 
-      const res = await app.inject({ method: "DELETE", url: `/api/v1/t/${id}?force=true` });
+    const res = await new Promise<{ status: number; headers: IncomingHttpHeaders; body: string }>(
+      (resolve, reject) => {
+        const req = request(`${address}/api/v1/t/list?limit=5`, { method: "HEAD" }, (r) => {
+          let body = "";
+          r.setEncoding("utf8");
+          r.on("data", (chunk: string) => (body += chunk));
+          r.on("end", () => {
+            resolve({ status: r.statusCode ?? 0, headers: r.headers, body });
+          });
+        });
+        req.on("error", reject);
+        req.end();
+      },
+    );
 
-      expect(res.statusCode).toBe(200);
-      expect(routes.removeInputs).toEqual([{ id, force: true }]);
-    },
-  );
+    expect(res.status).toBe(404);
+    expect(res.body).toBe("");
+    expect(res.headers["x-budmon-api-version"]).toMatch(/^1\.\d+$/);
+    expect(routes.listInputs).toEqual([]);
+  });
 });
 
 describe("TP-4.25: a context without method gets no coercion (A-171)", () => {
