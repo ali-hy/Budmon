@@ -17,6 +17,13 @@ import { lazyKmsClient } from "./crypto/kmsClient.js";
 import { createSealedColumnRegistry, type SealedColumnRegistry } from "./crypto/sealedColumns.js";
 import { createDatabase } from "./db/client.js";
 import type { Database } from "./db/types.js";
+import { createFxService, type FxService } from "./fx/fxService.js";
+import {
+  createFawazahmed0,
+  createFixedProvider,
+  createOpenExchangeRates,
+  type FxProviders,
+} from "./fx/providers.js";
 import { noAuthHook, type AuthHook } from "./http/context.js";
 import type { ErrorReporter } from "./observability/errorReporter.js";
 import { createLogger, type Logger } from "./observability/logger.js";
@@ -67,6 +74,10 @@ export interface WorkerContainer extends BaseContainer {
   erasureHandler: ErasureHandler | null;
   /** A-26 (F-78b). */
   onGeneralStarted: (() => Promise<void>)[];
+  /** F-132 (S-9): every role. */
+  fx: FxService;
+  /** F-133 (S-9): general role only. */
+  fxProviders: FxProviders | null;
 }
 
 export interface ApiContainer extends BaseContainer {
@@ -83,6 +94,8 @@ export interface ApiContainer extends BaseContainer {
   cursors: CursorCodec;
   /** A-26: plain Fastify routes modules register (F-55 step 4b). */
   moduleRoutes: ((app: FastifyInstance) => void)[];
+  /** F-132 (S-9). */
+  fx: FxService;
 }
 
 function platformMetrics(): PlatformMetrics {
@@ -146,6 +159,49 @@ function closer(database: Database, bosses: readonly (PgBoss | null)[]): () => P
   };
 }
 
+function fxServiceFor(base: BaseCore, queue: JobQueue): FxService {
+  return createFxService({
+    database: base.database,
+    queue,
+    clock: base.clock,
+    logger: base.logger,
+    metrics: base.metrics,
+  });
+}
+
+/**
+ * F-133 from config.fx: live → Open Exchange Rates and fawazahmed0; fixed → fixed for both. No
+ * FX_PROVIDER → null (the fetch and backfill handlers then fail rather than guess a provider).
+ */
+function fxProvidersFor(config: Config): FxProviders | null {
+  const fx = config.fx;
+  if (fx === undefined) return null;
+  if (fx.provider === "fixed") {
+    const fixed = createFixedProvider();
+    return { primary: fixed, fallback: fixed };
+  }
+  const deps = { fetch: globalThis.fetch.bind(globalThis) };
+  return {
+    primary: createOpenExchangeRates({ baseUrl: fx.primaryBaseUrl, appId: fx.primaryAppId }, deps),
+    fallback: createFawazahmed0(
+      { baseUrl: fx.fallbackBaseUrl, mirrorUrl: fx.fallbackMirrorUrl },
+      deps,
+    ),
+  };
+}
+
+/** F-96 step 5 (A-266): every rates-added subscriber is the registry's own definition. */
+function assertFxSubscribersRegistered<C extends { fx: FxService; registry: JobRegistry }>(
+  c: C,
+): C {
+  for (const def of c.fx.subscribers()) {
+    if (c.registry.get(def.name) !== def) {
+      throw new TypeError(`fx subscriber not registered: ${def.name}`);
+    }
+  }
+  return c;
+}
+
 export function createApiContainer(
   config: Config,
   overrides: Partial<ApiContainer> = {},
@@ -162,11 +218,13 @@ export function createApiContainer(
   }
   const registry = overrides.registry ?? buildJobRegistry();
   const boss = overrides.boss ?? createPgBoss(config, "send-only", base.logger);
-  return {
+  const queue = overrides.queue ?? createJobQueue({ boss, registry });
+  return assertFxSubscribersRegistered({
     ...base,
     registry,
     boss,
-    queue: overrides.queue ?? createJobQueue({ boss, registry }),
+    queue,
+    fx: overrides.fx ?? fxServiceFor(base, queue),
     sealedColumns: overrides.sealedColumns ?? createSealedColumnRegistry(),
     close: closer(base.database, [boss]),
     authHook: overrides.authHook ?? noAuthHook,
@@ -197,7 +255,7 @@ export function createApiContainer(
         key: (cursorKey as NonNullable<typeof cursorKey>).reveal(),
         clock: base.clock,
       }),
-  };
+  });
 }
 
 /** The capture role's own key (config.capture), else the sealing key any role may hold. */
@@ -245,12 +303,20 @@ export function createWorkerContainer(
         : null;
   // Checked above: at least one role, so at least one instance.
   const boss = overrides.boss ?? ((queueBoss ?? captureBoss) as PgBoss);
-  return {
+  const queue = overrides.queue ?? createJobQueue({ boss, registry });
+  return assertFxSubscribersRegistered({
     ...base,
     roles,
     registry,
     boss,
-    queue: overrides.queue ?? createJobQueue({ boss, registry }),
+    queue,
+    fx: overrides.fx ?? fxServiceFor(base, queue),
+    fxProviders:
+      overrides.fxProviders !== undefined
+        ? overrides.fxProviders
+        : roles.has("general")
+          ? fxProvidersFor(config)
+          : null,
     sealedColumns: overrides.sealedColumns ?? createSealedColumnRegistry(),
     queueBoss,
     captureBoss,
@@ -269,5 +335,5 @@ export function createWorkerContainer(
           : null,
     onGeneralStarted: overrides.onGeneralStarted ?? [],
     close: closer(base.database, [boss, queueBoss, captureBoss]),
-  };
+  });
 }

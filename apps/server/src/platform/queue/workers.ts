@@ -1,7 +1,9 @@
 // F-77 createPgBoss, F-78 startWorkers and F-78b runGeneralStartHooks.
+import { Temporal, utcDateOf } from "@budmon/shared";
 import { PgBoss } from "pg-boss";
 import type { Config } from "../config/schema.js";
 import type { WorkerContainer } from "../container.js";
+import { latestDayOnOrBefore } from "../fx/fxRepo.js";
 import { describeFailure } from "../observability/describeFailure.js";
 import type { Logger } from "../observability/logger.js";
 import { startHeartbeat } from "./heartbeat.js";
@@ -79,6 +81,14 @@ function rolesBosses(c: WorkerContainer): { role: "general" | "capture"; boss: P
   return out;
 }
 
+/** Epoch seconds of `day` + 1 day at 00:00Z (F-42, A-265). */
+function fxDayEndEpochSeconds(day: string): number {
+  return (
+    Temporal.PlainDate.from(day).add({ days: 1 }).toZonedDateTime({ timeZone: "UTC" })
+      .epochMilliseconds / 1000
+  );
+}
+
 /** The service name (A-157): `worker-<role>` for one role, `worker` for several. */
 export function workerServiceName(roles: ReadonlySet<string>): string {
   return roles.size === 1 ? `worker-${[...roles][0] ?? "general"}` : "worker";
@@ -93,6 +103,7 @@ export async function startWorkers(
   let heartbeat: { stop(): void } | undefined;
   let depthTimer: NodeJS.Timeout | undefined;
   let depths: { value: number; labels: Record<string, string> }[] = [];
+  let fxLastDay: { value: number; labels: Record<string, string> }[] = [];
   const stop = async (): Promise<void> => {
     heartbeat?.stop();
     clearInterval(depthTimer);
@@ -133,6 +144,9 @@ export async function startWorkers(
           if (def.cron !== undefined) await boss.schedule(def.name, def.cron, {}, { tz: "UTC" });
         }
         c.metrics.observeQueueDepth(() => depths);
+        // A-265: the FX freshness gauge, when the FX jobs are registered.
+        const observeFx = c.registry.get("platform.fx-rates-fetch") !== undefined;
+        if (observeFx) c.metrics.observeFxLastDay(() => fxLastDay);
         const refresh = async (): Promise<void> => {
           try {
             depths = (await boss.getQueues()).map((q) => ({
@@ -141,6 +155,14 @@ export async function startWorkers(
             }));
           } catch {
             // The gauge keeps its last values.
+          }
+          if (!observeFx) return;
+          try {
+            const today = utcDateOf(c.clock.now()).toString();
+            const day = await latestDayOnOrBefore(c.database.handle, today);
+            fxLastDay = day === null ? [] : [{ value: fxDayEndEpochSeconds(day), labels: {} }];
+          } catch {
+            // The gauge keeps its last value.
           }
         };
         await refresh();
