@@ -160,8 +160,8 @@ export async function createApiServer(
   // 2. Headers, body handling (A-124), the coarse rate limit once S-5 provides it, cookies.
   await registerSecurityHeaders(app);
   registerBodyHandling(app, { reporter: c.reporter, logger: c.logger });
-  // F-65's coarse per-IP limit (S-5), only when the container has a rate limiter (A-124).
-  if ((c as Partial<ApiContainer>).rateLimiter !== undefined) await registerCoarseRateLimit(app);
+  // F-65's coarse per-IP limit (S-5), always on (A-192); it keeps its own in-memory store.
+  await registerCoarseRateLimit(app);
   await app.register(cookie);
 
   // 3. The request context.

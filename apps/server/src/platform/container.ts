@@ -101,7 +101,7 @@ export function createApiContainer(
   const base = createBase(config, "api", overrides);
   const rateLimitKey = config.api?.rateLimitKey;
   if (overrides.rateLimiter === undefined && rateLimitKey === undefined) {
-    throw new Error("an api container needs the api configuration");
+    throw new Error("api config required");
   }
   return {
     ...base,
