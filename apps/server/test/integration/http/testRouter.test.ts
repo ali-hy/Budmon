@@ -3,7 +3,7 @@
 // TP-4.25 (query coercion, A-148; bodies never coerced, A-165; no method, no coercion, A-171;
 // HEAD unsupported, A-175),
 // TP-4.26 (defined errors, A-149; declared message, A-166) and TP-5.2 to TP-5.4 (F-62,
-// moved to S-4, A-124; A-152), plus extra cases TP-4.39x.
+// moved to S-4, A-124; A-152), plus extra cases TP-4.41x.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { request, type IncomingHttpHeaders } from "node:http";
 import { CANARIES, scanForCanaries } from "@budmon/test-support";
@@ -136,7 +136,7 @@ describe("TP-4.11: the client version check through HTTP", () => {
     expect(res.status).toBe(200);
   });
 
-  it("TP-4.39x: a blocked request increments client_update_required_total", async () => {
+  it("TP-4.41x: a blocked request increments client_update_required_total", async () => {
     await injectJson(app, "GET", "/api/v1/test/ping", undefined, {
       "x-budmon-client": "android/2",
     });

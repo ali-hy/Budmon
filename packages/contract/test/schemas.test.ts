@@ -1,5 +1,5 @@
 // F-340 to F-345: the wire schemas, the API version, the error map, creates, lists and the meta
-// contract. Extra cases TP-4.31x (these functions have no LLD test case of their own beyond TP-4.2
+// contract. Extra cases TP-4.33x (these functions have no LLD test case of their own beyond TP-4.2
 // to TP-4.6), plus TP-4.27 and TP-4.28. IDs ending in "x" are test-architect additions, not LLD
 // test-plan IDs.
 import { describe, expect, it } from "vitest";
@@ -30,22 +30,22 @@ import { arr, generate, obj, resolve } from "./fixtures/generate.js";
 const ok = (schema: { safeParse(v: unknown): { success: boolean } }, v: unknown) =>
   schema.safeParse(v).success;
 
-describe("TP-4.31x: F-340 wire schemas", () => {
+describe("TP-4.33x: F-340 wire schemas", () => {
   it.each([[0], [-9007199254740991], [9007199254740991], [123]])(
-    "TP-4.31x: MoneyAmount accepts %d",
+    "TP-4.33x: MoneyAmount accepts %d",
     (v) => {
       expect(ok(MoneyAmount, v)).toBe(true);
     },
   );
 
   it.each([[1.5], [9007199254740992], [-9007199254740992], ["1"], [Number.NaN]])(
-    "TP-4.31x: MoneyAmount refuses %o",
+    "TP-4.33x: MoneyAmount refuses %o",
     (v) => {
       expect(ok(MoneyAmount, v)).toBe(false);
     },
   );
 
-  it("TP-4.31x: CurrencyCodeSchema and MoneySchema", () => {
+  it("TP-4.33x: CurrencyCodeSchema and MoneySchema", () => {
     expect(ok(CurrencyCodeSchema, "EGP")).toBe(true);
     expect(ok(CurrencyCodeSchema, "egp")).toBe(false);
     expect(ok(CurrencyCodeSchema, "EG")).toBe(false);
@@ -59,7 +59,7 @@ describe("TP-4.31x: F-340 wire schemas", () => {
     ["2026-02-29", false],
     ["2026-13-01", false],
     ["2026-1-01", false],
-  ])("TP-4.31x: PlainDateWire %s is valid: %s", (v, valid) => {
+  ])("TP-4.33x: PlainDateWire %s is valid: %s", (v, valid) => {
     expect(ok(PlainDateWire, v)).toBe(valid);
   });
 
@@ -67,26 +67,26 @@ describe("TP-4.31x: F-340 wire schemas", () => {
     ["2026-10-05T12:00:00.000Z", true],
     ["2026-10-05T12:00:00+02:00", false],
     ["2026-10-05", false],
-  ])("TP-4.31x: InstantWire %s is valid: %s", (v, valid) => {
+  ])("TP-4.33x: InstantWire %s is valid: %s", (v, valid) => {
     expect(ok(InstantWire, v)).toBe(valid);
   });
 
-  it("TP-4.31x: UuidSchema takes lower-case UUIDs", () => {
+  it("TP-4.33x: UuidSchema takes lower-case UUIDs", () => {
     expect(ok(UuidSchema, "0190a0b0-1c2d-7e3f-8a4b-5c6d7e8f9a0b")).toBe(true);
     expect(ok(UuidSchema, "not-a-uuid")).toBe(false);
   });
 });
 
-describe("TP-4.31x: F-341 API version", () => {
-  it("TP-4.31x: API_VERSION is 1.<API_MINOR>", () => {
+describe("TP-4.33x: F-341 API version", () => {
+  it("TP-4.33x: API_VERSION is 1.<API_MINOR>", () => {
     expect(API_MAJOR).toBe(1);
     expect(Number.isInteger(API_MINOR) && API_MINOR >= 0).toBe(true);
     expect(API_VERSION).toBe(`1.${String(API_MINOR)}`);
   });
 });
 
-describe("TP-4.31x: F-342 error map", () => {
-  it("TP-4.31x: PLATFORM_ERRORS has §6's keys and statuses", () => {
+describe("TP-4.33x: F-342 error map", () => {
+  it("TP-4.33x: PLATFORM_ERRORS has §6's keys and statuses", () => {
     const statuses = Object.fromEntries(
       Object.entries(PLATFORM_ERRORS as Record<string, { status?: number }>).map(([k, v]) => [
         k,
@@ -109,13 +109,13 @@ describe("TP-4.31x: F-342 error map", () => {
     });
   });
 
-  it("TP-4.31x: OutcomeSchema is not_applied or unknown", () => {
+  it("TP-4.33x: OutcomeSchema is not_applied or unknown", () => {
     expect(OutcomeSchema.options).toEqual(["not_applied", "unknown"]);
   });
 });
 
-describe("TP-4.31x: F-343 and F-344 creates and lists", () => {
-  it("TP-4.31x: CreatedResultSchema is { id: uuid, createdAt: instant }", () => {
+describe("TP-4.33x: F-343 and F-344 creates and lists", () => {
+  it("TP-4.33x: CreatedResultSchema is { id: uuid, createdAt: instant }", () => {
     expect(
       ok(CreatedResultSchema, {
         id: "0190a0b0-1c2d-7e3f-8a4b-5c6d7e8f9a0b",
@@ -125,7 +125,7 @@ describe("TP-4.31x: F-343 and F-344 creates and lists", () => {
     expect(ok(CreatedResultSchema, { id: "x", createdAt: "2026-10-05T12:00:00.000Z" })).toBe(false);
   });
 
-  it("TP-4.31x: listInput defaults limit to 50 and bounds it to 1..100; the cursor is at most 512 characters", () => {
+  it("TP-4.33x: listInput defaults limit to 50 and bounds it to 1..100; the cursor is at most 512 characters", () => {
     const input = listInput({});
 
     expect(input.parse({})).toEqual({ limit: 50 });
@@ -136,14 +136,14 @@ describe("TP-4.31x: F-343 and F-344 creates and lists", () => {
     expect(ok(CursorSchema, "abc")).toBe(true);
   });
 
-  it("TP-4.31x: listOutput is { items, nextCursor: string | null }", () => {
+  it("TP-4.33x: listOutput is { items, nextCursor: string | null }", () => {
     const output = listOutput(UuidSchema);
 
     expect(ok(output, { items: [], nextCursor: null })).toBe(true);
     expect(ok(output, { items: [] })).toBe(false);
   });
 
-  it("TP-4.31x: a create route is POST, 201, with a required uuid Idempotency-Key header and x-budmon-kind create", async () => {
+  it("TP-4.33x: a create route is POST, 201, with a required uuid Idempotency-Key header and x-budmon-kind create", async () => {
     const { createRoute } = await import("../src/index.js");
     const doc = await generate({ make: createRoute("/things") });
     const post = obj(doc, "paths", "/things", "post");
@@ -158,8 +158,8 @@ describe("TP-4.31x: F-343 and F-344 creates and lists", () => {
   });
 });
 
-describe("TP-4.31x: F-345 and F-346 the meta contract", () => {
-  it("TP-4.31x: the contract root has meta.clientConfig, GET /meta/client-config", async () => {
+describe("TP-4.33x: F-345 and F-346 the meta contract", () => {
+  it("TP-4.33x: the contract root has meta.clientConfig, GET /meta/client-config", async () => {
     const doc = await generate(contract);
 
     expect(Object.keys(contract)).toContain("meta");
@@ -199,7 +199,7 @@ describe("TP-4.27: UuidSchema follows isUuid (A-153)", () => {
     expect(typeof schema["pattern"]).toBe("string");
   });
 
-  it("TP-4.33x: a variant outside [89ab] is refused", () => {
+  it("TP-4.35x: a variant outside [89ab] is refused", () => {
     expect(ok(UuidSchema, "0190a0b0-1c2d-7e3f-ca4b-5c6d7e8f9a0b")).toBe(false);
   });
 });

@@ -1,5 +1,5 @@
 // F-348 checkContractRules. TP-4.5: one fixture document violating each of R1 to R6, and a clean
-// one, with R4's A-165 and A-173 cases; plus extra cases TP-4.29x (the real contract's emitted
+// one, with R4's A-165 and A-173 cases; plus extra cases TP-4.31x (the real contract's emitted
 // document is clean). IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 //
 // The clean document is generated (F-347's configuration) from a small contract built with F-343's
@@ -270,14 +270,14 @@ describe("TP-4.5: checkContractRules", () => {
   });
 });
 
-describe("TP-4.29x: checkContractRules, further cases (F-348)", () => {
-  it("TP-4.29x: the real contract's emitted document is clean", async () => {
+describe("TP-4.31x: checkContractRules, further cases (F-348)", () => {
+  it("TP-4.31x: the real contract's emitted document is clean", async () => {
     const doc: unknown = JSON.parse(await emitOpenapi());
 
     expect(check(doc)).toEqual([]);
   });
 
-  it("TP-4.29x: R4, a GET with a request body", async () => {
+  it("TP-4.31x: R4, a GET with a request body", async () => {
     const doc = await clean();
     obj(doc, "paths", "/things", "get")["requestBody"] = {
       content: { "application/json": { schema: { type: "object" } } },
@@ -286,7 +286,7 @@ describe("TP-4.29x: checkContractRules, further cases (F-348)", () => {
     expect(check(doc).map((v) => v.rule)).toContain("R4");
   });
 
-  it("TP-4.29x: R3, a number marked x-budmon-allow-number is allowed", async () => {
+  it("TP-4.31x: R3, a number marked x-budmon-allow-number is allowed", async () => {
     const doc = await clean();
     obj(listItemSchema(doc), "properties")["ratio"] = {
       type: "number",
@@ -296,7 +296,7 @@ describe("TP-4.29x: checkContractRules, further cases (F-348)", () => {
     expect(check(doc)).toEqual([]);
   });
 
-  it("TP-4.29x: R5, a create whose 201 response isn't CreatedResult", async () => {
+  it("TP-4.31x: R5, a create whose 201 response isn't CreatedResult", async () => {
     const doc = await clean();
     obj(doc, "paths", "/things", "post", "responses", "201", "content", "application/json")[
       "schema"
@@ -308,7 +308,7 @@ describe("TP-4.29x: checkContractRules, further cases (F-348)", () => {
     expect(check(doc).map((v) => v.rule)).toEqual(["R5"]);
   });
 
-  it("TP-4.29x: the contract builders never leave a .transform() (R1 on the emitted spike)", async () => {
+  it("TP-4.31x: the contract builders never leave a .transform() (R1 on the emitted spike)", async () => {
     const { spike } = await import("./fixtures/spikeContract.js");
 
     expect(check(await generate(spike))).toEqual([]);

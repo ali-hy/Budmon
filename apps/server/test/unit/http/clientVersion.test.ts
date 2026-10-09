@@ -1,5 +1,5 @@
 // F-56 parseClientHeader. TP-4.11's unit part (the middleware through HTTP is in
-// integration/http/clientVersion.test.ts), plus extra cases TP-4.36x.
+// integration/http/clientVersion.test.ts), plus extra cases TP-4.38x.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { describe, expect, it } from "vitest";
 import { parseClientHeader } from "../../../src/platform/http/clientVersion.js";
@@ -16,7 +16,7 @@ describe("TP-4.11: parseClientHeader", () => {
   });
 });
 
-describe("TP-4.36x: parseClientHeader, malformed values (F-56)", () => {
+describe("TP-4.38x: parseClientHeader, malformed values (F-56)", () => {
   it.each([
     ["android/"],
     ["android/x"],
@@ -26,11 +26,11 @@ describe("TP-4.36x: parseClientHeader, malformed values (F-56)", () => {
     ["web/1 "],
     ["web/-1"],
     [""],
-  ])("TP-4.36x: %j is other with no version", (header) => {
+  ])("TP-4.38x: %j is other with no version", (header) => {
     expect(parseClientHeader(header)).toEqual({ kind: "other", version: null });
   });
 
-  it("TP-4.36x: ten digits are accepted", () => {
+  it("TP-4.38x: ten digits are accepted", () => {
     expect(parseClientHeader("web/1234567890")).toEqual({ kind: "web", version: 1234567890 });
   });
 });

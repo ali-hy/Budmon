@@ -90,6 +90,7 @@ describe("TP-3.27x: createMetrics, further cases (F-41)", () => {
         "drop_kind",
         "limiter",
         "provider",
+        "reason", // A-178
       ].sort(),
     );
   });

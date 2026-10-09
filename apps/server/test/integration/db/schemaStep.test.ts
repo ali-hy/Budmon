@@ -1,5 +1,6 @@
 // F-19 runSchemaStep, S-2 shape (A-49, A-50), on a fresh container. TP-2.15, plus extra cases
-// TP-2.55x. S-6 extends TP-2.15 with the queue fields.
+// TP-2.55x. S-6 extends TP-2.15 with the queue fields. TP-2.15 (d) and (e) (A-179) run the built
+// migrate process for its exit code, in test/integration/main/apiBundle.test.ts.
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { bootstrapCluster } from "../../../src/platform/db/clusterBootstrap.js";

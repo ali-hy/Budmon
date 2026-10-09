@@ -1,7 +1,7 @@
 // F-40 AllowlistSpanExporter. TP-3.7 and TP-3.16 (links, A-114), plus extra cases TP-3.26x
 // (classification by prefix, the allowlist itself, status messages, delegation) and TP-3.33x (link
 // attributes). IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
-import { SpanStatusCode, type Attributes } from "@opentelemetry/api";
+import { SpanKind, SpanStatusCode, type Attributes } from "@opentelemetry/api";
 import {
   BasicTracerProvider,
   InMemorySpanExporter,
@@ -13,16 +13,17 @@ import { describe, expect, it, vi } from "vitest";
 import {
   AllowlistSpanExporter,
   EXPECTED_DROPPED_SPAN_ATTRIBUTES,
+  SPAN_ATTRIBUTE_ALLOWLIST,
 } from "../../../src/platform/observability/otel.js";
 import { RecordingSpanExporter } from "../../support/telemetry.js";
 
-/** F-40's allowlist. */
+/** F-40's allowlist (A-176: url.path out, budmon.route in; A-177: server.* on non-SERVER spans). */
 const ALLOWLIST: ReadonlySet<string> = new Set([
   "http.request.method",
   "http.response.status_code",
   "http.route",
+  "budmon.route",
   "url.scheme",
-  "url.path",
   "server.address",
   "server.port",
   "network.protocol.version",
@@ -42,6 +43,7 @@ const ALLOWLIST: ReadonlySet<string> = new Set([
 
 interface SpanSpec {
   attributes: Attributes;
+  kind?: SpanKind;
   links?: { traceId: string; spanId: string; attributes: Attributes }[];
   events?: { name: string; attributes?: Attributes }[];
   exception?: Error;
@@ -60,6 +62,7 @@ function makeSpans(
   for (const spec of specs) {
     const span = tracer.startSpan(name, {
       attributes: spec.attributes,
+      ...(spec.kind === undefined ? {} : { kind: spec.kind }),
       links: (spec.links ?? []).map((l) => ({
         context: { traceId: l.traceId, spanId: l.spanId, traceFlags: 1 },
         attributes: l.attributes,
@@ -136,13 +139,13 @@ describe("TP-3.7: AllowlistSpanExporter", () => {
 
 describe("TP-3.26x: AllowlistSpanExporter, further cases (F-40)", () => {
   it("TP-3.26x: every allowlisted attribute is kept", () => {
-    const attributes = Object.fromEntries([...ALLOWLIST].map((key) => [key, "v"]));
+    // budmon.route must pass F-30's route rule (A-176), so it gets a template.
+    const attributes = Object.fromEntries(
+      [...ALLOWLIST].map((key) => [key, key === "budmon.route" ? "/a/{id}" : "v"]),
+    );
     const { inner, sums } = exportThrough(makeSpans([{ attributes }]));
 
-    const exported = inner.spans[0]?.attributes ?? {};
-    // url.path goes through F-37's path rule, so only its presence and type are checked here.
-    expect(typeof exported["url.path"]).toBe("string");
-    expect({ ...exported, "url.path": "v" }).toEqual(attributes);
+    expect(inner.spans[0]?.attributes).toEqual(attributes);
     expect(sums).toEqual({ expected: 0, unexpected: 0 });
   });
 
@@ -209,6 +212,7 @@ describe("TP-3.26x: AllowlistSpanExporter, further cases (F-40)", () => {
         "url.full",
         "url.query",
         "url.original",
+        "url.path", // A-176
         "user_agent.original",
         "client.address",
         "client.port",
@@ -399,5 +403,84 @@ describe("TP-3.7: span names from instrumentations (A-164)", () => {
 
     expect(inner.spans[0]?.name).toBe("request");
     expect(sums).toEqual({ expected: 0, unexpected: 0 });
+  });
+});
+
+describe("TP-3.7: no raw path or client host in traces (A-176, A-177)", () => {
+  const CANARY_PATH = `/api/v1/${CANARIES.payee}/${CANARIES.amountMinor}/${CANARIES.email}`;
+  const CANARY_HOST = `${CANARIES.payee}.example.invalid`;
+
+  it("TP-3.7: a SERVER span exports none of url.path, server.address, server.port (3 expected drops)", () => {
+    const { inner, sums } = exportThrough(
+      makeSpans([
+        {
+          kind: SpanKind.SERVER,
+          attributes: {
+            "http.route": "/api/v1/*",
+            "url.path": CANARY_PATH,
+            "server.address": CANARY_HOST,
+            "server.port": 987654321,
+          },
+        },
+      ]),
+    );
+
+    expect(inner.spans[0]?.attributes).toEqual({ "http.route": "/api/v1/*" });
+    expect(sums).toEqual({ expected: 3, unexpected: 0 });
+    const text = JSON.stringify(inner.spans.map((s) => s.attributes));
+    expect(scanForCanaries([{ name: "spans", text }], CANARIES)).toEqual([]);
+  });
+
+  it("TP-3.7: a CLIENT span keeps server.address and server.port", () => {
+    const { inner, sums } = exportThrough(
+      makeSpans([
+        {
+          kind: SpanKind.CLIENT,
+          attributes: { "server.address": "oauth2.googleapis.com", "server.port": 443 },
+        },
+      ]),
+    );
+
+    expect(inner.spans[0]?.attributes).toEqual({
+      "server.address": "oauth2.googleapis.com",
+      "server.port": 443,
+    });
+    expect(sums).toEqual({ expected: 0, unexpected: 0 });
+  });
+
+  it.each([
+    ["CLIENT", SpanKind.CLIENT],
+    ["INTERNAL", SpanKind.INTERNAL],
+  ])("TP-3.7: url.path is dropped from a %s span too (expected)", (_label, kind) => {
+    const { inner, sums } = exportThrough(
+      makeSpans([{ kind, attributes: { "url.path": CANARY_PATH } }]),
+    );
+
+    expect(inner.spans[0]?.attributes).toEqual({});
+    expect(sums).toEqual({ expected: 1, unexpected: 0 });
+  });
+
+  it("TP-3.7: budmon.route /payees/{id} is kept, with no drop", () => {
+    const { inner, sums } = exportThrough(
+      makeSpans([{ attributes: { "budmon.route": "/payees/{id}" } }]),
+    );
+
+    expect(inner.spans[0]?.attributes).toEqual({ "budmon.route": "/payees/{id}" });
+    expect(sums).toEqual({ expected: 0, unexpected: 0 });
+  });
+
+  it("TP-3.7: budmon.route with a real id is dropped, one unexpected", () => {
+    const { inner, sums } = exportThrough(
+      makeSpans([
+        { attributes: { "budmon.route": "/payees/0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b" } },
+      ]),
+    );
+
+    expect(inner.spans[0]?.attributes).toEqual({});
+    expect(sums).toEqual({ expected: 0, unexpected: 1 });
+  });
+
+  it("TP-3.7: the test's allowlist is F-40's", () => {
+    expect([...SPAN_ATTRIBUTE_ALLOWLIST].sort()).toEqual([...ALLOWLIST].sort());
   });
 });

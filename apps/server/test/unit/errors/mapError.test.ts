@@ -1,4 +1,4 @@
-// F-52 mapError. TP-4.9, plus extra cases TP-4.35x (every zod code's fixed message, the other
+// F-52 mapError. TP-4.9, plus extra cases TP-4.37x (every zod code's fixed message, the other
 // oRPC built-ins, every database-unavailable code). IDs ending in "x" are test-architect additions,
 // not LLD test-plan IDs.
 import { ValidationError, validateORPCError, type ErrorMap } from "@orpc/contract";
@@ -180,7 +180,7 @@ describe("TP-4.9: contract-defined oRPC errors (A-149)", () => {
   });
 });
 
-describe("TP-4.35x: mapError, further cases (F-52)", () => {
+describe("TP-4.37x: mapError, further cases (F-52)", () => {
   it.each([
     ["invalid_type", "Invalid type"],
     ["too_small", "Too small"],
@@ -190,7 +190,7 @@ describe("TP-4.35x: mapError, further cases (F-52)", () => {
     ["unrecognized_keys", "Unknown field"],
     ["custom", "Invalid value"],
     ["invalid_union", "Invalid value"],
-  ])("TP-4.35x: zod code %s gets the fixed message %j", (code, message) => {
+  ])("TP-4.37x: zod code %s gets the fixed message %j", (code, message) => {
     const { error } = mapError(
       inputValidationError([{ code, path: ["a", 0], message: CANARIES.message }]),
       NOT_COMMITTED,
@@ -202,7 +202,7 @@ describe("TP-4.35x: mapError, further cases (F-52)", () => {
   });
 
   it.each([["METHOD_NOT_SUPPORTED"], ["NOT_ACCEPTABLE"]])(
-    "TP-4.35x: oRPC %s is NOT_FOUND 404",
+    "TP-4.37x: oRPC %s is NOT_FOUND 404",
     (code) => {
       const { error, report } = mapError(new ORPCError(code), NOT_COMMITTED);
 
@@ -218,7 +218,7 @@ describe("TP-4.35x: mapError, further cases (F-52)", () => {
     ["ECONNREFUSED"],
     ["ETIMEDOUT"],
     ["ECONNRESET"],
-  ])("TP-4.35x: %s is SERVICE_UNAVAILABLE, with outcome unknown once committed", (code) => {
+  ])("TP-4.37x: %s is SERVICE_UNAVAILABLE, with outcome unknown once committed", (code) => {
     const { error } = mapError(pgError(code), COMMITTED);
 
     expect([error.code, error.status, error.data]).toEqual([
@@ -228,11 +228,11 @@ describe("TP-4.35x: mapError, further cases (F-52)", () => {
     ]);
   });
 
-  it("TP-4.35x: another SQLSTATE (23505) is INTERNAL", () => {
+  it("TP-4.37x: another SQLSTATE (23505) is INTERNAL", () => {
     expect(mapError(pgError("23505"), NOT_COMMITTED).error.code).toBe("INTERNAL");
   });
 
-  it("TP-4.35x: a RateLimitedError is RATE_LIMITED 429 with retryAfterSeconds, not reported", () => {
+  it("TP-4.37x: a RateLimitedError is RATE_LIMITED 429 with retryAfterSeconds, not reported", () => {
     const { error, report } = mapError(new RateLimitedError(30), NOT_COMMITTED);
 
     expect(envelope(error)).toEqual({
@@ -245,7 +245,7 @@ describe("TP-4.35x: mapError, further cases (F-52)", () => {
     expect(report).toBe(false);
   });
 
-  it("TP-4.35x: a thrown non-Error is INTERNAL", () => {
+  it("TP-4.37x: a thrown non-Error is INTERNAL", () => {
     expect(mapError(CANARIES.message, NOT_COMMITTED).error.code).toBe("INTERNAL");
   });
 });

@@ -8,10 +8,11 @@
 import { spawn, spawnSync } from "node:child_process";
 import { createServer as createHttpServer, type Server } from "node:http";
 import { cpSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { createConnection, createServer } from "node:net";
+import { createConnection, createServer, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { CANARIES, scanForCanaries } from "@budmon/test-support";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { bootstrapCluster } from "../../../src/platform/db/clusterBootstrap.js";
 import { runSchemaStep } from "../../../src/platform/db/schemaStep.js";
@@ -19,6 +20,7 @@ import { devApi } from "../../support/configEnv.js";
 import { connectDatabase, schemaStepInput } from "../../support/platform.js";
 import {
   TEST_ROLE_PASSWORDS,
+  query,
   startFreshPostgres,
   type FreshPostgres,
 } from "../../support/postgres.js";
@@ -377,6 +379,137 @@ describe("TP-2.13: node dist/main/migrate.js with an invalid journal (A-150, A-1
   );
 });
 
+// ---- TP-2.15 (d), (e): migrate on a fresh database (A-179) ----
+
+describe("TP-2.15: node dist/main/migrate.js on a fresh database (A-179)", () => {
+  const PASSWORD = "fresh-migrator-Qp7pass";
+  const FRESH_DATABASE = "budmon_fresh";
+  const started: FreshPostgres[] = [];
+  const dirs: string[] = [];
+
+  afterAll(async () => {
+    for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
+    for (const pg of started) await pg.stop();
+  });
+
+  /** A fresh cluster, bootstrapped (F-15) and nothing else. */
+  async function freshCluster(): Promise<FreshPostgres> {
+    const pg = await startFreshPostgres();
+    started.push(pg);
+    const client = await pg.superuserClient();
+    try {
+      await bootstrapCluster(client, {
+        databaseName: FRESH_DATABASE,
+        migrator: { password: PASSWORD },
+      });
+    } finally {
+      await client.end();
+    }
+    return pg;
+  }
+
+  /** The built bundle in a temporary directory whose drizzle/ holds `files`, run against pg. */
+  function migrateBundle(pg: FreshPostgres, files: Record<string, string>) {
+    const dir = mkdtempSync(path.join(tmpdir(), "budmon-migrate-fresh-"));
+    dirs.push(dir);
+    writeFileSync(path.join(dir, "package.json"), '{"name":"@budmon/server","type":"module"}\n');
+    cpSync(path.join(SERVER_DIR, "dist"), path.join(dir, "dist"), { recursive: true });
+    symlinkSync(path.join(SERVER_DIR, "node_modules"), path.join(dir, "node_modules"));
+    mkdirSync(path.join(dir, "drizzle", "meta"), { recursive: true });
+    for (const [name, content] of Object.entries(files)) {
+      writeFileSync(path.join(dir, "drizzle", name), content);
+    }
+    const passwordFile = path.join(dir, "password");
+    const rolesFile = path.join(dir, "roles.json");
+    writeFileSync(passwordFile, `${PASSWORD}\n`);
+    writeFileSync(
+      rolesFile,
+      JSON.stringify(
+        Object.fromEntries(
+          ["budmon_app", "budmon_capture", "budmon_queue", "budmon_monitor", "budmon_migrator"].map(
+            (role) => [role, { password: role === "budmon_migrator" ? PASSWORD : `pw-${role}` }],
+          ),
+        ),
+      ),
+    );
+    return spawnSync(process.execPath, ["dist/main/migrate.js"], {
+      cwd: dir,
+      env: {
+        PATH: process.env["PATH"] ?? "",
+        APP_ENV: "development",
+        DB_HOST: pg.host,
+        DB_PORT: String(pg.port),
+        DB_NAME: FRESH_DATABASE,
+        DB_USER: "budmon_migrator",
+        DB_PASSWORD_FILE: passwordFile,
+        ROLE_SECRETS_FILE: rolesFile,
+      },
+      encoding: "utf8",
+      timeout: 60_000,
+    });
+  }
+
+  function jsonLines(output: string): Record<string, unknown>[] {
+    return output.split("\n").flatMap((line): Record<string, unknown>[] => {
+      try {
+        const parsed: unknown = JSON.parse(line);
+        return isJsonObject(parsed) ? [parsed] : [];
+      } catch {
+        return [];
+      }
+    });
+  }
+
+  it.each([
+    ["no journal file", {}],
+    ["a journal with entries: []", { "meta/_journal.json": JSON.stringify({ entries: [] }) }],
+  ])(
+    "TP-2.15 (d): %s exits 0, reports zeros after step 2, and schema drizzle exists",
+    async (_label, files: Record<string, string>) => {
+      const pg = await freshCluster();
+
+      const result = migrateBundle(pg, files);
+
+      expect(result.status, `${result.stdout}${result.stderr}`).toBe(0);
+      const [reportLine] = jsonLines(result.stdout);
+      expect(reportLine).toMatchObject({ migrationsApplied: 0, currenciesUpserted: 0 });
+      const [drizzle] = await query<{ n: number }>(
+        pg.superuserUrl(FRESH_DATABASE),
+        "SELECT count(*)::int AS n FROM pg_namespace WHERE nspname = 'drizzle'",
+      );
+      expect(drizzle).toEqual({ n: 1 });
+    },
+    180_000,
+  );
+
+  it("TP-2.15 (e): a one-entry journal whose migration doesn't create currencies exits 3 with table_missing (currencies)", async () => {
+    const pg = await freshCluster();
+
+    const result = migrateBundle(pg, {
+      "meta/_journal.json": JSON.stringify({
+        version: "7",
+        dialect: "postgresql",
+        entries: [
+          { idx: 0, version: "7", when: 1760000000000, tag: "0000_first", breakpoints: true },
+        ],
+      }),
+      // Creates nothing, so the first listed table checked is absent (no table_without_grants).
+      "0000_first.sql": "SELECT 1;\n",
+    });
+    const output = `${result.stdout}${result.stderr}`;
+
+    expect(result.status, output).toBe(3);
+    const failures = jsonLines(result.stderr).filter((l) => l["event"] === "startup_failed");
+    expect(failures).toHaveLength(1);
+    expect(failures[0]).toMatchObject({
+      errorClass: "SchemaStepError",
+      errorCode: "table_missing",
+      reason: "currencies",
+    });
+    expect(output).not.toContain("42P01");
+  }, 180_000);
+});
+
 // ---- TP-2.13's api half (A-150): the api refuses to start on an invalid journal ----
 
 describe("TP-2.13: node --import ./dist/main/instrument.js dist/main/api.js with an invalid journal (A-150)", () => {
@@ -584,6 +717,22 @@ function unexpectedDrops(requests: readonly OtlpRequest[]): number[] {
 
 const SPAN_KIND_SERVER = 2;
 
+/** Writes `text` to 127.0.0.1:port over a raw socket; resolves with what came back once closed. */
+function rawHttp(port: number, text: string): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    let received = "";
+    const socket = createConnection({ host: "127.0.0.1", port }, () => {
+      socket.write(text);
+    });
+    socket.setEncoding("utf8");
+    socket.on("data", (chunk: string) => (received += chunk));
+    socket.on("end", () => {
+      resolve(received);
+    });
+    socket.on("error", reject);
+  });
+}
+
 describe("TP-4.24: the built api exports spans through the production start command (A-147)", () => {
   let recorder: Server;
   let recorderPort: number;
@@ -657,9 +806,10 @@ describe("TP-4.24: the built api exports spans through the production start comm
     };
   }
 
-  /** Starts the built api with `args`, makes one request, stops it with SIGTERM. */
+  /** Starts the built api with `args`, makes one request (after `before`), stops it with SIGTERM. */
   async function runApi(
     args: readonly string[],
+    before?: (port: number) => Promise<void>,
   ): Promise<{ status: number; code: number | null; output: string }> {
     const port = await freePort();
     const child = spawn(process.execPath, args, {
@@ -683,6 +833,7 @@ describe("TP-4.24: the built api exports spans through the production start comm
         }
         await new Promise((resolve) => setTimeout(resolve, 100));
       }
+      if (before !== undefined) await before(port);
       const res = await fetch(`http://127.0.0.1:${String(port)}/api/v1/meta/client-config`);
       await res.text();
       child.kill("SIGTERM");
@@ -720,6 +871,125 @@ describe("TP-4.24: the built api exports spans through the production start comm
     ).toEqual([]);
     expect(unexpectedDrops(received).filter((v) => v > 0)).toEqual([]);
     expect(received.some((r) => r.path.endsWith("/v1/metrics"))).toBe(true);
+  }, 90_000);
+
+  it("TP-4.24: canaries in the path, Host and X-Forwarded-Host reach no span or metric; no url.path; SERVER spans have no server.address/port; client-config has budmon.route (A-176, A-177)", async () => {
+    received.length = 0;
+    let canaryResponse = "";
+
+    const run = await runApi(START_COMMAND, async (port) => {
+      canaryResponse = await rawHttp(
+        port,
+        [
+          `GET /api/v1/${CANARIES.payee}/${CANARIES.amountMinor}/canary.7f3a%40example.invalid HTTP/1.1`,
+          `Host: ${CANARIES.payee}.example.invalid:${CANARIES.amountMinor}`,
+          "X-Forwarded-Host: canary.7f3a.example.invalid",
+          "Connection: close",
+          "",
+          "",
+        ].join("\r\n"),
+      );
+    });
+
+    expect(run.status, run.output).toBe(200);
+    expect(canaryResponse).toMatch(/^HTTP\/1\.1 404/);
+    const all = exportedSpans(received);
+    const seen = JSON.stringify(all.map((s) => [s.scope, s.kind, s.name, s.attributes]));
+    // Both requests were traced: the canary one and client-config.
+    expect(all.filter((s) => s.kind === SPAN_KIND_SERVER).length, seen).toBeGreaterThanOrEqual(2);
+    expect(
+      scanForCanaries(
+        received.map((r, i) => ({ name: `${r.path}#${String(i)}`, text: JSON.stringify(r.body) })),
+        CANARIES,
+      ),
+    ).toEqual([]);
+    expect(JSON.stringify(received.map((r) => r.body))).not.toContain("canary.7f3a.example");
+    for (const span of all) expect(Object.keys(span.attributes), seen).not.toContain("url.path");
+    for (const span of all.filter((s) => s.kind === SPAN_KIND_SERVER)) {
+      expect(Object.keys(span.attributes), seen).not.toContain("server.address");
+      expect(Object.keys(span.attributes), seen).not.toContain("server.port");
+    }
+    expect(
+      all.filter((s) => s.attributes["budmon.route"] === "/meta/client-config").length,
+      seen,
+    ).toBeGreaterThanOrEqual(1);
+  }, 90_000);
+
+  // TP-4.29 (A-180). The bundle has no test procedure, so the stalled request is one whose body
+  // never finishes: it stays in flight, and app.close() can't complete on its own.
+  it("TP-4.29: with an OTLP endpoint that never answers and a stalled request, SIGTERM exits 0 within 8.5 s", async () => {
+    const sockets: Socket[] = [];
+    const blackHole = createServer((socket) => {
+      sockets.push(socket); // accepted, never answered
+    });
+    await new Promise<void>((resolve) => blackHole.listen(0, "127.0.0.1", resolve));
+    const address = blackHole.address();
+    const blackHolePort = typeof address === "object" && address !== null ? address.port : 0;
+    const port = await freePort();
+    const child = spawn(process.execPath, START_COMMAND, {
+      cwd: SERVER_DIR,
+      env: {
+        ...apiEnv(port),
+        OTEL_EXPORTER_OTLP_ENDPOINT: `http://localhost:${String(blackHolePort)}`,
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let output = "";
+    child.stdout.on("data", (c: Buffer) => (output += c.toString()));
+    child.stderr.on("data", (c: Buffer) => (output += c.toString()));
+    const exited = new Promise<{ code: number | null; at: number }>((resolve) => {
+      child.on("exit", (code) => {
+        resolve({ code, at: Date.now() });
+      });
+    });
+    let stalled: Socket | undefined;
+    try {
+      const deadline = Date.now() + 30_000;
+      while (!(await portAcceptsConnections(port))) {
+        if (Date.now() > deadline || child.exitCode !== null) {
+          throw new Error(`the api didn't start:\n${output}`);
+        }
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      // Telemetry to flush: one completed request.
+      await (await fetch(`http://127.0.0.1:${String(port)}/api/v1/meta/client-config`)).text();
+      const socket = await new Promise<Socket>((resolve, reject) => {
+        const s = createConnection({ host: "127.0.0.1", port }, () => {
+          resolve(s);
+        });
+        s.once("error", reject);
+      });
+      stalled = socket;
+      socket.write(
+        [
+          "POST /api/v1/test/stalled HTTP/1.1",
+          "Host: 127.0.0.1",
+          "Content-Type: application/json",
+          "Content-Length: 1000",
+          "",
+          '{"a":',
+        ].join("\r\n"),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 500));
+
+      const sentAt = Date.now();
+      child.kill("SIGTERM");
+      const { code, at } = await exited;
+
+      expect(code, output).toBe(0);
+      expect(at - sentAt, output).toBeLessThan(8_500);
+      // The exporter did reach the endpoint that never answers.
+      expect(sockets.length).toBeGreaterThan(0);
+    } finally {
+      if (child.exitCode === null) child.kill("SIGKILL");
+      stalled?.destroy();
+      for (const socket of sockets) socket.destroy();
+      await new Promise<void>((resolve) => {
+        blackHole.close(() => {
+          resolve();
+        });
+      });
+    }
   }, 90_000);
 
   it("TP-4.24: without --import, no server span arrives (guards the start command)", async () => {

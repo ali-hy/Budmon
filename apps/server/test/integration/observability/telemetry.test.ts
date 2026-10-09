@@ -36,6 +36,7 @@ const METRIC_ATTRIBUTE_ALLOWLIST = new Set([
   "drop_kind",
   "limiter",
   "provider",
+  "reason",
   "http.request.method",
   "http.response.status_code",
   "http.route",
@@ -82,6 +83,25 @@ async function close(l: Listening): Promise<void> {
   });
 }
 
+const CANARY_HOST = `${CANARIES.payee}.example.invalid:9876`;
+
+/** Writes `text` to 127.0.0.1:port and resolves once the server closes the connection. */
+async function rawRequest(port: number, text: string): Promise<string> {
+  const net = await import("node:net");
+  return new Promise<string>((resolve, reject) => {
+    let received = "";
+    const socket = net.connect(port, "127.0.0.1", () => {
+      socket.write(text);
+    });
+    socket.setEncoding("utf8");
+    socket.on("data", (chunk: string) => (received += chunk));
+    socket.on("end", () => {
+      resolve(received);
+    });
+    socket.on("error", reject);
+  });
+}
+
 let telemetry: InMemoryTelemetry;
 let sentinel: Listening;
 const drops: { signal: string; kind: string; n: number }[] = [];
@@ -120,6 +140,13 @@ beforeAll(async () => {
   // (c) an outgoing client request whose URL carries a canary in its query.
   await (await fetch(`http://localhost:${String(app.port)}/a?token=${CANARIES.token}`)).text();
 
+  // (A-177) an incoming request whose Host is a canary, sent over a raw socket so no client
+  // instrumentation sees it.
+  await rawRequest(
+    app.port,
+    `GET /y HTTP/1.1\r\nHost: ${CANARY_HOST}\r\nConnection: close\r\n\r\n`,
+  );
+
   await close(app);
   await started.shutdown();
   vi.unstubAllEnvs();
@@ -148,8 +175,8 @@ describe("TP-3.11: startTelemetry", () => {
     const text = JSON.stringify(spans.map((s) => ({ name: s.name, attributes: s.attributes })));
 
     expect(text).not.toContain("/health");
-    // Three requests reached the server: /health/ready (ignored), /x and /a (c).
-    expect(spans).toHaveLength(2);
+    // Four requests reached the server: /health/ready (ignored), /x, /a (c) and /y (A-177).
+    expect(spans).toHaveLength(3);
   });
 
   it("TP-3.11 (c): client-duration metric points carry only allowlisted attributes, never url.full or the canary", () => {
@@ -170,6 +197,37 @@ describe("TP-3.11: startTelemetry", () => {
     expect(scanForCanaries([{ name: "metrics", text: telemetry.metricsText() }], CANARIES)).toEqual(
       [],
     );
+  });
+});
+
+describe("TP-3.11: http.server.* metrics carry no client host (A-177, A-181)", () => {
+  it("TP-3.11: http.server.request.duration has no server.address or server.port, and no canary", () => {
+    const metrics = telemetry
+      .resourceMetrics()
+      .flatMap((rm) => rm.scopeMetrics.flatMap((sm) => sm.metrics));
+    const serverDurations = metrics.filter(
+      (m) => m.descriptor.name === "http.server.request.duration",
+    );
+
+    // A-181: no View; the pinned instrumentation must not add the client's Host.
+    expect(serverDurations.length).toBeGreaterThan(0);
+    for (const metric of serverDurations) {
+      expect(metric.dataPoints.length).toBeGreaterThan(0);
+      for (const point of metric.dataPoints) {
+        expect(Object.keys(point.attributes)).not.toContain("server.address");
+        expect(Object.keys(point.attributes)).not.toContain("server.port");
+      }
+    }
+    const text = JSON.stringify(serverDurations.map((m) => m.dataPoints));
+    expect(scanForCanaries([{ name: "server metrics", text }], CANARIES)).toEqual([]);
+  });
+
+  it("TP-3.11: no exported span carries the canary Host", () => {
+    const text = JSON.stringify(
+      telemetry.traceExporter.spans.map((s) => ({ name: s.name, attributes: s.attributes })),
+    );
+
+    expect(scanForCanaries([{ name: "spans", text }], CANARIES)).toEqual([]);
   });
 });
 

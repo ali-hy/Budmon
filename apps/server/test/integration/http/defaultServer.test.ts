@@ -2,9 +2,13 @@
 // TP-4.14, TP-4.15, TP-4.17 and TP-5.1 (moved to S-4, A-124).
 import { API_VERSION } from "@budmon/contract";
 import { CANARIES, scanForCanaries } from "@budmon/test-support";
-import type { FastifyInstance } from "fastify";
+import Fastify, { type FastifyInstance } from "fastify";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createApiServer } from "../../../src/platform/http/server.js";
+import {
+  SECURITY_HEADERS,
+  registerSecurityHeaders,
+} from "../../../src/platform/security/headers.js";
 import {
   buildApiContainer,
   injectJson,
@@ -158,5 +162,45 @@ describe("TP-5.1: security headers (F-61)", () => {
         "x-xss-protection",
       ].sort(),
     );
+  });
+});
+
+describe("TP-5.1: SECURITY_HEADERS matches helmet's output (A-182)", () => {
+  /** Fastify's own response headers: everything else on the bare app comes from helmet. */
+  const FASTIFY_HEADERS = new Set([
+    "content-type",
+    "content-length",
+    "date",
+    "connection",
+    "keep-alive",
+  ]);
+
+  it("TP-5.1: helmet alone on a bare app sends exactly SECURITY_HEADERS, names and values", async () => {
+    const bare = Fastify();
+    await registerSecurityHeaders(bare);
+    bare.get("/x", () => ({ ok: true }));
+    await bare.ready();
+    try {
+      const res = await bare.inject({ method: "GET", url: "/x" });
+      const helmet = Object.fromEntries(
+        Object.entries(res.headers)
+          .filter(([name]) => !FASTIFY_HEADERS.has(name))
+          .map(([name, value]) => [name, String(value)]),
+      );
+
+      expect(res.statusCode).toBe(200);
+      expect(helmet).toEqual(SECURITY_HEADERS);
+    } finally {
+      await bare.close();
+    }
+  });
+
+  it("TP-5.1: the API's normal response carries every SECURITY_HEADERS entry with the same value", async () => {
+    const res = await injectJson(app, "GET", "/api/v1/meta/client-config");
+
+    const sent = Object.fromEntries(
+      Object.keys(SECURITY_HEADERS).map((name) => [name, String(res.headers[name])]),
+    );
+    expect(sent).toEqual(SECURITY_HEADERS);
   });
 });
