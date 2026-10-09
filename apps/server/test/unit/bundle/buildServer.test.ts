@@ -8,7 +8,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { buildServer } from "../../../scripts/build.js";
 
 const SERVER_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
-const ENTRY_NAMES = ["api", "worker", "migrate"];
+// A-147: F-89's telemetry preload is bundled too (dist/main/instrument.js).
+const ENTRY_NAMES = ["api", "worker", "migrate", "instrument"];
 // A-83: devMigrate is development-only too.
 const DEVELOPMENT_ONLY = ["dev", "dbReset", "devMigrate"];
 
