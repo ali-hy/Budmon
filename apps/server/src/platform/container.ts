@@ -22,6 +22,8 @@ import { buildJobRegistry } from "./queue/appRegistry.js";
 import { createJobQueue, type JobQueue } from "./queue/jobQueue.js";
 import type { JobRegistry } from "./queue/registry.js";
 import { createPgBoss, workerServiceName } from "./queue/workers.js";
+import { createIdempotency, type Idempotency } from "./idempotency/idempotency.js";
+import { createCursorCodec, type CursorCodec } from "./pagination/cursor.js";
 import { createRateLimiter, type RateLimiter } from "./security/rateLimiter.js";
 
 export interface BaseContainer {
@@ -59,6 +61,10 @@ export interface ApiContainer extends BaseContainer {
   authHook: AuthHook;
   /** F-63 (S-5): shared rate limits; F-55 also registers the coarse per-IP limit with it. */
   rateLimiter: RateLimiter;
+  /** F-100 (S-7). */
+  idempotency: Idempotency;
+  /** F-103 (S-7), keyed by Config.api.cursorKey. */
+  cursors: CursorCodec;
   /** A-26: plain Fastify routes modules register (F-55 step 4b). */
   moduleRoutes: ((app: FastifyInstance) => void)[];
 }
@@ -130,7 +136,11 @@ export function createApiContainer(
 ): ApiContainer {
   const base = createCore(config, "api", overrides);
   const rateLimitKey = config.api?.rateLimitKey;
-  if (overrides.rateLimiter === undefined && rateLimitKey === undefined) {
+  const cursorKey = config.api?.cursorKey;
+  if (
+    (overrides.rateLimiter === undefined && rateLimitKey === undefined) ||
+    (overrides.cursors === undefined && cursorKey === undefined)
+  ) {
     throw new Error("api config required");
   }
   const registry = overrides.registry ?? buildJobRegistry();
@@ -152,6 +162,15 @@ export function createApiContainer(
         clock: base.clock,
       }),
     moduleRoutes: overrides.moduleRoutes ?? [],
+    idempotency:
+      overrides.idempotency ?? createIdempotency({ clock: base.clock, metrics: base.metrics }),
+    cursors:
+      overrides.cursors ??
+      createCursorCodec({
+        // Checked above: present unless cursors was given.
+        key: (cursorKey as NonNullable<typeof cursorKey>).reveal(),
+        clock: base.clock,
+      }),
   };
 }
 
