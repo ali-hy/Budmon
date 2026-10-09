@@ -179,6 +179,53 @@ describe("TP-7.5: concurrent duplicates (F-100)", () => {
     expect(b.replayed).toBe(true);
     expect(b.result.id).toBe(a.result.id);
   });
+
+  it("TP-7.5: the first run's work throws and its transaction rolls back; the waiting duplicate then inserts, runs work itself and succeeds, leaving one completed record", async () => {
+    const key = newKey();
+    let release: () => void = () => undefined;
+    const latch = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let entered: () => void = () => undefined;
+    const inWork = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const failing = vi.fn(async () => {
+      entered();
+      await latch;
+      throw new Error("boom");
+    });
+    const succeeding = vi.fn(() => Promise.resolve(created(9)));
+
+    const first = run(USER_A, key, { y: 2 }, failing).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+    await inWork;
+    let secondDone = false;
+    const second = run(USER_A, key, { y: 2 }, succeeding).then((r) => {
+      secondDone = true;
+      return r;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    expect(secondDone).toBe(false);
+    release();
+    const [a, b] = await Promise.all([first, second]);
+
+    expect((a as Error).message).toBe("boom");
+    expect(failing).toHaveBeenCalledTimes(1);
+    expect(succeeding).toHaveBeenCalledTimes(1);
+    expect(b.replayed).toBe(false);
+    expect(b.result.id).toBe(created(9).id);
+    const { rows } = await testDb.database.handle.executeSql(
+      "SELECT response_status, result FROM idempotency_records WHERE user_id = $1 AND idempotency_key = $2",
+      [USER_A, key],
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.["response_status"]).toBe(201);
+    expect((rows[0]?.["result"] as { id?: unknown } | null)?.id).toBe(created(9).id);
+  });
 });
 
 describe("TP-7.6: failing work (F-100)", () => {
