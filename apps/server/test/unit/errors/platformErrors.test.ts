@@ -1,4 +1,4 @@
-// F-51 platform errors against §6. Extra cases TP-4.29x (F-51 has no LLD test case of its own; the
+// F-51 platform errors against §6. Extra cases TP-4.33x (F-51 has no LLD test case of its own; the
 // envelopes are TP-4.9's). IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { describe, expect, it } from "vitest";
 import { BudmonError } from "../../../src/platform/errors/BudmonError.js";
@@ -17,7 +17,7 @@ import {
 
 const ISSUE = { path: ["name"], code: "too_big", message: "Too big" };
 
-describe("TP-4.29x: F-51 errors carry §6's key, status, message and data", () => {
+describe("TP-4.33x: F-51 errors carry §6's key, status, message and data", () => {
   it.each([
     [
       "ValidationFailedError",
@@ -85,14 +85,14 @@ describe("TP-4.29x: F-51 errors carry §6's key, status, message and data", () =
       "Service unavailable",
       { outcome: "unknown" },
     ],
-  ] as const)("TP-4.29x: %s", (name, err, key, status, message, details) => {
+  ] as const)("TP-4.33x: %s", (name, err, key, status, message, details) => {
     expect(err).toBeInstanceOf(BudmonError);
     expect(err.name).toBe(name);
     expect([err.key, err.status, err.message]).toEqual([key, status, message]);
     expect(err.details).toEqual(details);
   });
 
-  it("TP-4.29x: ConflictError without details has no data", () => {
+  it("TP-4.33x: ConflictError without details has no data", () => {
     expect(new ConflictError().details).toBeUndefined();
   });
 });

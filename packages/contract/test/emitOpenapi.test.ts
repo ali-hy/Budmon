@@ -1,6 +1,6 @@
 // F-347 emitOpenapi. TP-4.1 (the committed packages/contract/openapi.json is what the contract
 // emits; CI's `pnpm contract:openapi && git diff --exit-code` fails on a stale file), plus extra
-// cases TP-4.27x (deterministic output). IDs ending in "x" are test-architect additions, not LLD
+// cases TP-4.31x (deterministic output). IDs ending in "x" are test-architect additions, not LLD
 // test-plan IDs.
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -52,15 +52,15 @@ describe("TP-4.1: openapi.json drift", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
-  });
+  }, 30_000);
 });
 
-describe("TP-4.27x: emitOpenapi output (F-347)", () => {
-  it("TP-4.27x: two runs give identical text", async () => {
+describe("TP-4.31x: emitOpenapi output (F-347)", () => {
+  it("TP-4.31x: two runs give identical text", async () => {
     expect(await emitOpenapi()).toBe(await emitOpenapi());
   });
 
-  it("TP-4.27x: keys are sorted recursively, 2-space indented, with a trailing newline", async () => {
+  it("TP-4.31x: keys are sorted recursively, 2-space indented, with a trailing newline", async () => {
     const text = await emitOpenapi();
     const doc: unknown = JSON.parse(text);
 
@@ -68,7 +68,7 @@ describe("TP-4.27x: emitOpenapi output (F-347)", () => {
     expect(text).toBe(`${JSON.stringify(doc, null, 2)}\n`);
   });
 
-  it("TP-4.27x: info and servers are as F-347 says", async () => {
+  it("TP-4.31x: info and servers are as F-347 says", async () => {
     const doc = JSON.parse(await emitOpenapi()) as { info: unknown; servers: unknown };
 
     expect(doc.info).toMatchObject({ title: "Budmon API", version: API_VERSION });

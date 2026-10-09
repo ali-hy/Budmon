@@ -105,4 +105,58 @@ describe("TP-5.1: security headers (F-61)", () => {
     expect(res.headers["referrer-policy"]).toBe("no-referrer");
     expect(res.headers["x-content-type-options"]).toBe("nosniff");
   });
+
+  it("TP-5.1: helmet's other headers carry the values A-151 lists, and no other helmet header is sent", async () => {
+    const res = await injectJson(app, "GET", "/api/v1/meta/client-config");
+
+    expect({
+      "cross-origin-opener-policy": res.headers["cross-origin-opener-policy"],
+      "origin-agent-cluster": res.headers["origin-agent-cluster"],
+      "x-dns-prefetch-control": res.headers["x-dns-prefetch-control"],
+      "x-download-options": res.headers["x-download-options"],
+      "x-frame-options": res.headers["x-frame-options"],
+      "x-permitted-cross-domain-policies": res.headers["x-permitted-cross-domain-policies"],
+      "x-xss-protection": res.headers["x-xss-protection"],
+    }).toEqual({
+      "cross-origin-opener-policy": "same-origin",
+      "origin-agent-cluster": "?1",
+      "x-dns-prefetch-control": "off",
+      "x-download-options": "noopen",
+      "x-frame-options": "SAMEORIGIN",
+      "x-permitted-cross-domain-policies": "none",
+      "x-xss-protection": "0",
+    });
+    const helmetHeaders = [
+      "content-security-policy",
+      "content-security-policy-report-only",
+      "cross-origin-embedder-policy",
+      "cross-origin-opener-policy",
+      "cross-origin-resource-policy",
+      "origin-agent-cluster",
+      "referrer-policy",
+      "strict-transport-security",
+      "x-content-type-options",
+      "x-dns-prefetch-control",
+      "x-download-options",
+      "x-frame-options",
+      "x-permitted-cross-domain-policies",
+      "x-xss-protection",
+    ];
+    expect(helmetHeaders.filter((h) => h in res.headers).sort()).toEqual(
+      [
+        "content-security-policy",
+        "cross-origin-opener-policy",
+        "cross-origin-resource-policy",
+        "origin-agent-cluster",
+        "referrer-policy",
+        "strict-transport-security",
+        "x-content-type-options",
+        "x-dns-prefetch-control",
+        "x-download-options",
+        "x-frame-options",
+        "x-permitted-cross-domain-policies",
+        "x-xss-protection",
+      ].sort(),
+    );
+  });
 });

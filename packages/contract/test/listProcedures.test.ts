@@ -1,18 +1,18 @@
-// F-349 listProcedures. Extra cases TP-4.25x (F-349 has no LLD test case of its own; TP-4.8 uses
+// F-349 listProcedures. Extra cases TP-4.29x (F-349 has no LLD test case of its own; TP-4.8 uses
 // it). IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { z } from "zod";
 import { describe, expect, it } from "vitest";
 import { base, contract, createRoute } from "../src/index.js";
 import { listProcedures } from "../src/rules/listProcedures.js";
 
-describe("TP-4.25x: listProcedures", () => {
-  it("TP-4.25x: the platform contract has meta.clientConfig, GET /meta/client-config", () => {
+describe("TP-4.29x: listProcedures", () => {
+  it("TP-4.29x: the platform contract has meta.clientConfig, GET /meta/client-config", () => {
     expect(listProcedures(contract)).toEqual([
       { path: "meta.clientConfig", method: "GET", route: "/meta/client-config" },
     ]);
   });
 
-  it("TP-4.25x: nested routers give dotted paths", () => {
+  it("TP-4.29x: nested routers give dotted paths", () => {
     const c = {
       a: {
         b: {
@@ -28,13 +28,13 @@ describe("TP-4.25x: listProcedures", () => {
     ]);
   });
 
-  it("TP-4.25x: a prefix lists a sub-router under its key (A-127)", () => {
+  it("TP-4.29x: a prefix lists a sub-router under its key (A-127)", () => {
     expect(listProcedures(contract.meta, "meta")).toEqual([
       { path: "meta.clientConfig", method: "GET", route: "/meta/client-config" },
     ]);
   });
 
-  it("TP-4.25x: no prefix on a sub-router gives paths relative to it", () => {
+  it("TP-4.29x: no prefix on a sub-router gives paths relative to it", () => {
     expect(listProcedures(contract.meta)).toEqual([
       { path: "clientConfig", method: "GET", route: "/meta/client-config" },
     ]);

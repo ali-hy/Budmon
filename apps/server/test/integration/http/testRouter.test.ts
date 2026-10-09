@@ -1,6 +1,7 @@
 // The API server with a test contract and router (S-4 AC 1). TP-4.10 (F-52's interceptor),
 // TP-4.11's integration part (F-56's middleware), TP-4.19 (body handling, F-55 step 5 with F-62)
-// and TP-5.2 to TP-5.4 (F-62, moved to S-4, A-124), plus extra cases TP-4.34x.
+// TP-4.25 (query coercion, A-148), TP-4.26 (defined errors, A-149) and TP-5.2 to TP-5.4 (F-62,
+// moved to S-4, A-124; A-152), plus extra cases TP-4.38x.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { CANARIES, scanForCanaries } from "@budmon/test-support";
 import type { FastifyInstance } from "fastify";
@@ -132,7 +133,7 @@ describe("TP-4.11: the client version check through HTTP", () => {
     expect(res.status).toBe(200);
   });
 
-  it("TP-4.34x: a blocked request increments client_update_required_total", async () => {
+  it("TP-4.38x: a blocked request increments client_update_required_total", async () => {
     await injectJson(app, "GET", "/api/v1/test/ping", undefined, {
       "x-budmon-client": "android/2",
     });
@@ -263,5 +264,82 @@ describe("TP-5.2 to TP-5.4: body handling (F-62)", () => {
     expect(body.code).toBe("VALIDATION_FAILED");
     expect(body.data.issues.map((i) => i.code)).toEqual(["unsupported_media_type"]);
     expect(routes.createHandler).not.toHaveBeenCalled();
+  });
+});
+
+describe("TP-5.2: prototype keys are removed before validation (A-152)", () => {
+  it("TP-5.2: __proto__ and constructor.prototype are stripped; the handler gets { a: 1 } only", async () => {
+    routes.looseInputs.length = 0;
+
+    const res = await injectJson(
+      app,
+      "POST",
+      "/api/v1/test/loose",
+      '{"__proto__":{"polluted":1},"constructor":{"prototype":{"p":1}},"a":1}',
+      IDEMPOTENCY,
+    );
+
+    expect(res.status).toBe(201);
+    expect(routes.looseInputs).toEqual([{ a: 1 }]);
+    expect(Object.keys(routes.looseInputs[0] as object)).toEqual(["a"]);
+    expect(({} as Record<string, unknown>)["polluted"]).toBeUndefined();
+    expect(({} as Record<string, unknown>)["p"]).toBeUndefined();
+  });
+});
+
+describe("TP-4.25: query strings are coerced to the declared types (A-148)", () => {
+  it("TP-4.25: ?limit=5&active=true reaches the handler as the number 5 and true", async () => {
+    routes.listInputs.length = 0;
+
+    const res = await injectJson(app, "GET", "/api/v1/t/list?limit=5&active=true");
+
+    expect(res.status).toBe(200);
+    expect(routes.listInputs).toHaveLength(1);
+    expect(routes.listInputs[0]).toMatchObject({ limit: 5, active: true });
+  });
+
+  it.each([["limit=abc"], ["limit=0"], ["active=yes"]])(
+    "TP-4.25: ?%s is VALIDATION_FAILED",
+    async (query) => {
+      const res = await injectJson(app, "GET", `/api/v1/t/list?${query}`);
+
+      expect(res.status).toBe(400);
+      expect((res.json() as { code: string }).code).toBe("VALIDATION_FAILED");
+    },
+  );
+
+  it("TP-4.25: the emitted parameters are type integer (limit) and type boolean (active)", async () => {
+    const { OpenAPIGenerator } = await import("@orpc/openapi");
+    const { ZodToJsonSchemaConverter } = await import("@orpc/zod/zod4");
+    const doc: unknown = await new OpenAPIGenerator({
+      schemaConverters: [new ZodToJsonSchemaConverter()],
+    }).generate({ list: testContract.test.list }, { info: { title: "t", version: "1.0" } });
+    const parameters =
+      (
+        doc as {
+          paths: Record<string, { get: { parameters: { name: string; schema: unknown }[] } }>;
+        }
+      ).paths["/t/list"]?.get.parameters ?? [];
+    const schemaOf = (name: string) => parameters.find((p) => p.name === name)?.schema;
+
+    expect(schemaOf("limit")).toMatchObject({ type: "integer" });
+    expect(schemaOf("active")).toMatchObject({ type: "boolean" });
+  });
+});
+
+describe("TP-4.26: contract-defined errors pass through (A-149)", () => {
+  it("TP-4.26: errors.CONFLICT({ data: { reason: 'taken' } }) is the 409 envelope with its data, not reported", async () => {
+    const reportsBefore = obs.reporter.events.length;
+
+    const res = await injectJson(app, "GET", "/api/v1/test/conflict");
+
+    expect(res.status).toBe(409);
+    expect(res.json()).toMatchObject({
+      defined: true,
+      code: "CONFLICT",
+      status: 409,
+      data: { reason: "taken" },
+    });
+    expect(obs.reporter.events.length).toBe(reportsBefore);
   });
 });

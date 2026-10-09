@@ -1,4 +1,4 @@
-// F-57 schemaWindow. TP-4.12, plus extra cases TP-4.32x.
+// F-57 schemaWindow. TP-4.12, plus extra cases TP-4.36x.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { describe, expect, it } from "vitest";
 import { schemaWindow } from "../../../src/platform/http/health.js";
@@ -26,19 +26,19 @@ describe("TP-4.12: schemaWindow", () => {
   });
 });
 
-describe("TP-4.32x: schemaWindow, further cases (F-57)", () => {
-  it("TP-4.32x: both empty: ok", () => {
+describe("TP-4.36x: schemaWindow, further cases (F-57)", () => {
+  it("TP-4.36x: both empty: ok", () => {
     expect(schemaWindow([], [])).toBe("ok");
   });
 
-  it("TP-4.32x: a missing journal entry wins over extra applied ones: behind", () => {
+  it("TP-4.36x: a missing journal entry wins over extra applied ones: behind", () => {
     const j = journal(3);
     const a = [...applied(j.slice(1)), { hash: "x1", createdAt: 1 }, { hash: "x2", createdAt: 2 }];
 
     expect(schemaWindow(a, j)).toBe("behind");
   });
 
-  it("TP-4.32x: a missing entry in the middle of the journal: behind", () => {
+  it("TP-4.36x: a missing entry in the middle of the journal: behind", () => {
     const j = journal(3);
 
     expect(

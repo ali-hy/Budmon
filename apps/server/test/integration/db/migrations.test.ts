@@ -3,12 +3,14 @@
 // test/fixtures/migrations-no-journal, holding only `.gitkeep` like apps/server/drizzle), plus extra
 // cases TP-2.54x and TP-2.70x. IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { bootstrapCluster } from "../../../src/platform/db/clusterBootstrap.js";
 import {
+  JournalInvalidError,
   UnknownMigrationError,
   applyCommittedMigrations,
   readJournal,
@@ -164,6 +166,82 @@ describe("TP-2.13: an existing journal with no entries (A-146)", () => {
       expect(drizzleMigrate).not.toHaveBeenCalled();
     } finally {
       await database.close();
+    }
+  });
+});
+
+describe("TP-2.13: a malformed journal is an error (A-150)", () => {
+  it.each([
+    ["{}", "{}"],
+    ["not json", "not json CANARYMESSAGE7f3a"],
+  ])(
+    "TP-2.13: a journal file %s throws JournalInvalidError without its content",
+    (_label, content) => {
+      const dir = mkdtempSync(path.join(tmpdir(), "budmon-journal-"));
+      try {
+        mkdirSync(path.join(dir, "meta"));
+        writeFileSync(path.join(dir, "meta", "_journal.json"), content);
+
+        let caught: unknown;
+        try {
+          readJournal(dir);
+        } catch (error) {
+          caught = error;
+        }
+
+        expect(caught).toBeInstanceOf(JournalInvalidError);
+        expect((caught as Error).message).toBe("drizzle journal is invalid");
+        expect((caught as Error).message).not.toContain("CANARY");
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
+
+  // A-160: a valid entries array with badly shaped entries is invalid too.
+  it.each([
+    ["a bad tag", { entries: [{ idx: 0, tag: "bad tag", when: 1 }] }, []],
+    [
+      "a non-integer when",
+      { entries: [{ idx: 0, tag: "0000_first", when: "x" }] },
+      ["0000_first.sql"],
+    ],
+    ["a missing .sql file", { entries: [{ idx: 0, tag: "0000_first", when: 1 }] }, []],
+    [
+      "an idx that isn't its position (extra)",
+      { entries: [{ idx: 3, tag: "0000_first", when: 1 }] },
+      ["0000_first.sql"],
+    ],
+  ] as const)(
+    "TP-2.13: a journal entry with %s throws JournalInvalidError (A-160)",
+    (_label, journal, sqlFiles) => {
+      const dir = mkdtempSync(path.join(tmpdir(), "budmon-journal-"));
+      try {
+        mkdirSync(path.join(dir, "meta"));
+        writeFileSync(path.join(dir, "meta", "_journal.json"), JSON.stringify(journal));
+        for (const file of sqlFiles) writeFileSync(path.join(dir, file), "SELECT 1;");
+
+        expect(() => readJournal(dir)).toThrow(JournalInvalidError);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it("TP-2.70x: applyCommittedMigrations with a malformed journal throws JournalInvalidError and records nothing", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "budmon-journal-"));
+    const database = await freshDatabase("malformed_journal");
+    try {
+      mkdirSync(path.join(dir, "meta"));
+      writeFileSync(path.join(dir, "meta", "_journal.json"), '{"version":"7"}');
+
+      await expect(applyCommittedMigrations(database, dir)).rejects.toBeInstanceOf(
+        JournalInvalidError,
+      );
+      expect(drizzleMigrate).not.toHaveBeenCalled();
+    } finally {
+      await database.close();
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 });

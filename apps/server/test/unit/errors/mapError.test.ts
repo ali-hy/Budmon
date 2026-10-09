@@ -1,4 +1,4 @@
-// F-52 mapError. TP-4.9, plus extra cases TP-4.30x (every zod code's fixed message, the other
+// F-52 mapError. TP-4.9, plus extra cases TP-4.34x (every zod code's fixed message, the other
 // oRPC built-ins, every database-unavailable code). IDs ending in "x" are test-architect additions,
 // not LLD test-plan IDs.
 import { ValidationError } from "@orpc/contract";
@@ -153,7 +153,32 @@ describe("TP-4.9: mapError", () => {
   );
 });
 
-describe("TP-4.30x: mapError, further cases (F-52)", () => {
+describe("TP-4.9: contract-defined oRPC errors (A-149)", () => {
+  it("TP-4.9: a defined CONFLICT passes through with its status and data, not reported", () => {
+    const err = new ORPCError("CONFLICT", { status: 409, data: { reason: "x" }, defined: true });
+
+    const { error, report } = mapError(err, NOT_COMMITTED);
+
+    expect([error.defined, error.code, error.status, error.data]).toEqual([
+      true,
+      "CONFLICT",
+      409,
+      { reason: "x" },
+    ]);
+    expect(report).toBe(false);
+  });
+
+  it("TP-4.9: the same error without defined is NOT_FOUND 404", () => {
+    const { error, report } = mapError(
+      new ORPCError("CONFLICT", { status: 409, data: { reason: "x" } }),
+      NOT_COMMITTED,
+    );
+
+    expect([error.code, error.status, report]).toEqual(["NOT_FOUND", 404, false]);
+  });
+});
+
+describe("TP-4.34x: mapError, further cases (F-52)", () => {
   it.each([
     ["invalid_type", "Invalid type"],
     ["too_small", "Too small"],
@@ -163,7 +188,7 @@ describe("TP-4.30x: mapError, further cases (F-52)", () => {
     ["unrecognized_keys", "Unknown field"],
     ["custom", "Invalid value"],
     ["invalid_union", "Invalid value"],
-  ])("TP-4.30x: zod code %s gets the fixed message %j", (code, message) => {
+  ])("TP-4.34x: zod code %s gets the fixed message %j", (code, message) => {
     const { error } = mapError(
       inputValidationError([{ code, path: ["a", 0], message: CANARIES.message }]),
       NOT_COMMITTED,
@@ -175,7 +200,7 @@ describe("TP-4.30x: mapError, further cases (F-52)", () => {
   });
 
   it.each([["METHOD_NOT_SUPPORTED"], ["NOT_ACCEPTABLE"]])(
-    "TP-4.30x: oRPC %s is NOT_FOUND 404",
+    "TP-4.34x: oRPC %s is NOT_FOUND 404",
     (code) => {
       const { error, report } = mapError(new ORPCError(code), NOT_COMMITTED);
 
@@ -191,7 +216,7 @@ describe("TP-4.30x: mapError, further cases (F-52)", () => {
     ["ECONNREFUSED"],
     ["ETIMEDOUT"],
     ["ECONNRESET"],
-  ])("TP-4.30x: %s is SERVICE_UNAVAILABLE, with outcome unknown once committed", (code) => {
+  ])("TP-4.34x: %s is SERVICE_UNAVAILABLE, with outcome unknown once committed", (code) => {
     const { error } = mapError(pgError(code), COMMITTED);
 
     expect([error.code, error.status, error.data]).toEqual([
@@ -201,11 +226,11 @@ describe("TP-4.30x: mapError, further cases (F-52)", () => {
     ]);
   });
 
-  it("TP-4.30x: another SQLSTATE (23505) is INTERNAL", () => {
+  it("TP-4.34x: another SQLSTATE (23505) is INTERNAL", () => {
     expect(mapError(pgError("23505"), NOT_COMMITTED).error.code).toBe("INTERNAL");
   });
 
-  it("TP-4.30x: a RateLimitedError is RATE_LIMITED 429 with retryAfterSeconds, not reported", () => {
+  it("TP-4.34x: a RateLimitedError is RATE_LIMITED 429 with retryAfterSeconds, not reported", () => {
     const { error, report } = mapError(new RateLimitedError(30), NOT_COMMITTED);
 
     expect(envelope(error)).toEqual({
@@ -218,7 +243,7 @@ describe("TP-4.30x: mapError, further cases (F-52)", () => {
     expect(report).toBe(false);
   });
 
-  it("TP-4.30x: a thrown non-Error is INTERNAL", () => {
+  it("TP-4.34x: a thrown non-Error is INTERNAL", () => {
     expect(mapError(CANARIES.message, NOT_COMMITTED).error.code).toBe("INTERNAL");
   });
 });

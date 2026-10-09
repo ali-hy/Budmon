@@ -1,4 +1,4 @@
-// F-8 checkApiMinor. TP-4.6, plus extra cases TP-4.28x.
+// F-8 checkApiMinor. TP-4.6, plus extra cases TP-4.32x.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { describe, expect, it } from "vitest";
 import { checkApiMinor } from "../checkApiMinor.js";
@@ -32,13 +32,13 @@ describe("TP-4.6: checkApiMinor", () => {
   });
 });
 
-describe("TP-4.28x: checkApiMinor, further cases (F-8)", () => {
-  it("TP-4.28x: identical documents with a different version are ok (info.version is ignored)", () => {
+describe("TP-4.32x: checkApiMinor, further cases (F-8)", () => {
+  it("TP-4.32x: identical documents with a different version are ok (info.version is ignored)", () => {
     expect(checkApiMinor({ baseOpenapi: doc("1.3"), headOpenapi: doc("1.0") }).ok).toBe(true);
   });
 
   it.each([["1.0"], ["1.2"], ["2.3"], ["1.x"], ["v1.4"]])(
-    "TP-4.28x: changed content with head version %s against base 1.3 is not ok",
+    "TP-4.32x: changed content with head version %s against base 1.3 is not ok",
     (version) => {
       expect(
         checkApiMinor({ baseOpenapi: doc("1.3"), headOpenapi: doc(version, CHANGED_PATHS) }).ok,
@@ -46,7 +46,7 @@ describe("TP-4.28x: checkApiMinor, further cases (F-8)", () => {
     },
   );
 
-  it("TP-4.28x: changed content with the minor jumping by more than one is ok", () => {
+  it("TP-4.32x: changed content with the minor jumping by more than one is ok", () => {
     expect(
       checkApiMinor({ baseOpenapi: doc("1.3"), headOpenapi: doc("1.5", CHANGED_PATHS) }).ok,
     ).toBe(true);

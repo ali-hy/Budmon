@@ -1,4 +1,4 @@
-// F-57 health routes and checkReadiness. TP-4.13, plus extra cases TP-4.35x.
+// F-57 health routes and checkReadiness. TP-4.13, plus extra cases TP-4.39x.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 //
 // (c) runs over HTTP with the journal injected through createApiServer's opts.journal (A-125) and
@@ -6,7 +6,7 @@
 // the database has been through the schema step in migrate mode (A-146).
 import { createServer } from "node:net";
 import type { FastifyInstance } from "fastify";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import { checkReadiness } from "../../../src/platform/http/health.js";
 import { createApiServer } from "../../../src/platform/http/server.js";
 import { buildApiContainer, injectJson, type BuiltContainer } from "../../support/api.js";
@@ -137,7 +137,7 @@ describe("TP-4.13 (c): production with the journal one entry ahead of the databa
     expect([live.status, live.json()]).toEqual([200, { status: "ok" }]);
   });
 
-  it("TP-4.35x: the same database with the journal equal to it is ready", async () => {
+  it("TP-4.39x: the same database with the journal equal to it is ready", async () => {
     const built = await migratedProductionContainer();
 
     const result = await checkReadiness({
@@ -163,8 +163,31 @@ describe("TP-4.13 (d): production, migrate mode, an empty table and an empty jou
   });
 });
 
-describe("TP-4.35x: checkReadiness, further cases (F-57)", () => {
-  it("TP-4.35x: in development a journal ahead of the database is still ready", async () => {
+describe("TP-4.13: the auth hook doesn't run for /health/* (A-154)", () => {
+  it("TP-4.13: with an auth hook that throws, /health/live and /health/ready are 200 and the hook isn't called", async () => {
+    const authenticate = vi.fn(() => Promise.reject(new Error("hook failed")));
+    const app = await serve(await buildApiContainer({ authHook: { authenticate } }));
+
+    const live = await injectJson(app, "GET", "/health/live");
+    const ready = await injectJson(app, "GET", "/health/ready");
+
+    expect([live.status, ready.status]).toEqual([200, 200]);
+    expect(authenticate).not.toHaveBeenCalled();
+  });
+
+  it("TP-4.39x: the same hook still runs for /api/v1/* (A-154)", async () => {
+    const authenticate = vi.fn(() => Promise.reject(new Error("hook failed")));
+    const app = await serve(await buildApiContainer({ authHook: { authenticate } }));
+
+    const res = await injectJson(app, "GET", "/api/v1/meta/client-config");
+
+    expect(authenticate).toHaveBeenCalled();
+    expect(res.status).toBe(500);
+  });
+});
+
+describe("TP-4.39x: checkReadiness, further cases (F-57)", () => {
+  it("TP-4.39x: in development a journal ahead of the database is still ready", async () => {
     const built = await buildApiContainer();
     cleanups.push(() => built.close());
 
@@ -177,7 +200,7 @@ describe("TP-4.35x: checkReadiness, further cases (F-57)", () => {
     expect(result).toEqual({ ready: true });
   });
 
-  it("TP-4.35x: in production with no migrations table and an empty journal, ready", async () => {
+  it("TP-4.39x: in production with no migrations table and an empty journal, ready", async () => {
     const built = await buildApiContainer();
     cleanups.push(() => built.close());
 

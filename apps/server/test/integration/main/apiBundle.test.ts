@@ -1,10 +1,13 @@
-// The built entries (F-24) under plain Node. TP-2.6: api with DB_HOST unset (F-90, F-11).
+// The built entries (F-24) under plain Node. TP-2.6: api with DB_HOST unset (F-90, F-11), also
+// through the production start command `node --import ./dist/main/instrument.js` (A-147).
+// TP-4.24: the built api, started with that command, exports server spans to an OTLP recorder.
 // TP-2.37: migrate's failure log on stderr with stdout empty, and on success exactly the report
 // line on stdout (F-92, A-81, A-109). Both share one build: two files building into the
 // same dist/ in parallel would race. Extra case TP-2.75x; IDs ending in "x" are test-architect
 // additions, not LLD test-plan IDs.
-import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { createServer as createHttpServer, type Server } from "node:http";
+import { cpSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createConnection, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -12,12 +15,14 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { bootstrapCluster } from "../../../src/platform/db/clusterBootstrap.js";
 import { runSchemaStep } from "../../../src/platform/db/schemaStep.js";
+import { devApi } from "../../support/configEnv.js";
 import { connectDatabase, schemaStepInput } from "../../support/platform.js";
 import {
   TEST_ROLE_PASSWORDS,
   startFreshPostgres,
   type FreshPostgres,
 } from "../../support/postgres.js";
+import { createTestDatabase, type TestDatabase } from "../../support/testDatabase.js";
 
 const SERVER_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const REPO_ROOT = path.resolve(SERVER_DIR, "../..");
@@ -59,7 +64,30 @@ beforeAll(() => {
   }
 }, 180_000);
 
+const START_COMMAND = ["--import", "./dist/main/instrument.js", "dist/main/api.js"];
+
 describe("TP-2.6: node dist/main/api.js with DB_HOST unset", () => {
+  it("TP-2.6: through the production start command, the same: exit 78 and the problems (A-147)", async () => {
+    const port = await freePort();
+
+    const result = spawnSync(process.execPath, START_COMMAND, {
+      cwd: SERVER_DIR,
+      env: {
+        PATH: process.env["PATH"] ?? "",
+        APP_ENV: "development",
+        PORT: String(port),
+        HOST: "127.0.0.1",
+      },
+      encoding: "utf8",
+      timeout: 30_000,
+    });
+
+    expect(result.status, result.stderr).toBe(78);
+    expect(result.stderr).toContain("Configuration invalid:");
+    expect(result.stderr.split("\n")).toContain("  - DB_HOST: required");
+    expect(await portAcceptsConnections(port)).toBe(false);
+  });
+
   it("TP-2.6: prints the configuration problems, exits 78 and opens no port", async () => {
     const port = await freePort();
     const env: Record<string, string> = {
@@ -270,4 +298,269 @@ describe("TP-2.37: node dist/main/migrate.js failure logs (A-81)", () => {
       expect(startupFailures(stdout)).toEqual([]);
     });
   });
+});
+
+// ---- TP-2.13 (A-150, A-160): migrate exits 5 on an invalid journal ----
+
+describe("TP-2.13: node dist/main/migrate.js with an invalid journal (A-150, A-160)", () => {
+  /**
+   * A copy of the built server (package.json and dist, node_modules linked) whose drizzle/ holds
+   * the given journal and .sql files, so serverRoot()'s drizzle folder is the test's. The database
+   * points at a closed port: exit 5 shows the journal was read before any connection.
+   */
+  async function migrateWith(journal: string, sqlFiles: readonly string[]) {
+    const dir = mkdtempSync(path.join(tmpdir(), "budmon-migrate-journal-"));
+    try {
+      writeFileSync(path.join(dir, "package.json"), '{"name":"@budmon/server","type":"module"}\n');
+      cpSync(path.join(SERVER_DIR, "dist"), path.join(dir, "dist"), { recursive: true });
+      symlinkSync(path.join(SERVER_DIR, "node_modules"), path.join(dir, "node_modules"));
+      mkdirSync(path.join(dir, "drizzle", "meta"), { recursive: true });
+      writeFileSync(path.join(dir, "drizzle", "meta", "_journal.json"), journal);
+      for (const file of sqlFiles) writeFileSync(path.join(dir, "drizzle", file), "SELECT 1;\n");
+      const passwordFile = path.join(dir, "password");
+      const rolesFile = path.join(dir, "roles.json");
+      writeFileSync(passwordFile, "pw\n");
+      writeFileSync(
+        rolesFile,
+        JSON.stringify(
+          Object.fromEntries(
+            [
+              "budmon_app",
+              "budmon_capture",
+              "budmon_queue",
+              "budmon_monitor",
+              "budmon_migrator",
+            ].map((role) => [role, { password: `pw-${role}` }]),
+          ),
+        ),
+      );
+      const port = await freePort();
+      return spawnSync(process.execPath, ["dist/main/migrate.js"], {
+        cwd: dir,
+        env: {
+          PATH: process.env["PATH"] ?? "",
+          APP_ENV: "development",
+          DB_HOST: "127.0.0.1",
+          DB_PORT: String(port),
+          DB_NAME: "budmon",
+          DB_USER: "budmon_migrator",
+          DB_PASSWORD_FILE: passwordFile,
+          ROLE_SECRETS_FILE: rolesFile,
+        },
+        encoding: "utf8",
+        timeout: 60_000,
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  it.each([
+    ["{}", "{}", []],
+    ["not json", "not json CANARYMESSAGE7f3a", []],
+    ["a bad tag", JSON.stringify({ entries: [{ idx: 0, tag: "bad tag", when: 1 }] }), []],
+    [
+      "a non-integer when",
+      JSON.stringify({ entries: [{ idx: 0, tag: "0000_a", when: "x" }] }),
+      ["0000_a.sql"],
+    ],
+    ["a missing .sql file", JSON.stringify({ entries: [{ idx: 0, tag: "0000_a", when: 1 }] }), []],
+  ] as const)(
+    "TP-2.13: a journal with %s makes migrate exit 5, before touching the database",
+    async (_label, journal, sql) => {
+      const result = await migrateWith(journal, sql);
+
+      expect(result.status, `${result.stdout}${result.stderr}`).toBe(5);
+      expect(`${result.stdout}${result.stderr}`).not.toContain("CANARY");
+      expect(`${result.stdout}${result.stderr}`).not.toContain("ECONNREFUSED");
+    },
+  );
+});
+
+// ---- TP-4.24 ----
+
+interface OtlpRequest {
+  path: string;
+  body: unknown;
+}
+
+interface ExportedSpan {
+  scope: string;
+  kind: number;
+  name: string;
+  attributes: Record<string, unknown>;
+}
+
+/** Every span in the recorded OTLP/HTTP JSON trace exports. */
+function exportedSpans(requests: readonly OtlpRequest[]): ExportedSpan[] {
+  const spans: ExportedSpan[] = [];
+  for (const r of requests.filter((x) => x.path.endsWith("/v1/traces"))) {
+    const body = r.body as {
+      resourceSpans?: {
+        scopeSpans?: {
+          scope?: { name?: string };
+          spans?: {
+            kind?: number;
+            name?: string;
+            attributes?: { key: string; value: Record<string, unknown> }[];
+          }[];
+        }[];
+      }[];
+    };
+    for (const rs of body.resourceSpans ?? []) {
+      for (const ss of rs.scopeSpans ?? []) {
+        for (const span of ss.spans ?? []) {
+          spans.push({
+            scope: ss.scope?.name ?? "",
+            kind: span.kind ?? 0,
+            name: span.name ?? "",
+            attributes: Object.fromEntries(
+              (span.attributes ?? []).map((a) => [a.key, Object.values(a.value)[0]]),
+            ),
+          });
+        }
+      }
+    }
+  }
+  return spans;
+}
+
+const SPAN_KIND_SERVER = 2;
+
+describe("TP-4.24: the built api exports spans through the production start command (A-147)", () => {
+  let recorder: Server;
+  let recorderPort: number;
+  const received: OtlpRequest[] = [];
+  let testDb: TestDatabase;
+  let configDir: string;
+
+  beforeAll(async () => {
+    recorder = createHttpServer((req, res) => {
+      const chunks: Buffer[] = [];
+      req.on("data", (c: Buffer) => chunks.push(c));
+      req.on("end", () => {
+        const text = Buffer.concat(chunks).toString("utf8");
+        let body: unknown = null;
+        try {
+          body = JSON.parse(text);
+        } catch {
+          body = null;
+        }
+        received.push({ path: req.url ?? "", body });
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end("{}");
+      });
+    });
+    await new Promise<void>((resolve) => recorder.listen(0, "127.0.0.1", resolve));
+    const address = recorder.address();
+    recorderPort = typeof address === "object" && address !== null ? address.port : 0;
+    testDb = await createTestDatabase("budmon_app");
+    configDir = mkdtempSync(path.join(tmpdir(), "budmon-api-otel-"));
+  }, 60_000);
+
+  afterAll(async () => {
+    await new Promise<void>((resolve) => {
+      recorder.close(() => {
+        resolve();
+      });
+    });
+    await testDb.drop();
+    rmSync(configDir, { recursive: true, force: true });
+  });
+
+  /** The development api fixture, with its secret files written to configDir, for APP_ENV test. */
+  function apiEnv(port: number): Record<string, string> {
+    const f = devApi();
+    const env: Record<string, string> = { PATH: process.env["PATH"] ?? "" };
+    for (const [key, value] of Object.entries(f.env)) {
+      if (value === undefined) continue;
+      const content = f.files.get(value);
+      if (content === undefined) {
+        env[key] = value;
+      } else {
+        const file = path.join(configDir, path.basename(value));
+        writeFileSync(file, content);
+        env[key] = file;
+      }
+    }
+    const passwordFile = path.join(configDir, "app_password");
+    writeFileSync(passwordFile, `${TEST_ROLE_PASSWORDS.budmon_app}\n`);
+    return {
+      ...env,
+      APP_ENV: "test",
+      PORT: String(port),
+      HOST: "127.0.0.1",
+      DB_HOST: testDb.endpoint.host,
+      DB_PORT: String(testDb.endpoint.port),
+      DB_NAME: testDb.name,
+      DB_USER: "budmon_app",
+      DB_PASSWORD_FILE: passwordFile,
+      OBJECT_STORE_FS_ROOT: path.join(configDir, "objects"),
+      OTEL_EXPORTER_OTLP_ENDPOINT: `http://localhost:${String(recorderPort)}`,
+    };
+  }
+
+  /** Starts the built api with `args`, makes one request, stops it with SIGTERM. */
+  async function runApi(
+    args: readonly string[],
+  ): Promise<{ status: number; code: number | null; output: string }> {
+    const port = await freePort();
+    const child = spawn(process.execPath, args, {
+      cwd: SERVER_DIR,
+      env: apiEnv(port),
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let output = "";
+    child.stdout.on("data", (c: Buffer) => (output += c.toString()));
+    child.stderr.on("data", (c: Buffer) => (output += c.toString()));
+    const exited = new Promise<number | null>((resolve) => {
+      child.on("exit", (code) => {
+        resolve(code);
+      });
+    });
+    try {
+      const deadline = Date.now() + 30_000;
+      while (!(await portAcceptsConnections(port))) {
+        if (Date.now() > deadline || child.exitCode !== null) {
+          throw new Error(`the api didn't start:\n${output}`);
+        }
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      const res = await fetch(`http://127.0.0.1:${String(port)}/api/v1/meta/client-config`);
+      await res.text();
+      child.kill("SIGTERM");
+      return { status: res.status, code: await exited, output };
+    } finally {
+      if (child.exitCode === null) child.kill("SIGKILL");
+    }
+  }
+
+  it("TP-4.24: with --import, the recorder gets an http and an @fastify/otel server span, and metrics", async () => {
+    received.length = 0;
+
+    const run = await runApi(START_COMMAND);
+
+    expect(run.status, run.output).toBe(200);
+    const all = exportedSpans(received);
+    const seen = JSON.stringify(all.map((s) => [s.scope, s.kind, s.name]));
+    const servers = all.filter((s) => s.kind === SPAN_KIND_SERVER);
+    expect(
+      servers.some((s) => s.scope.includes("instrumentation-http")),
+      seen,
+    ).toBe(true);
+    expect(
+      servers.some((s) => s.scope.includes("fastify")),
+      seen,
+    ).toBe(true);
+    expect(received.some((r) => r.path.endsWith("/v1/metrics"))).toBe(true);
+  }, 90_000);
+
+  it("TP-4.24: without --import, no server span arrives (guards the start command)", async () => {
+    received.length = 0;
+
+    const run = await runApi(["dist/main/api.js"]);
+
+    expect(run.status, run.output).toBe(200);
+    expect(exportedSpans(received).filter((s) => s.kind === SPAN_KIND_SERVER)).toEqual([]);
+  }, 90_000);
 });
