@@ -4,11 +4,10 @@ import { canonicalJson, fixedClock } from "@budmon/shared";
 import { describe, expect, it, vi } from "vitest";
 import type { DbHandle } from "../../../src/platform/db/types.js";
 import { observed } from "../../support/api.js";
-import { s7 } from "../../support/s7.js";
+import { createIdempotency, requestHashOf } from "../../../src/platform/idempotency/idempotency.js";
 
 describe("TP-7.9: idempotency needs a transaction (F-100)", () => {
   it("TP-7.9: run on a handle that isn't in a transaction throws, before any statement or work", async () => {
-    const { createIdempotency } = await s7.idempotency();
     const executeSql = vi.fn();
     const h = { inTransaction: false, executeSql, db: {} } as unknown as DbHandle;
     const work = vi.fn();
@@ -35,9 +34,7 @@ describe("TP-7.9: idempotency needs a transaction (F-100)", () => {
 });
 
 describe("TP-7.8: requestHashOf is canonical (F-100, A-233)", () => {
-  it("TP-7.8: {a:1,b:2} and {b:2,a:1} give the same 32-byte hash, sha256(canonicalJson(input))", async () => {
-    const { requestHashOf } = await s7.idempotency();
-
+  it("TP-7.8: {a:1,b:2} and {b:2,a:1} give the same 32-byte hash, sha256(canonicalJson(input))", () => {
     const one = requestHashOf({ a: 1, b: 2 });
     const two = requestHashOf({ b: 2, a: 1 });
 
@@ -50,9 +47,7 @@ describe("TP-7.8: requestHashOf is canonical (F-100, A-233)", () => {
     );
   });
 
-  it("TP-7.8: different inputs give different hashes", async () => {
-    const { requestHashOf } = await s7.idempotency();
-
+  it("TP-7.8: different inputs give different hashes", () => {
     expect(requestHashOf({ a: 1, b: 2 })).not.toEqual(requestHashOf({ a: 1, b: 3 }));
     expect(requestHashOf({ a: [1, 2] })).not.toEqual(requestHashOf({ a: [2, 1] }));
   });

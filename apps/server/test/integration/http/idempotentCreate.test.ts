@@ -19,7 +19,10 @@ import {
   type BuiltContainer,
 } from "../../support/api.js";
 import { query } from "../../support/postgres.js";
-import { s7 } from "../../support/s7.js";
+import {
+  requestHashOf,
+  runIdempotentCreate,
+} from "../../../src/platform/idempotency/idempotency.js";
 
 const idemContract = {
   ...contract,
@@ -31,8 +34,7 @@ const idemContract = {
   },
 };
 
-async function idemRouter(): Promise<Record<string, unknown>> {
-  const { runIdempotentCreate } = await s7.idempotency();
+function idemRouter(): Record<string, unknown> {
   const os = implement(idemContract).$context<RequestContext>();
   return {
     meta: metaRouter,
@@ -65,7 +67,7 @@ let app: FastifyInstance | undefined;
 let userId = "";
 
 beforeAll(async () => {
-  const router = await idemRouter();
+  const router = idemRouter();
   const b = await buildApiContainer({
     authHook: { authenticate: () => Promise.resolve(testPrincipal({ userId })) },
   });
@@ -195,7 +197,6 @@ describe("TP-7.18x: idempotent creates, further cases (F-102)", () => {
   });
 
   it("TP-7.18x: (A-233, A-236) the stored request_hash is requestHashOf(the validated input)", async () => {
-    const { requestHashOf } = await s7.idempotency();
     const key = "0190a0b0-1c2d-7e3f-8a4b-0000000000c5";
     await post(key, { name: "hashed" });
 

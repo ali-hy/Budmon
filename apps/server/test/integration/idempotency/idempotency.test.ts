@@ -8,8 +8,17 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { withTransaction } from "../../../src/platform/db/transaction.js";
 import { IdempotencyKeyReusedError } from "../../../src/platform/errors/platformErrors.js";
 import { observed, type Observed } from "../../support/api.js";
-import { s7, type CreatedResult, type Idempotency } from "../../support/s7.js";
 import { createTestDatabase, type TestDatabase } from "../../support/testDatabase.js";
+import {
+  type CreatedResult,
+  type Idempotency,
+  createIdempotency,
+} from "../../../src/platform/idempotency/idempotency.js";
+import {
+  complete,
+  find,
+  insertIfAbsent,
+} from "../../../src/platform/idempotency/idempotencyRepo.js";
 
 // A-234: user ids come only from createTestUser.
 let USER_A: string;
@@ -25,7 +34,6 @@ beforeAll(async () => {
   USER_A = await createTestUser(testDb);
   USER_B = await createTestUser(testDb);
   obs = observed();
-  const { createIdempotency } = await s7.idempotency();
   idempotency = createIdempotency({ clock: fixedClock(NOW), metrics: obs.metrics });
 });
 
@@ -192,7 +200,6 @@ describe("TP-7.6: failing work (F-100)", () => {
 
 describe("TP-7.17x: F-101 idempotencyRepo", () => {
   it("TP-7.17x: insertIfAbsent is true then false; find before complete has a null status and result; complete sets them", async () => {
-    const { insertIfAbsent, find, complete } = await s7.idempotencyRepo();
     const key = newKey();
     const hash = createHash("sha256").update("x").digest();
     const r = {
