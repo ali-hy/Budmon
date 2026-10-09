@@ -2,7 +2,7 @@
 module: platform
 doc: lld
 status: approved # draft | in-review | approved
-version: 0.71
+version: 0.72
 hld_version: 1.3
 author: planner
 approved_by: the user (project owner), delegated auto-approval
@@ -137,6 +137,7 @@ Nothing in that list changes application code (D-29 rule 2).
 | 0.69    | 2026-10-09 | Implementation-time amendments A-258, A-259 (S-8 code review notes). **A-258:** F-112 accepts only key versions of the configured capture key before calling KMS. **A-259:** a malformed 200 from the token endpoint (missing `access_token`/`expires_in`, or a non-finite or non-positive `expires_in`) is `rejected`, not retryable; supersedes that row of A-255. Tests: TP-8.5, TP-8.12 extended. Approval stands. |
 | 0.70    | 2026-10-09 | Implementation-time amendment A-260: `createKmsCaptureUnsealer` takes a required `configuredKeyVersion`; the A-258 check can't be skipped. Tests: TP-8.5 extended. Approval stands. |
 | 0.71    | 2026-10-09 | Implementation-time amendment A-261 (text only): TP-8.15's drift guard records reads on `parseConfig`'s `env` (F-10 now names `parseConfig` and `RawConfigInput`); F-112's signature already has the required `configuredKeyVersion`. Approval stands. |
+| 0.72    | 2026-10-09 | Implementation-time amendment A-262 (S-8 round-2 note): `expires_in` must be finite with 0 < value ≤ 31 622 400 (366 days), else `rejected`. Tests: TP-8.12 extended. Approval stands. |
 
 ## Amendments
 
@@ -403,6 +404,7 @@ Nothing in that list changes application code (D-29 rule 2).
 | A-259 | N-4b (S-8 code review): a 200 means Google has consumed the single-use code, so retrying a malformed 200 as `server` (A-255) can only yield `invalid_grant`. N-4a (being fixed): a non-finite or non-positive `expires_in` is also malformed. | **`rejected`, not retryable,** for every malformed 200: missing `access_token`, missing `expires_in`, or `expires_in` not a finite positive number. The user reconnects. This replaces A-255's `server` row; A-255's 3xx → `rejected` row stands. | F-120, A-255, TP-8.12 | none | planner decision |
 | A-260 | A-258's check needs the configured key; the engineer added an optional `configuredKeyVersion` to `createKmsCaptureUnsealer`'s deps, and the check is skipped when it's absent (software-engineer, `c40abe4`). | **Required.** It's a security boundary, so it can't be skippable: `createKmsCaptureUnsealer(deps: { client; configuredKeyVersion: string; timeoutMs?; metrics })`. The factory throws `TypeError("configured key version required")` when it doesn't match F-10's KMS key-version pattern, so a misconfiguration fails at container build, not at the first unseal. The container passes `config.capture.keyVersion`; tests pass a value. | F-112, TP-8.5 | none | planner decision |
 | A-261 | (1) A-251's drift guard, a recording `Proxy` passed to `loadConfig`, proves nothing: `loadConfig` enumerates `env` with `Object.entries` to scope it, so every key is recorded; (2) is `configuredKeyVersion` required in F-112's signature? (test-architect) | **Text only.** (1) F-10 names its pure parsing entry, which `loadConfig` calls after scoping `env` to `configKeysFor` and reading the `*_FILE` files: `export interface RawConfigInput { env: Readonly<Record<string, string \| undefined>>; files: Readonly<Record<string, string \| null>> }; export function parseConfig(kind: ProcessKind, input: RawConfigInput): { ok: true; config: Config } \| { ok: false; problems: ConfigProblem[] }`. TP-8.15's guard wraps `input.env` given to **`parseConfig`** in the recording `Proxy`, with every known variable outside the list also set, and asserts the recorded reads ⊆ `configKeysFor(kind, roles)`. A-251's wording is superseded. (2) Checked: F-112's signature line has `configuredKeyVersion: string` as a required member (A-260); no change. | F-10, A-251, TP-8.15 | none | planner decision |
+| A-262 | A finite but huge `expires_in` (e.g. `1e300`) makes `Temporal.Instant.add` throw `RangeError` instead of `OAuthExchangeError` (S-8 round-2 review, non-blocking). | **Upper bound:** a 200 is well-formed only when `expires_in` is a finite number with `0 < expires_in ≤ 86400 × 366` (31 622 400 s); anything else is `rejected`, not retryable (the code is spent, A-259). Google's access tokens last an hour, so the bound never refuses a real answer. | F-120, A-259, TP-8.12 | none | planner decision |
 
 ## 1. Deviations from the HLD, and decisions the HLD left open
 
@@ -2073,7 +2075,7 @@ Pure functions with no I/O. Imported by the server and the web app. Android mirr
   | 5xx or 429 | `server` | true |
   | Network error or timeout | `network` | true |
   | Any other status, including 3xx (never followed) (A-255) | `rejected` | false |
-  | 200 without `access_token`, without `expires_in`, or with an `expires_in` that isn't a finite positive number (A-255, A-259) | `rejected` | false |
+  | 200 without `access_token`, without `expires_in`, or with an `expires_in` that isn't a finite number with `0 < expires_in ≤ 31622400` (366 days) (A-255, A-259, A-262) | `rejected` | false |
 
   Response bodies are never kept on the error.
 
@@ -3890,7 +3892,7 @@ Types: **U** unit, **I** integration (real Postgres and/or HTTP in-process), **E
 | TP-8.9 | S-8 | U | F-115 | none | table `Bad-Name`; purpose `has space`; a duplicate | `TypeError` ×3 |
 | TP-8.10 | S-8 | U | F-119 | `randomBytes` returning RFC 7636 appendix B bytes | `createPkcePair` | verifier `dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk`, challenge `E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM` |
 | TP-8.11 | S-8 | U | F-119 | none | `buildGoogleAuthorizationUrl(...)` | Host, path and exactly the listed parameters |
-| TP-8.12 | S-8 | U | F-120 | `fakeFetch` | 200 full; 200 without refresh; 400 invalid_grant (description = canary); 403; 503; 429; network error; timeout; (A-255) 302 with a `Location`; 200 `{ refresh_token }` without `access_token`; 200 without `expires_in`; (A-259) 200 with `expires_in` `0`, `-5`, `"abc"` | Tokens (`Secret`s), `expiresAt` = now + `expires_in`; `no_refresh_token`; `invalid_grant`; `rejected`; `server`; `server`; `network`; `network`. The request body has `grant_type`, `code`, `code_verifier`, `client_id`, `client_secret`, `redirect_uri`. The canary never appears in the errors' properties or messages; (A-255, A-259) `rejected` (not followed, not retryable); `rejected` ×2 (not retryable); (A-259) `rejected` ×3 |
+| TP-8.12 | S-8 | U | F-120 | `fakeFetch` | 200 full; 200 without refresh; 400 invalid_grant (description = canary); 403; 503; 429; network error; timeout; (A-255) 302 with a `Location`; 200 `{ refresh_token }` without `access_token`; 200 without `expires_in`; (A-259) 200 with `expires_in` `0`, `-5`, `"abc"`; (A-262) 200 with `expires_in` `1e300`; with `31622400`; with `31622401` | Tokens (`Secret`s), `expiresAt` = now + `expires_in`; `no_refresh_token`; `invalid_grant`; `rejected`; `server`; `server`; `network`; `network`. The request body has `grant_type`, `code`, `code_verifier`, `client_id`, `client_secret`, `redirect_uri`. The canary never appears in the errors' properties or messages; (A-255, A-259) `rejected` (not followed, not retryable); `rejected` ×2 (not retryable); (A-259) `rejected` ×3; (A-262) `rejected` (no `RangeError`); accepted; `rejected` |
 | TP-8.13 | S-8 | U | F-121 | inner fetch spy | `https://gmail.googleapis.com/x`; `http://gmail.googleapis.com/`; `https://evil.example/`; `https://gmail.googleapis.com:8443/`; `https://u:p@gmail.googleapis.com/` | Called with `redirect:"manual"`; `EgressDeniedError` ×4; inner not called |
 | TP-8.14 | S-8 | I | F-122 | local HTTPS target and a CONNECT proxy recording hosts (test helper) | (a) `HTTPS_PROXY` set; (b) set with `NO_PROXY` including the target; (c) unset — each in a child process calling `installProxySupport` then `fetch` | (a) the proxy saw a CONNECT to the target; (b), (c) no CONNECT; requests succeed |
 | TP-8.16 | S-8 | I | F-96, F-117 `rewrapApiSecretsCommand`, F-93 (A-26) | `sealed_test` as in TP-8.7 with 2 rows sealed under k1; config current `k2`; an API container whose `sealedColumns` override has `sealed_test` registered (provider api) | `rewrapApiSecretsCommand(c)`; `createApiContainer(config).sealedColumns.all()`; CLI `secrets:rewrap-api` on that database (nothing registered); (A-250) the CLI run uses kind `api` with the test helpers' minimal api environment, `DB_*` for the test database as `budmon_app` and `API_SECRETS_KEYS_FILE` = `{ current: k2, keys: { k1, k2 } }` | `{rewrapped:2, skipped:0}` and both rows under `k2`; `[]`; stdout `{"rewrapped":0,"skipped":0}`, exit 0 |
