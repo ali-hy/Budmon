@@ -2,8 +2,8 @@
 // reference data. S-6 adds the queue steps.
 import type { AppEnv, DbLoginRole } from "../config/schema.js";
 import type { Logger } from "../observability/logger.js";
-import { applyTableGrants } from "./grants.js";
-import { applyCommittedMigrations } from "./migrations.js";
+import { applyTableGrants, grantMigrationsTableRead } from "./grants.js";
+import { applyCommittedMigrations, readJournal } from "./migrations.js";
 import { loadReferenceData, type ReferenceData } from "./referenceData.js";
 import { applyRolesAndPrivileges } from "./roles.js";
 import type { Database } from "./types.js";
@@ -48,9 +48,16 @@ export async function runSchemaStep(input: {
     )) as typeof import("./schemaPush.js");
     pushedStatements = (await timed("push", () => pushSchemaOntoEmpty(database.handle))).statements;
   } else {
-    migrationsApplied = (
-      await timed("migrations", () => applyCommittedMigrations(database, input.migrationsFolder))
-    ).applied;
+    const migrations = await timed("migrations", () =>
+      applyCommittedMigrations(database, input.migrationsFolder),
+    );
+    migrationsApplied = migrations.applied;
+    // 2b (A-179): an empty journal and nothing recorded means no tables yet (every build before
+    // the first release): only the migrations table's grant applies, and the step stops here.
+    if (readJournal(input.migrationsFolder).length === 0 && migrations.verified === 0) {
+      await timed("grants", () => grantMigrationsTableRead(database.handle));
+      return { migrationsApplied: 0, pushedStatements: 0, currenciesUpserted: 0 };
+    }
   }
 
   await timed("grants", () => applyTableGrants(database.handle));

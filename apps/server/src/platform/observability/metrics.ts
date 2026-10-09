@@ -20,6 +20,8 @@ export const METRIC_LABELS: ReadonlySet<string> = new Set([
   "drop_kind",
   "limiter",
   "provider",
+  // A-178: http_client_errors_total.
+  "reason",
 ]);
 
 const NAME = /^[a-z][a-z0-9_]{2,63}$/;
@@ -115,6 +117,8 @@ export interface PlatformMetrics {
   jobDuration: Histogram;
   jobsDeadLettered: Counter;
   telemetryAttributesDropped: Counter;
+  /** A-178: connection-level errors answered by clientErrorHandler. */
+  httpClientErrors: Counter;
   rateLimited: Counter;
   idempotentReplays: Counter;
   clientUpdateRequired: Counter;
@@ -162,6 +166,11 @@ export function registerPlatformMetrics(m: Metrics): PlatformMetrics {
       "telemetry_attributes_dropped_total",
       "Telemetry attributes, fields and labels dropped",
       ["signal", "drop_kind"],
+    ),
+    httpClientErrors: counter(
+      "http_client_errors_total",
+      "Connection-level client errors answered before a request existed",
+      ["reason"],
     ),
     rateLimited: counter("rate_limited_total", "Requests refused by a rate limiter", ["limiter"]),
     idempotentReplays: counter("idempotent_replays_total", "Creates answered from a record", []),

@@ -9,14 +9,25 @@ import type { Router } from "@orpc/server";
 import { RequestHeadersPlugin, ResponseHeadersPlugin } from "@orpc/server/plugins";
 import { ZodToJsonSchemaConverter } from "@orpc/zod/zod4";
 import { trace } from "@opentelemetry/api";
-import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
+import type { Socket } from "node:net";
+import Fastify, {
+  type FastifyError,
+  type FastifyInstance,
+  type FastifyReply,
+  type FastifyRequest,
+} from "fastify";
 import { serverRoot } from "../config/serverRoot.js";
 import type { ApiContainer } from "../container.js";
 import { readJournal } from "../db/migrations.js";
 import { createCommitTracker } from "../db/transaction.js";
 import { createErrorInterceptor } from "../errors/interceptor.js";
 import { registerRequestLog, type RequestLogRequest } from "../observability/requestLog.js";
-import { registerBodyHandling, registerSecurityHeaders, BODY_LIMIT } from "../security/headers.js";
+import {
+  applySecurityHeaders,
+  registerBodyHandling,
+  registerSecurityHeaders,
+  BODY_LIMIT,
+} from "../security/headers.js";
 import { appRouter } from "./appRouter.js";
 import { clientVersionMiddleware, parseClientHeader } from "./clientVersion.js";
 import type { RequestContext } from "./context.js";
@@ -53,6 +64,21 @@ function lowerCaseHeaders(request: FastifyRequest): Record<string, string | unde
   return out;
 }
 
+/** A-178: connection-level errors get a fixed, bodiless answer; no request exists. */
+const CLIENT_ERROR_RESPONSES = {
+  bad_request: "HTTP/1.1 400 Bad Request",
+  timeout: "HTTP/1.1 408 Request Timeout",
+  headers_too_large: "HTTP/1.1 431 Request Header Fields Too Large",
+} as const;
+
+function clientErrorReason(err: unknown): keyof typeof CLIENT_ERROR_RESPONSES {
+  const code =
+    typeof err === "object" && err !== null ? (err as { code?: unknown }).code : undefined;
+  if (code === "HPE_HEADER_OVERFLOW") return "headers_too_large";
+  if (code === "ERR_HTTP_REQUEST_TIMEOUT") return "timeout";
+  return "bad_request";
+}
+
 export async function createApiServer(
   c: ApiContainer,
   opts: {
@@ -73,6 +99,48 @@ export async function createApiServer(
     requestTimeout: 30000,
     return503OnClosing: true,
     genReqId: () => requestId(c.ids),
+    // A-178: errors before routing (a bad percent-encoding) get the platform envelope; nothing
+    // from the URL or headers is echoed.
+    frameworkErrors: (error: FastifyError, request: FastifyRequest, reply: FastifyReply) => {
+      const invalidUrl = error.code === "FST_ERR_BAD_URL";
+      applySecurityHeaders(reply);
+      reply.header("x-request-id", request.id);
+      reply.code(400);
+      // No hook runs for these replies, so F-38's line is written here.
+      c.logger.info("http_request", {
+        method: request.method,
+        route: "/unmatched",
+        status: 400,
+        statusClass: "4xx",
+        durationMs: reply.elapsedTime,
+        clientKind: "other",
+        requestId: request.id,
+      });
+      void reply.send({
+        defined: true,
+        code: "VALIDATION_FAILED",
+        status: 400,
+        message: "Validation failed",
+        data: {
+          issues: [
+            invalidUrl
+              ? { path: [], code: "invalid_url", message: "Request URL is not valid." }
+              : { path: [], code: "invalid_request", message: "Request is not valid." },
+          ],
+        },
+      });
+    },
+    clientErrorHandler: (err: Error, socket: Socket) => {
+      if ((err as { code?: unknown }).code === "ECONNRESET" || socket.destroyed) return;
+      const reason = clientErrorReason(err);
+      c.metrics.httpClientErrors.add(1, { reason });
+      if (socket.writable) {
+        socket.write(
+          `${CLIENT_ERROR_RESPONSES[reason]}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`,
+        );
+      }
+      socket.destroy();
+    },
   });
   app.decorateRequest("budmon", null);
   app.decorateRequest("orpcRoute", undefined);
@@ -160,7 +228,11 @@ export async function createApiServer(
     clientInterceptors: [
       (options) => {
         const procedureRoute = options.procedure["~orpc"].route.path;
-        if (procedureRoute !== undefined) options.context.matched.route = procedureRoute;
+        if (procedureRoute !== undefined) {
+          options.context.matched.route = procedureRoute;
+          // A-176: the route template on the active span, in place of the raw path.
+          trace.getActiveSpan()?.setAttribute("budmon.route", procedureRoute);
+        }
         return errors({
           next: () =>
             versions({

@@ -11,7 +11,7 @@ import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
 import { HttpInstrumentation } from "@opentelemetry/instrumentation-http";
 import { PgInstrumentation } from "@opentelemetry/instrumentation-pg";
 import { UndiciInstrumentation } from "@opentelemetry/instrumentation-undici";
-import { metrics as metricsApi, type Attributes } from "@opentelemetry/api";
+import { metrics as metricsApi, SpanKind, type Attributes } from "@opentelemetry/api";
 import { resourceFromAttributes } from "@opentelemetry/resources";
 import {
   PeriodicExportingMetricReader,
@@ -27,12 +27,14 @@ import {
 import type { AppEnv } from "../config/schema.js";
 import type { Secret } from "./redaction.js";
 import { createMetrics, METRIC_LABELS, type Metrics } from "./metrics.js";
+import { isRoute } from "./safeFields.js";
 
 /** What the pinned instrumentations emit beyond the allowlist (F-40). Entries ending in "." are
  * prefixes. */
 export const EXPECTED_DROPPED_SPAN_ATTRIBUTES: readonly string[] = [
   "url.full",
   "url.query",
+  "url.path",
   "url.original",
   "user_agent.original",
   "client.address",
@@ -77,7 +79,6 @@ export const SPAN_ATTRIBUTE_ALLOWLIST: ReadonlySet<string> = new Set([
   "http.response.status_code",
   "http.route",
   "url.scheme",
-  "url.path",
   "server.address",
   "server.port",
   "network.protocol.version",
@@ -88,6 +89,7 @@ export const SPAN_ATTRIBUTE_ALLOWLIST: ReadonlySet<string> = new Set([
   "db.query.text",
   "rpc.system",
   "rpc.method",
+  "budmon.route",
   "budmon.job.name",
   "budmon.queue",
   "budmon.error.key",
@@ -276,14 +278,24 @@ export class AllowlistSpanExporter implements SpanExporter {
           else unexpected += 1;
           continue;
         }
+        // A-177: on SERVER spans these come from the client's Host header.
+        if (span.kind === SpanKind.SERVER && (key === "server.address" || key === "server.port")) {
+          expected += 1;
+          continue;
+        }
+        // A-176: the route template, checked with F-30's route rule.
+        if (key === "budmon.route") {
+          if (isRoute(value)) attributes[key] = value;
+          else unexpected += 1;
+          continue;
+        }
         if (key === "db.query.text") {
           const masked = typeof value === "string" ? maskQueryText(value) : null;
           if (masked === null) unexpected += 1;
           else attributes[key] = masked;
           continue;
         }
-        attributes[key] =
-          key === "url.path" && typeof value === "string" ? (value.split(/[?#]/)[0] ?? "") : value;
+        attributes[key] = value;
       }
       let name = spanName(span);
       if (!SPAN_NAME.test(name)) {

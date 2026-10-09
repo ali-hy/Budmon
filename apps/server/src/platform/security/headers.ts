@@ -1,6 +1,6 @@
 // F-61 security headers and F-62 body handling (delivered in S-4, A-124).
 import helmet from "@fastify/helmet";
-import type { FastifyError, FastifyInstance } from "fastify";
+import type { FastifyError, FastifyInstance, FastifyReply } from "fastify";
 import secureJson from "secure-json-parse";
 import type { ErrorReporter } from "../observability/errorReporter.js";
 import type { Logger } from "../observability/logger.js";
@@ -19,6 +19,27 @@ export async function registerSecurityHeaders(app: FastifyInstance): Promise<voi
     crossOriginResourcePolicy: { policy: "same-origin" },
     xContentTypeOptions: true,
   });
+}
+
+/** F-61's headers as helmet sends them (A-151), for responses written outside the hooks that
+ * helmet uses: Fastify's frameworkErrors answer before any onRequest hook runs (A-178). */
+const SECURITY_HEADERS: Readonly<Record<string, string>> = {
+  "content-security-policy": "default-src 'none';frame-ancestors 'none'",
+  "cross-origin-opener-policy": "same-origin",
+  "cross-origin-resource-policy": "same-origin",
+  "origin-agent-cluster": "?1",
+  "referrer-policy": "no-referrer",
+  "strict-transport-security": "max-age=31536000; includeSubDomains",
+  "x-content-type-options": "nosniff",
+  "x-dns-prefetch-control": "off",
+  "x-download-options": "noopen",
+  "x-frame-options": "SAMEORIGIN",
+  "x-permitted-cross-domain-policies": "none",
+  "x-xss-protection": "0",
+};
+
+export function applySecurityHeaders(reply: FastifyReply): void {
+  for (const [name, value] of Object.entries(SECURITY_HEADERS)) reply.header(name, value);
 }
 
 export const BODY_LIMIT = 102400;

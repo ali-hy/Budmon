@@ -12,9 +12,19 @@ import { getTelemetry } from "../platform/observability/telemetryHandle.js";
 const state = startupState("api", process.env);
 installFatalHandlers(state);
 
-/** Runs `fn`, giving up after `ms` (each shutdown step has a 10 s deadline). */
+/** A-180: the whole shutdown fits in 8 s, inside Compose's 15 s grace period. */
+const SHUTDOWN_BUDGET_MS = 8_000;
+
+/** Runs `fn`, giving up after `ms`; a rejection counts as done. */
 async function withDeadline(fn: () => Promise<unknown>, ms: number): Promise<void> {
-  await Promise.race([fn(), new Promise((resolve) => setTimeout(resolve, ms))]);
+  let timer: NodeJS.Timeout | undefined;
+  await Promise.race([
+    fn().catch(() => undefined),
+    new Promise((resolve) => {
+      timer = setTimeout(resolve, Math.max(0, ms));
+    }),
+  ]);
+  clearTimeout(timer);
 }
 
 async function main(): Promise<number | null> {
@@ -40,10 +50,14 @@ async function main(): Promise<number | null> {
   logger.info("api_started");
 
   const stop = (): void => {
+    const deadline = Date.now() + SHUTDOWN_BUDGET_MS;
+    const remaining = (cap: number): number => Math.min(cap, deadline - Date.now());
+    // When the budget runs out, exit anyway: unflushed telemetry is dropped.
+    setTimeout(() => process.exit(0), SHUTDOWN_BUDGET_MS).unref();
     void (async () => {
-      await withDeadline(() => app.close(), 10_000);
-      await withDeadline(() => container.close(), 10_000);
-      await withDeadline(() => telemetry.shutdown(), 10_000);
+      await withDeadline(() => app.close(), remaining(5_000));
+      await withDeadline(() => container.close(), remaining(2_000));
+      await withDeadline(() => telemetry.shutdown(), remaining(2_000));
       process.exit(0);
     })();
   };

@@ -36,6 +36,10 @@ export async function applyTableGrants(
   const tables = rows.map((row) => String(row["tablename"]));
 
   // Validate everything before the first statement.
+  for (const table of Object.keys(grants)) {
+    // A-179: a listed table that doesn't exist is a schema defect, not a raw 42P01.
+    if (!tables.includes(table)) throw new SchemaStepError("table_missing", table);
+  }
   for (const table of tables) {
     const grant = grants[table];
     if (grant === undefined) throw new SchemaStepError("table_without_grants", table);
@@ -80,8 +84,12 @@ export async function applyTableGrants(
     }
   }
 
-  // 5. The API's readiness check reads the migrations table (A-130). Push-mode databases have no
-  // drizzle schema and skip this.
+  await grantMigrationsTableRead(migrator);
+}
+
+/** F-16 step 5 (A-130): the API's readiness check reads the migrations table. Push-mode databases
+ * have no drizzle schema and skip this. */
+export async function grantMigrationsTableRead(migrator: DbHandle): Promise<void> {
   const drizzle = await migrator.executeSql(
     "SELECT to_regclass('drizzle.__drizzle_migrations') IS NOT NULL AS present",
   );

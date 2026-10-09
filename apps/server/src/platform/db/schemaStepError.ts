@@ -6,7 +6,8 @@ export type SchemaStepCode =
   | "table_without_grants"
   | "credential_table_granted_to_capture"
   | "minor_units_changed"
-  | "role_attributes_unexpected";
+  | "role_attributes_unexpected"
+  | "table_missing";
 
 export class SchemaStepError extends Error {
   readonly code: SchemaStepCode;
