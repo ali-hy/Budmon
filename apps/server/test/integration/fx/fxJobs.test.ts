@@ -1,5 +1,5 @@
 // F-137 FX jobs, F-138 enqueueRatesAdded and F-139 fxGapCheck on template copies. TP-9.9 to
-// TP-9.11, TP-9.14 and TP-9.19, plus extra cases TP-9.22x. IDs ending in "x" are test-architect
+// TP-9.11, TP-9.14 and TP-9.19, plus extra cases TP-9.23x. IDs ending in "x" are test-architect
 // additions, not LLD test-plan IDs.
 //
 // Handlers are reached through buildHandlerMap(c) and run with a JobContext built here, so
@@ -16,7 +16,13 @@ import { buildWorkerContainer, type BuiltWorker } from "../../support/worker.js"
 import { fxGapCheck } from "../../../src/platform/fx/fxJobs.js";
 import { RatesAddedPayload } from "../../../src/platform/fx/fxService.js";
 import { type FxProvider, FxProviderError } from "../../../src/platform/fx/providers.js";
-import { fakeProvider, queuedJobs, storeDay, storedRates } from "../../support/s9.js";
+import {
+  beforeStatement,
+  fakeProvider,
+  queuedJobs,
+  storeDay,
+  storedRates,
+} from "../../support/s9.js";
 
 const FETCH = "platform.fx-rates-fetch";
 const BACKFILL = "platform.fx-backfill";
@@ -120,7 +126,7 @@ describe("TP-9.9: the daily fetch and the rates-added fan-out (F-137, F-138)", (
     expect(await queuedJobs(b.testDb, TEST_FX_RATES_ADDED.name)).toHaveLength(1);
   });
 
-  it("TP-9.22x: fx_rates_fetched_total{provider} +1 and one fx_day_stored line {rateDate, provider, inserted, rejected}; affectedTo is null with no later day", async () => {
+  it("TP-9.23x: fx_rates_fetched_total{provider} +1 and one fx_day_stored line {rateDate, provider, inserted, rejected}; affectedTo is null with no later day", async () => {
     const primary = fakeProvider("openexchangerates", rates({ EGP: "48.5", JPY: "149.25" }));
     const b = await worker("2026-10-05T00:30:00Z", primary, fakeProvider("fawazahmed0", rates({})));
     b.container.fx.registerRatesAddedSubscriber({
@@ -144,13 +150,58 @@ describe("TP-9.9: the daily fetch and the rates-added fan-out (F-137, F-138)", (
     ]);
   });
 
-  it("TP-9.22x: the rate day comes from createdOn, not the clock: a retry a day later still fetches 2026-10-04", async () => {
+  it("TP-9.23x: the rate day comes from createdOn, not the clock: a retry a day later still fetches 2026-10-04", async () => {
     const primary = fakeProvider("openexchangerates", rates({ EGP: "48.5" }));
     const b = await worker("2026-10-05T05:00:00Z", primary, fakeProvider("fawazahmed0", rates({})));
 
     await run(b, FETCH, {}, "2026-10-05T00:30:00Z");
 
     expect(primary.calls).toEqual(["2026-10-04"]);
+  });
+});
+
+describe("TP-9.9 (A-282): rates-added only when rows were inserted", () => {
+  it("TP-9.9 (A-282): a backfill for 2026-10-04 that finds the day already inserted (the fetch stores it between the backfill's dayExists and its insert) enqueues no second subscriber job", async () => {
+    const primary = fakeProvider("openexchangerates", rates({ EGP: "48.5", JPY: "149.25" }));
+    const fallback = fakeProvider("fawazahmed0", rates({ EGP: "48.6", JPY: "149.3" }));
+    const b = await worker("2026-10-05T00:30:00Z", primary, fallback);
+    b.container.fx.registerRatesAddedSubscriber({
+      ...TEST_FX_RATES_ADDED,
+      payload: RatesAddedPayload,
+    });
+    // The backfill's container: just before its insert into exchange_rates, the daily fetch (on
+    // the unwrapped container) stores the same day.
+    const racing = {
+      ...b.container,
+      database: beforeStatement(
+        b.container.database,
+        /insert\s+into\s+"?exchange_rates/i,
+        async () => {
+          await run(b, FETCH, {}, "2026-10-05T00:30:00Z");
+        },
+      ),
+    };
+    const handler = buildHandlerMap(racing).get(BACKFILL);
+    if (handler === undefined) throw new Error("no backfill handler");
+
+    await handler(
+      { rateDate: "2026-10-04" },
+      {
+        jobId: "0190a0b0-1c2d-7e3f-8a4b-5c6d7e8f9a0c",
+        attempt: 1,
+        createdOn: Temporal.Instant.from("2026-10-05T00:30:00Z"),
+        logger: b.container.logger,
+        signal: new AbortController().signal,
+      },
+    );
+
+    expect(primary.calls).toEqual(["2026-10-04"]);
+    expect(fallback.calls).toEqual(["2026-10-04"]);
+    expect((await storedRates(b.testDb)).map((r) => [r.code, r.unitsPerUsd, r.provider])).toEqual([
+      ["EGP", "48.500000000000", "openexchangerates"],
+      ["JPY", "149.250000000000", "openexchangerates"],
+    ]);
+    expect(await queuedJobs(b.testDb, TEST_FX_RATES_ADDED.name)).toHaveLength(1);
   });
 });
 
@@ -174,7 +225,7 @@ describe("TP-9.10: the fallback after 6 hours (F-137)", () => {
     ]);
   });
 
-  it("TP-9.22x: at 5 h 59 min the primary is still used, and its failure throws for a retry", async () => {
+  it("TP-9.23x: at 5 h 59 min the primary is still used, and its failure throws for a retry", async () => {
     const primary = fakeProvider("openexchangerates", failWith("http", 500));
     const fallback = fakeProvider("fawazahmed0", rates({ EGP: "48.6" }));
     const b = await worker("2026-10-05T06:29:00Z", primary, fallback);
@@ -187,13 +238,14 @@ describe("TP-9.10: the fallback after 6 hours (F-137)", () => {
 });
 
 describe("TP-9.11: bad provider data (F-137)", () => {
-  it("TP-9.11: EGP valid, XAU (not in the table), ZWL inactive, EUR 0, GBP abc: only EGP stored, fx_rates_rejected_total 2; a provider with only invalid values throws FxProviderError(invalid) and stores nothing", async () => {
+  it("TP-9.11: EGP valid, XAU (not in the table), ZWL inactive, EUR 0, GBP abc, JPY 4e-13: only EGP stored, fx_rates_rejected_total 3; a provider with only invalid values throws FxProviderError(invalid) and stores nothing", async () => {
     let answer: Record<string, string> = {
       EGP: "48.5",
       XAU: "0.0005",
       ZWL: "322",
       EUR: "0",
       GBP: "abc",
+      JPY: "4e-13",
     };
     const primary = fakeProvider("openexchangerates", () =>
       Promise.resolve(new Map(Object.entries(answer))),
@@ -211,11 +263,11 @@ describe("TP-9.11: bad provider data (F-137)", () => {
       },
     ]);
     expect(await metricSum(b, "fx_rates_rejected_total", { provider: "openexchangerates" })).toBe(
-      2,
+      3,
     );
-    // A-274: the logged count matches; XAU and ZWL are skipped uncounted.
+    // A-274, A-280: EUR, GBP and JPY (4e-13) are rejected; XAU and ZWL skipped uncounted.
     expect(events(b, "fx_day_stored")).toEqual([
-      expect.objectContaining({ rateDate: "2026-10-04", inserted: 1, rejected: 2 }),
+      expect.objectContaining({ rateDate: "2026-10-04", inserted: 1, rejected: 3 }),
     ]);
 
     answer = { EUR: "0", GBP: "abc", JPY: "-1" };
@@ -287,7 +339,7 @@ describe("TP-9.14: backfill (F-137)", () => {
     ]);
   });
 
-  it("TP-9.22x: a stored day completes without fetching; another provider error throws for a retry", async () => {
+  it("TP-9.23x: a stored day completes without fetching; another provider error throws for a retry", async () => {
     const fallback = fakeProvider("fawazahmed0", failWith("http", 503));
     const b = await worker(
       "2026-10-05T12:00:00Z",
@@ -325,7 +377,7 @@ describe("TP-9.14 (A-275): backfill dates out of range", () => {
     expect(warned.every((l) => l["level"] === "warn")).toBe(true);
   });
 
-  it("TP-9.22x (A-275): the floor itself (2024-03-02) and yesterday (2026-10-04) are in range", async () => {
+  it("TP-9.23x (A-275): the floor itself (2024-03-02) and yesterday (2026-10-04) are in range", async () => {
     const fallback = fakeProvider("fawazahmed0", rates({ EGP: "48.3" }));
     const b = await worker(
       "2026-10-05T12:00:00Z",

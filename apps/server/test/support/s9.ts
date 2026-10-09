@@ -1,5 +1,6 @@
 // S-9 test support (FX rates and conversion), owned by the test-architect: data helpers for
 // exchange_rates and pgboss.job, and a fake FxProvider.
+import type { Database } from "../../src/platform/db/types.js";
 import type { FxProvider, FxProviderName } from "../../src/platform/fx/providers.js";
 import { query } from "./postgres.js";
 import type { TestDatabase } from "./testDatabase.js";
@@ -70,4 +71,67 @@ export function fakeProvider(
       return answer(date);
     },
   };
+}
+
+/**
+ * `db` with a hook: before the first statement whose text matches `match`, `before()` runs once
+ * (another connection's change between a check and a write; A-245's pattern). Covers the pool's
+ * clients, `pool.query` and `handle.executeSql`.
+ */
+export function beforeStatement(
+  db: Database,
+  match: RegExp,
+  before: () => Promise<void>,
+): Database {
+  let fired = false;
+  const hook = async (text: unknown): Promise<void> => {
+    const inner = typeof text === "string" ? undefined : (text as { text?: unknown }).text;
+    const sql = typeof text === "string" ? text : typeof inner === "string" ? inner : "";
+    if (!fired && match.test(sql)) {
+      fired = true;
+      await before();
+    }
+  };
+  const wrapClient = <C extends { query: (...args: never[]) => unknown }>(client: C): C =>
+    new Proxy(client, {
+      get(target, prop, receiver) {
+        if (prop === "query") {
+          return async (text: unknown, values?: unknown) => {
+            await hook(text);
+            return (target.query as (...a: unknown[]) => unknown).call(target, text, values);
+          };
+        }
+        const value: unknown = Reflect.get(target, prop, receiver);
+        return typeof value === "function"
+          ? (value as (...a: unknown[]) => unknown).bind(target)
+          : value;
+      },
+    });
+  const pool = new Proxy(db.pool, {
+    get(target, prop, receiver) {
+      if (prop === "connect") return async () => wrapClient(await target.connect());
+      if (prop === "query") {
+        return async (text: unknown, values?: unknown) => {
+          await hook(text);
+          return (target.query as (...a: unknown[]) => unknown).call(target, text, values);
+        };
+      }
+      const value: unknown = Reflect.get(target, prop, receiver);
+      return typeof value === "function"
+        ? (value as (...a: unknown[]) => unknown).bind(target)
+        : value;
+    },
+  });
+  const handle = new Proxy(db.handle, {
+    get(target, prop, receiver) {
+      if (prop === "executeSql") {
+        return async (text: string, values?: readonly unknown[]) => {
+          await hook(text);
+          return target.executeSql(text, values);
+        };
+      }
+      return Reflect.get(target, prop, receiver) as unknown;
+    },
+  });
+  return { ...db, pool, handle, close: () => db.close() };
 }

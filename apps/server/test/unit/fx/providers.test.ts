@@ -1,5 +1,5 @@
 // F-133 FX providers. TP-9.12 (Open Exchange Rates) and TP-9.13 (fawazahmed0), plus extra cases
-// TP-9.22x. IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
+// TP-9.23x. IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { describe, expect, it, vi } from "vitest";
 import { Secret } from "../../../src/platform/observability/redaction.js";
 import {
@@ -89,6 +89,12 @@ describe("TP-9.12: Open Exchange Rates (F-133)", () => {
       "invalid",
       undefined,
     ],
+    [
+      "a rate given as the string 0.92 (A-281)",
+      () => Promise.resolve(text(200, '{"base":"USD","rates":{"EGP":48.5,"EUR":"0.92"}}')),
+      "invalid",
+      undefined,
+    ],
     ["400", () => Promise.resolve(json(400, { error: true })), "not_found", undefined],
     ["404", () => Promise.resolve(json(404, { error: true })), "not_found", undefined],
     ["500", () => Promise.resolve(json(500, { error: true })), "http", 500],
@@ -170,7 +176,7 @@ describe("TP-9.13: fawazahmed0 (F-133)", () => {
     );
   });
 
-  it("TP-9.22x: a primary network error also retries once on the mirror", async () => {
+  it("TP-9.23x: a primary network error also retries once on the mirror", async () => {
     const { provider, fetchImpl } = fawaz(() => Promise.reject(new TypeError("fetch failed")), ok);
 
     await provider.fetchDay(DATE, new AbortController().signal);
@@ -178,7 +184,7 @@ describe("TP-9.13: fawazahmed0 (F-133)", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
-  it("TP-9.22x: a primary 200 doesn't touch the mirror", async () => {
+  it("TP-9.23x: a primary 200 doesn't touch the mirror", async () => {
     const { provider, fetchImpl } = fawaz(ok);
 
     await provider.fetchDay(DATE, new AbortController().signal);
@@ -190,6 +196,11 @@ describe("TP-9.13: fawazahmed0 (F-133)", () => {
     [
       "a date that isn't the requested one",
       () => Promise.resolve(text(200, '{"date":"2026-10-03","usd":{"egp":48.5}}')),
+      "invalid",
+    ],
+    [
+      "a rate given as a string (A-281)",
+      () => Promise.resolve(text(200, `{"date":"${DATE}","usd":{"egp":48.5,"eur":"0.92"}}`)),
       "invalid",
     ],
     ["404", () => Promise.resolve(json(404, {})), "not_found"],
@@ -204,8 +215,8 @@ describe("TP-9.13: fawazahmed0 (F-133)", () => {
   });
 });
 
-describe("TP-9.22x: the fixed provider (F-133)", () => {
-  it("TP-9.22x: returns the seven fixed rates for any date", async () => {
+describe("TP-9.23x: the fixed provider (F-133)", () => {
+  it("TP-9.23x: returns the seven fixed rates for any date", async () => {
     const provider = createFixedProvider();
 
     const rates = await provider.fetchDay("2020-01-01", new AbortController().signal);

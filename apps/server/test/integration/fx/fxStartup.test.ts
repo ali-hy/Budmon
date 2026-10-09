@@ -1,5 +1,5 @@
 // F-78 and F-139 start-up enqueue, the F-42 freshness gauge and the F-23 FX seeder, on template
-// copies. TP-9.17, TP-9.18 and TP-9.20, plus extra cases TP-9.22x. IDs ending in "x" are
+// copies. TP-9.17, TP-9.18 and TP-9.20, plus extra cases TP-9.23x. IDs ending in "x" are
 // test-architect additions, not LLD test-plan IDs.
 //
 // TP-9.17 (A-265): the general worker observes the gauge, refreshed with the queue depths.
@@ -65,7 +65,7 @@ describe("TP-9.20: the start-up gap check (F-78, F-139)", () => {
         expect(jobs[0]?.singletonKey).toBe("startup");
         expect(jobs[0]?.data).toEqual({});
         expect(schedules).toContainEqual({ name: GAP_CHECK, cron: "45 6 * * *", timezone: "UTC" });
-        // TP-9.22x: the daily fetch is scheduled too (F-137).
+        // TP-9.23x: the daily fetch is scheduled too (F-137).
         expect(schedules).toContainEqual({
           name: "platform.fx-rates-fetch",
           cron: "30 0 * * *",
@@ -180,8 +180,8 @@ describe("TP-9.17: the freshness gauge (F-42)", () => {
   }, 120_000);
 });
 
-describe("TP-9.22x: the freshness gauge with no stored day (A-265)", () => {
-  it("TP-9.22x: an empty exchange_rates gives no fx_last_day_timestamp_seconds data point", async () => {
+describe("TP-9.23x: the freshness gauge with no stored day (A-265)", () => {
+  it("TP-9.23x: an empty exchange_rates gives no fx_last_day_timestamp_seconds data point", async () => {
     const built = await buildWorkerContainer("general");
     const { handlers, release } = heldHandlers(built.container);
     try {

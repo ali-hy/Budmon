@@ -1,4 +1,4 @@
-// F-132 rates-added subscribers. TP-9.15, plus extra cases TP-9.22x.
+// F-132 rates-added subscribers. TP-9.15, plus extra cases TP-9.23x.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 //
 // A-266: registerRatesAddedSubscriber checks the definition (role general, payload identical to
@@ -45,7 +45,7 @@ describe("TP-9.15: subscriber validation (F-132)", () => {
     expect(fx.subscribers()).toEqual([]);
   });
 
-  it("TP-9.22x: a general subscriber with RatesAddedPayload is stored and listed", () => {
+  it("TP-9.23x: a general subscriber with RatesAddedPayload is stored and listed", () => {
     const fx = service();
     const def = subscriber("general", RatesAddedPayload);
 
@@ -67,7 +67,7 @@ describe("TP-9.15: subscriber validation (F-132)", () => {
     }).toThrow(TypeError);
   });
 
-  it("TP-9.22x: RatesAddedPayload takes {rateDate, affectedFrom, affectedTo} with affectedTo nullable", () => {
+  it("TP-9.23x: RatesAddedPayload takes {rateDate, affectedFrom, affectedTo} with affectedTo nullable", () => {
     expect(
       RatesAddedPayload.safeParse({
         rateDate: "2026-10-04",
