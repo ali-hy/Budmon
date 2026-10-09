@@ -30,15 +30,16 @@ async function rewrapColumns(plan: RewrapPlan): Promise<{ rewrapped: number; ski
     const col = escapeIdentifier(column.column);
     // Rows changed concurrently are skipped once; a row still on an old key is tried again in a
     // later batch, so the loop ends when nothing on an old key is left.
-    const seen = new Set<string>();
+    // Ids are kept and bound in the column's own type, so the primary key's index is used.
+    const seen: unknown[] = [];
     for (;;) {
       const { rows } = await plan.database.handle.executeSql(
-        `SELECT ${id}::text AS id, ${col} AS sealed FROM ${table}
+        `SELECT ${id} AS id, ${col} AS sealed FROM ${table}
          WHERE ${col} IS NOT NULL
            AND substring(${col} from 4 for get_byte(${col}, 2)) <> convert_to($1, 'UTF8')
-           AND NOT (${id}::text = ANY($3::text[]))
+           AND NOT (${id} = ANY($3))
          LIMIT $2`,
-        [plan.currentVersion, plan.batchSize, [...seen]],
+        [plan.currentVersion, plan.batchSize, seen],
       );
       const fresh = rows;
       if (fresh.length === 0) break;
@@ -46,16 +47,17 @@ async function rewrapColumns(plan: RewrapPlan): Promise<{ rewrapped: number; ski
         let done = 0;
         let raced = 0;
         for (const row of fresh) {
-          const rowId = String(row["id"]);
-          seen.add(rowId);
+          const rawId: unknown = row["id"];
+          const rowId = String(rawId);
+          seen.push(rawId);
           const old = row["sealed"] as Buffer;
           const ctx = { table: column.table, rowId, purpose: column.purpose };
           const plaintext = await plan.open(old, ctx);
           try {
             const sealed = plan.seal(plaintext, ctx);
             const { rowCount } = await tx.executeSql(
-              `UPDATE ${table} SET ${col} = $1 WHERE ${id}::text = $2 AND ${col} = $3`,
-              [sealed, rowId, old],
+              `UPDATE ${table} SET ${col} = $1 WHERE ${id} = $2 AND ${col} = $3`,
+              [sealed, rawId, old],
             );
             if (rowCount === 1) done += 1;
             else raced += 1;

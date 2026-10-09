@@ -8,6 +8,7 @@ import {
   EnvelopeAuthError,
   EnvelopeFormatError,
   KmsUnavailableError,
+  UnknownKeyVersionError,
   type SealContext,
 } from "./envelope.js";
 
@@ -27,7 +28,12 @@ export interface KmsDecryptClient {
 function plaintextOf(response: unknown): Buffer {
   const first: unknown = Array.isArray(response) ? response[0] : undefined;
   const plaintext = (first as { plaintext?: unknown } | undefined)?.plaintext;
-  if (plaintext instanceof Uint8Array) return Buffer.from(plaintext);
+  if (plaintext instanceof Uint8Array) {
+    const copy = Buffer.from(plaintext);
+    // The client's own copy of the DEK doesn't wait for garbage collection.
+    plaintext.fill(0);
+    return copy;
+  }
   throw new KmsUnavailableError();
 }
 
@@ -35,11 +41,31 @@ export function createKmsCaptureUnsealer(deps: {
   client: KmsDecryptClient;
   timeoutMs?: number;
   metrics: PlatformMetrics;
+  /**
+   * A-258: config.capture.keyVersion. An envelope must name a version of the same key; the
+   * signature in F-112 has no such field, so it's optional (the container always passes it).
+   */
+  configuredKeyVersion?: string;
 }): CaptureUnsealer {
+  const configured = deps.configuredKeyVersion;
+  const marker = "/cryptoKeyVersions/";
+  const keyName =
+    configured === undefined || !configured.includes(marker)
+      ? undefined
+      : configured.slice(0, configured.indexOf(marker));
+  /** `^<key name>/cryptoKeyVersions/\d+$`: any version of the configured key. */
+  const sameKey = (keyVersion: string): boolean =>
+    keyName !== undefined &&
+    keyVersion.startsWith(`${keyName}${marker}`) &&
+    /^\d+$/.test(keyVersion.slice(keyName.length + marker.length));
   return {
     async unseal(envelope, ctx) {
       const parts = decodeEnvelope(envelope);
       if (parts.provider !== "kms-capture") throw new EnvelopeFormatError();
+      // A-258: never ask KMS to decrypt with a key the row merely names.
+      if (configured !== undefined && !sameKey(parts.keyVersion)) {
+        throw new UnknownKeyVersionError();
+      }
       const aad = aadFor(ctx);
       let dek: Buffer;
       try {

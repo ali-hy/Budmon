@@ -101,11 +101,17 @@ export async function exchangeAuthorizationCode(
     const refresh = fields["refresh_token"];
     const access = fields["access_token"];
     const expiresIn = fields["expires_in"];
+    // A-259: a malformed 200 is a refusal, not retryable.
+    if (
+      typeof access !== "string" ||
+      typeof expiresIn !== "number" ||
+      !Number.isFinite(expiresIn) ||
+      expiresIn <= 0
+    ) {
+      throw new OAuthExchangeError("rejected");
+    }
     if (typeof refresh !== "string" || refresh === "") {
       throw new OAuthExchangeError("no_refresh_token");
-    }
-    if (typeof access !== "string" || typeof expiresIn !== "number") {
-      throw new OAuthExchangeError("server");
     }
     const scope = fields["scope"];
     return {
