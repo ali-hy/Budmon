@@ -10,6 +10,7 @@ import iso4217 from "../../src/platform/fx/iso4217.json" with { type: "json" };
 import { Secret } from "../../src/platform/observability/redaction.js";
 import type { Endpoint } from "./postgres.js";
 import { testRoleSecrets } from "./postgres.js";
+import { TEST_JOB_REGISTRY, type JobRegistry } from "./jobs.js";
 
 export const SERVER_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -78,8 +79,9 @@ export function schemaStepInput(
   mode: "push" | "migrate",
   logger: TestLogger = recordingLogger(),
   migrationsFolder: string = path.join(SERVER_DIR, "drizzle"),
+  jobRegistry: JobRegistry = TEST_JOB_REGISTRY,
 ): SchemaStepInput {
-  return {
+  const input: SchemaStepInput = {
     mode,
     database,
     migrationsFolder,
@@ -88,4 +90,6 @@ export function schemaStepInput(
     referenceData: referenceData(),
     logger,
   };
+  // S-6 (A-49): F-19's input gains jobRegistry; assigned so this compiles before and after.
+  return Object.assign(input, { jobRegistry });
 }

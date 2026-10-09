@@ -25,9 +25,9 @@ import {
   registerPlatformMetrics,
   type PlatformMetrics,
 } from "../../src/platform/observability/metrics.js";
-import { devApi, readFileFrom, type Fixture } from "./configEnv.js";
+import { devApi, readFileFrom, withFile, type Fixture } from "./configEnv.js";
 import { logCapture, type LogCapture } from "./telemetry.js";
-import type { LoginRole } from "./postgres.js";
+import { TEST_ROLE_PASSWORDS, type LoginRole } from "./postgres.js";
 import { createTestDatabase, type TestDatabase } from "./testDatabase.js";
 
 export const TEST_USER_ID = "0190a0b0-1c2d-7e3f-8a4b-5c6d7e8f9a0b";
@@ -91,6 +91,29 @@ export function testApiConfig(
   return loadConfig("api", f.env, readFileFrom(f.files));
 }
 
+/**
+ * An api configuration whose database is `testDb`, logged in as `role`: anything the container
+ * connects from config (S-6: the send-only pg-boss, F-77) reaches the same database.
+ */
+export function testApiConfigFor(
+  testDb: TestDatabase,
+  role: LoginRole = "budmon_app",
+  env: Record<string, string | undefined> = {},
+  fixture: () => Fixture = devApi,
+): Config {
+  return testApiConfig(env, () => {
+    const f = fixture();
+    Object.assign(f.env, {
+      DB_HOST: testDb.endpoint.host,
+      DB_PORT: String(testDb.endpoint.port),
+      DB_NAME: testDb.name,
+      DB_USER: role,
+    });
+    withFile(f, "DB_PASSWORD_FILE", `${TEST_ROLE_PASSWORDS[role]}\n`);
+    return f;
+  });
+}
+
 export interface BuiltContainer {
   container: ApiContainer;
   testDb: TestDatabase;
@@ -111,7 +134,7 @@ export async function buildApiContainer(
   const testDb = await createTestDatabase(role);
   // The container gets a pool of its own: container.close() closes it, and testDb.drop() closes
   // testDb.database.
-  const container = createApiContainer(testApiConfig(env, fixture), {
+  const container = createApiContainer(testApiConfigFor(testDb, role, env, fixture), {
     ...observed().overrides,
     database: testDb.connectAs(role),
     ...overrides,

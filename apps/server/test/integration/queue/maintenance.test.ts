@@ -1,0 +1,114 @@
+// F-80 platform maintenance jobs, through F-91's handler map (platform/queue/handlers.ts
+// buildHandlerMap). TP-6.12 with A-193's rate-limit purge, plus extra cases TP-6.20x. IDs ending
+// in "x" are test-architect additions, not LLD test-plan IDs.
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { s6, type JobContext, type JobHandler } from "../../support/jobs.js";
+import { resetBetweenTests } from "../../support/testDatabase.js";
+import { buildWorkerContainer, type BuiltWorker } from "../../support/worker.js";
+
+let built: BuiltWorker;
+let handlers: ReadonlyMap<string, JobHandler>;
+
+beforeAll(async () => {
+  built = await buildWorkerContainer("general");
+  const { buildHandlerMap } = await s6.handlers();
+  handlers = buildHandlerMap(built.container);
+});
+
+afterAll(async () => {
+  await built.close();
+});
+
+beforeEach(async () => {
+  await resetBetweenTests(built.testDb);
+});
+
+function context(): JobContext {
+  return {
+    jobId: "0190a0b0-1c2d-7e3f-8a4b-5c6d7e8f9a0b",
+    attempt: 1,
+    createdOn: new Date(),
+    logger: built.container.logger,
+    signal: new AbortController().signal,
+  };
+}
+
+async function run(name: string): Promise<void> {
+  const handler = handlers.get(name);
+  if (handler === undefined) throw new Error(`no handler for ${name}`);
+  await handler({}, context());
+}
+
+async function count(sql: string): Promise<number> {
+  const { rows } = await built.testDb.database.handle.executeSql(sql);
+  return Number(rows[0]?.["n"]);
+}
+
+describe("TP-6.12: maintenance purges (F-80)", () => {
+  it("TP-6.12: 6000 expired and 1 live idempotency record: the purge deletes 6000 and logs idempotency_purged; the live one remains", async () => {
+    const h = built.testDb.database.handle;
+    await h.executeSql(
+      `INSERT INTO idempotency_records (user_id, idempotency_key, procedure, request_hash, expires_at)
+       SELECT gen_random_uuid(), gen_random_uuid(), 'p', decode(repeat('00', 32), 'hex'), now() - interval '1 day'
+       FROM generate_series(1, 6000)`,
+    );
+    await h.executeSql(
+      `INSERT INTO idempotency_records (user_id, idempotency_key, procedure, request_hash, expires_at)
+       VALUES (gen_random_uuid(), gen_random_uuid(), 'live', decode(repeat('00', 32), 'hex'), now() + interval '1 day')`,
+    );
+    const linesBefore = built.obs.capture.records().length;
+
+    await run("platform.idempotency-purge");
+
+    expect(await count("SELECT count(*)::int AS n FROM idempotency_records")).toBe(1);
+    expect(
+      await count("SELECT count(*)::int AS n FROM idempotency_records WHERE procedure = 'live'"),
+    ).toBe(1);
+    const purged = built.obs.capture
+      .records()
+      .slice(linesBefore)
+      .filter((l) => l["event"] === "idempotency_purged");
+    // One line for the run, with the total (F-80 repeats batches of 5000 until fewer are deleted).
+    expect(purged.map((l) => l["count"])).toEqual([6000]);
+  }, 60_000);
+
+  it("TP-6.12: (A-193) the rate-limit purge removes only the expired counters", async () => {
+    const h = built.testDb.database.handle;
+    await h.executeSql(
+      `INSERT INTO rate_limit_counters (bucket_key, window_start, hits, expires_at)
+       SELECT 'expired-' || i, now() - interval '1 hour', 1, now() - interval '1 minute'
+       FROM generate_series(1, 3) AS i`,
+    );
+    await h.executeSql(
+      `INSERT INTO rate_limit_counters (bucket_key, window_start, hits, expires_at)
+       SELECT 'live-' || i, now(), 1, now() + interval '10 minutes'
+       FROM generate_series(1, 2) AS i`,
+    );
+
+    await run("platform.rate-limit-purge");
+
+    const { rows } = await h.executeSql(
+      "SELECT bucket_key FROM rate_limit_counters ORDER BY bucket_key",
+    );
+    expect(rows.map((r) => r["bucket_key"])).toEqual(["live-1", "live-2"]);
+  });
+});
+
+describe("TP-6.20x: the maintenance definitions (F-80)", () => {
+  it("TP-6.20x: idempotency-purge (0 3 * * *) and rate-limit-purge (*/10 * * * *) are general cron jobs with an empty payload, in the container's registry and the handler map", () => {
+    const registry = built.container.registry;
+
+    expect(registry.get("platform.idempotency-purge")).toMatchObject({
+      role: "general",
+      cron: "0 3 * * *",
+    });
+    expect(registry.get("platform.rate-limit-purge")).toMatchObject({
+      role: "general",
+      cron: "*/10 * * * *",
+    });
+    for (const name of ["platform.idempotency-purge", "platform.rate-limit-purge"]) {
+      expect(registry.get(name)?.payload.safeParse({}).success).toBe(true);
+      expect(handlers.has(name)).toBe(true);
+    }
+  });
+});

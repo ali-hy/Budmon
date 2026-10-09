@@ -1,4 +1,4 @@
-// F-24 buildServer (A-43, A-56, A-62). TP-2.27. S-6 adds cli and healthcheck to ENTRY_NAMES.
+// F-24 buildServer (A-43, A-56, A-62). TP-2.27, with S-6's cli and healthcheck.
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { isBuiltin } from "node:module";
 import { tmpdir } from "node:os";
@@ -9,7 +9,8 @@ import { buildServer } from "../../../scripts/build.js";
 
 const SERVER_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 // A-147: F-89's telemetry preload is bundled too (dist/main/instrument.js).
-const ENTRY_NAMES = ["api", "worker", "migrate", "instrument"];
+// S-6 (A-56): cli (F-93) and healthcheck (F-175).
+const ENTRY_NAMES = ["api", "worker", "migrate", "instrument", "cli", "healthcheck"];
 // A-83: devMigrate is development-only too.
 const DEVELOPMENT_ONLY = ["dev", "dbReset", "devMigrate"];
 

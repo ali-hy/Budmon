@@ -57,14 +57,20 @@ function stepFields(lines: LoggedLine[]): { step?: unknown; durationMs?: unknown
 
 describe("TP-2.15: runSchemaStep (S-2)", () => {
   it("TP-2.15 (a): push on an empty database reports pushed statements and upserted currencies", () => {
+    // S-6 (A-49): the three queue fields.
     expect(Object.keys(report).sort()).toEqual([
       "currenciesUpserted",
       "migrationsApplied",
       "pushedStatements",
+      "queueSchema",
+      "queuesCreated",
+      "queuesUpdated",
     ]);
     expect(report.migrationsApplied).toBe(0);
     expect(report.pushedStatements).toBeGreaterThan(0);
     expect(report.currenciesUpserted).toBeGreaterThan(0);
+    expect(report).toMatchObject({ queueSchema: "installed" });
+    expect((report as unknown as { queuesCreated: number }).queuesCreated).toBeGreaterThan(0);
   });
 
   it("TP-2.15 (b): push again throws PushTargetNotEmptyError after step 1 re-ran without error", async () => {
@@ -82,6 +88,8 @@ describe("TP-2.15: runSchemaStep (S-2)", () => {
     );
 
     expect(second).toMatchObject({ migrationsApplied: 0, currenciesUpserted: 0 });
+    // S-6 (A-49): the queue schema is current and every queue exists already.
+    expect(second).toMatchObject({ queueSchema: "current", queuesCreated: 0 });
   });
 });
 

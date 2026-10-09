@@ -16,7 +16,7 @@ import { CANARIES, scanForCanaries } from "@budmon/test-support";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { bootstrapCluster } from "../../../src/platform/db/clusterBootstrap.js";
 import { runSchemaStep } from "../../../src/platform/db/schemaStep.js";
-import { devApi } from "../../support/configEnv.js";
+import { devApi, devWorker } from "../../support/configEnv.js";
 import { connectDatabase, schemaStepInput } from "../../support/platform.js";
 import {
   TEST_ROLE_PASSWORDS,
@@ -67,6 +67,7 @@ beforeAll(() => {
 }, 180_000);
 
 const START_COMMAND = ["--import", "./dist/main/instrument.js", "dist/main/api.js"];
+const START_WORKER = ["--import", "./dist/main/instrument.js", "dist/main/worker.js"];
 
 describe("TP-2.6: node dist/main/api.js with DB_HOST unset", () => {
   it("TP-2.6: through the production start command, the same: exit 78 and the problems (A-147)", async () => {
@@ -608,6 +609,98 @@ function devApiEnvironment(
     OBJECT_STORE_FS_ROOT: path.join(dir, "objects"),
   };
 }
+
+// ---- S-6: the worker process ----
+
+/** The development worker fixture for `roles`, its files written into `dir`, APP_ENV test. */
+function devWorkerEnvironment(
+  dir: string,
+  roles: string,
+  db: { host: string; port: number; name: string },
+): Record<string, string> {
+  const f = devWorker();
+  const env: Record<string, string> = { PATH: process.env["PATH"] ?? "" };
+  for (const [key, value] of Object.entries(f.env)) {
+    if (value === undefined) continue;
+    const content = f.files.get(value);
+    if (content === undefined) {
+      env[key] = value;
+    } else {
+      const file = path.join(dir, path.basename(value));
+      writeFileSync(file, content);
+      env[key] = file;
+    }
+  }
+  return {
+    ...env,
+    APP_ENV: "test",
+    WORKER_ROLES: roles,
+    DB_HOST: db.host,
+    DB_PORT: String(db.port),
+    DB_NAME: db.name,
+    OBJECT_STORE_FS_ROOT: path.join(dir, "objects"),
+  };
+}
+
+describe("A-157: the worker's service name follows its roles (F-91)", () => {
+  it.each([
+    ["general", "worker-general"],
+    ["capture", "worker-capture"],
+    ["capture,general", "worker"],
+  ])(
+    "A-157: WORKER_ROLES=%s with the database unreachable: exit 1, startup_failed logged with service %s",
+    async (roles, service) => {
+      const dir = mkdtempSync(path.join(tmpdir(), "budmon-worker-name-"));
+      try {
+        const closedPort = await freePort();
+        const env = devWorkerEnvironment(dir, roles, {
+          host: "127.0.0.1",
+          port: closedPort,
+          name: "budmon",
+        });
+
+        const result = spawnSync(process.execPath, START_WORKER, {
+          cwd: SERVER_DIR,
+          env,
+          encoding: "utf8",
+          timeout: 60_000,
+        });
+        const output = `${result.stdout}${result.stderr}`;
+
+        expect(result.status, output).toBe(1);
+        const failures = output
+          .split("\n")
+          .flatMap((line): Record<string, unknown>[] => {
+            try {
+              const parsed: unknown = JSON.parse(line);
+              return isJsonObject(parsed) ? [parsed] : [];
+            } catch {
+              return [];
+            }
+          })
+          .filter((l) => l["event"] === "startup_failed");
+        expect(failures.length, output).toBeGreaterThanOrEqual(1);
+        expect(failures[0]?.["service"], output).toBe(service);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+    90_000,
+  );
+});
+
+describe("TP-6.13, TP-6.15: the built worker with a test job", () => {
+  // Both need a job the test registers in the bundled worker (a 2 s job, a job that never
+  // finishes, a handler running SELECT 1). F-91's worker.ts has no injectable entry for that
+  // (unlike runMigrate); the question is with the planner.
+  it.todo(
+    "TP-6.13: SIGTERM during a 2 s job: the job completes and the process exits 0 within 30 s",
+  );
+  it.todo("TP-6.13: (A-180) a job that never finishes: the process exits within 35 s of SIGTERM");
+  it.todo(
+    "TP-6.15: node --import ./dist/main/instrument.js dist/main/worker.js (general): a pg span whose parent is the job's span",
+  );
+});
 
 // ---- TP-4.24 ----
 
