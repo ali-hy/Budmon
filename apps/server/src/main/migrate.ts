@@ -5,6 +5,7 @@ import path from "node:path";
 import { EXIT_CONFIG, loadConfigOrReport } from "../platform/config/startup.js";
 import type { Config, DbLoginRole } from "../platform/config/schema.js";
 import { buildJobRegistry } from "../platform/queue/appRegistry.js";
+import { installProxySupport } from "../platform/crypto/proxy.js";
 import { serverRoot } from "../platform/config/serverRoot.js";
 import { createDatabase } from "../platform/db/client.js";
 import {
@@ -50,6 +51,8 @@ async function connect(
 export async function runMigrate(
   env: Readonly<Record<string, string | undefined>>,
 ): Promise<number> {
+  // F-122: first.
+  installProxySupport(env);
   const config = loadConfigOrReport("migrate", env, readFileSync, stderr);
   if (config?.migrate === undefined) return EXIT_CONFIG;
   const logger = createLogger({

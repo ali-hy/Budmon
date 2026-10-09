@@ -1,0 +1,141 @@
+// F-117 rewrapApiSecrets (CLI secrets:rewrap-api) and F-118 the platform.capture-rewrap job:
+// re-seal every sealed value under the current key.
+import { z } from "zod";
+import type { ApiContainer, WorkerContainer } from "../container.js";
+import { escapeIdentifier } from "../db/escape.js";
+import { withTransaction } from "../db/transaction.js";
+import type { Database } from "../db/types.js";
+import type { Logger } from "../observability/logger.js";
+import { defineJob } from "../queue/jobs.js";
+import type { ApiSecretsCipher } from "./apiSecrets.js";
+import type { SealContext } from "./envelope.js";
+import type { SealedColumn } from "./sealedColumns.js";
+
+interface RewrapPlan {
+  database: Database;
+  columns: readonly SealedColumn[];
+  currentVersion: string;
+  batchSize: number;
+  open(envelope: Buffer, ctx: SealContext): Buffer | Promise<Buffer>;
+  seal(plaintext: Buffer, ctx: SealContext): Buffer;
+}
+
+/** Re-seals every row of `columns` whose key version isn't `currentVersion`. */
+async function rewrapColumns(plan: RewrapPlan): Promise<{ rewrapped: number; skipped: number }> {
+  let rewrapped = 0;
+  let skipped = 0;
+  for (const column of plan.columns) {
+    const table = escapeIdentifier(column.table);
+    const id = escapeIdentifier(column.idColumn);
+    const col = escapeIdentifier(column.column);
+    // Rows changed concurrently are skipped once; a row still on an old key is tried again in a
+    // later batch, so the loop ends when nothing on an old key is left.
+    const seen = new Set<string>();
+    for (;;) {
+      const { rows } = await plan.database.handle.executeSql(
+        `SELECT ${id}::text AS id, ${col} AS sealed FROM ${table}
+         WHERE ${col} IS NOT NULL
+           AND substring(${col} from 4 for get_byte(${col}, 2)) <> convert_to($1, 'UTF8')
+           AND NOT (${id}::text = ANY($3::text[]))
+         LIMIT $2`,
+        [plan.currentVersion, plan.batchSize, [...seen]],
+      );
+      const fresh = rows;
+      if (fresh.length === 0) break;
+      const result = await withTransaction(plan.database, async (tx) => {
+        let done = 0;
+        let raced = 0;
+        for (const row of fresh) {
+          const rowId = String(row["id"]);
+          seen.add(rowId);
+          const old = row["sealed"] as Buffer;
+          const ctx = { table: column.table, rowId, purpose: column.purpose };
+          const plaintext = await plan.open(old, ctx);
+          try {
+            const sealed = plan.seal(plaintext, ctx);
+            const { rowCount } = await tx.executeSql(
+              `UPDATE ${table} SET ${col} = $1 WHERE ${id}::text = $2 AND ${col} = $3`,
+              [sealed, rowId, old],
+            );
+            if (rowCount === 1) done += 1;
+            else raced += 1;
+          } finally {
+            plaintext.fill(0);
+          }
+        }
+        return { done, raced };
+      });
+      rewrapped += result.done;
+      skipped += result.raced;
+    }
+  }
+  return { rewrapped, skipped };
+}
+
+/** F-117: the api-provider columns, re-wrapped under the cipher's current key. */
+export async function rewrapApiSecrets(deps: {
+  database: Database;
+  cipher: ApiSecretsCipher;
+  columns: readonly SealedColumn[];
+  batchSize?: number;
+  logger: Logger;
+}): Promise<{ rewrapped: number; skipped: number }> {
+  const result = await rewrapColumns({
+    database: deps.database,
+    columns: deps.columns.filter((c) => c.provider === "api"),
+    currentVersion: deps.cipher.currentKeyId(),
+    batchSize: deps.batchSize ?? 500,
+    open: (envelope, ctx) => deps.cipher.unseal(envelope, ctx),
+    seal: (plaintext, ctx) => deps.cipher.seal(plaintext, ctx),
+  });
+  deps.logger.info("api_secrets_rewrap", { count: result.rewrapped });
+  return result;
+}
+
+/** F-117's command form (A-26): the columns come from the container's registry. */
+export async function rewrapApiSecretsCommand(
+  c: Pick<ApiContainer, "database" | "apiSecrets" | "sealedColumns" | "logger">,
+): Promise<{ rewrapped: number; skipped: number }> {
+  return rewrapApiSecrets({
+    database: c.database,
+    cipher: c.apiSecrets,
+    columns: c.sealedColumns.all(),
+    logger: c.logger,
+  });
+}
+
+/** F-118. */
+export const captureRewrapJob = defineJob({
+  name: "platform.capture-rewrap",
+  role: "capture",
+  payload: z.object({}),
+  retryLimit: 3,
+  expireInSeconds: 3600,
+  policy: "singleton",
+});
+
+/** F-118's handler: capture-provider columns, re-sealed under config.capture.keyVersion. */
+export async function rewrapCaptureSecrets(
+  c: Pick<
+    WorkerContainer,
+    "database" | "sealedColumns" | "captureSealer" | "captureUnsealer" | "config"
+  >,
+  logger: Logger,
+): Promise<number> {
+  const keyVersion = c.config.capture?.keyVersion;
+  const sealer = c.captureSealer;
+  const unsealer = c.captureUnsealer;
+  if (keyVersion === undefined || sealer === null || unsealer === null) {
+    throw new Error("capture rewrap needs the capture role");
+  }
+  const result = await rewrapColumns({
+    database: c.database,
+    columns: c.sealedColumns.all().filter((col) => col.provider === "capture"),
+    currentVersion: keyVersion,
+    batchSize: 100,
+    open: (envelope, ctx) => unsealer.unseal(envelope, ctx),
+    seal: (plaintext, ctx) => sealer.seal(plaintext, ctx),
+  });
+  logger.info("capture_rewrap", { count: result.rewrapped });
+  return result.rewrapped;
+}

@@ -7,6 +7,8 @@ import { createApiServer } from "../platform/http/server.js";
 import { describeFailure } from "../platform/observability/describeFailure.js";
 import { installFatalHandlers, startupState } from "../platform/observability/fatal.js";
 import { createLogger } from "../platform/observability/logger.js";
+import { initSentry } from "../platform/observability/sentry.js";
+import { installProxySupport } from "../platform/crypto/proxy.js";
 import { getTelemetry } from "../platform/observability/telemetryHandle.js";
 
 const state = startupState("api", process.env);
@@ -31,6 +33,8 @@ async function withDeadline(fn: () => Promise<unknown>, ms: number): Promise<voi
 let started: { close(): Promise<void> } | undefined;
 
 async function main(): Promise<number | null> {
+  // F-122: first, so every outbound connection honours the proxy variables.
+  const proxy = installProxySupport(process.env);
   const config = loadConfigOrReport("api", process.env, readFileSync, (line) =>
     process.stderr.write(`${line}\n`),
   );
@@ -45,7 +49,16 @@ async function main(): Promise<number | null> {
   state.logger = logger;
   // Started by the `--import` preload (F-89, A-147); a no-op handle when it didn't run.
   const telemetry = getTelemetry();
-  const container = createApiContainer(config, { logger });
+  const container = createApiContainer(config, {
+    logger,
+    reporter: initSentry({
+      ...(config.sentryDsn === undefined ? {} : { dsn: config.sentryDsn }),
+      environment: config.appEnv,
+      release: config.release,
+      service: "api",
+      ...(proxy.httpsProxy === undefined ? {} : { httpsProxy: proxy.httpsProxy }),
+    }),
+  });
   started = container;
   state.reporter = container.reporter;
   // A-209: the send-only pg-boss; container.close() stops it.

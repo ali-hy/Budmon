@@ -175,6 +175,104 @@ const ALL_KEYS = [
   "WORKER_ROLES",
 ] as const;
 
+const COMMON_KEYS = [
+  "APP_ENV",
+  "LOG_LEVEL",
+  "BUDMON_RELEASE",
+  "OTEL_EXPORTER_OTLP_ENDPOINT",
+  "OTLP_HEADERS_FILE",
+  "SENTRY_DSN",
+  "DB_HOST",
+  "DB_NAME",
+  "DB_USER",
+  "DB_PORT",
+  "DB_PASSWORD_FILE",
+  "DB_SSLMODE",
+  "DB_SSL_ROOT_CERT_FILE",
+  "DB_POOL_MAX",
+];
+const SEALING_KEYS = ["CAPTURE_PUBLIC_KEY_FILE", "CAPTURE_KEY_VERSION"];
+const OBJECT_STORE_KEYS = [
+  "OBJECT_STORE_KIND",
+  "OBJECT_STORE_FS_ROOT",
+  "S3_ENDPOINT",
+  "S3_REGION",
+  "S3_BUCKET_EXPORTS",
+  "S3_BUCKET_ERASURE_LOG",
+  "S3_ACCESS_KEY_ID_FILE",
+  "S3_SECRET_ACCESS_KEY_FILE",
+];
+const KIND_KEYS: Readonly<Record<"migrate" | "api", readonly string[]>> = {
+  migrate: ["ROLE_SECRETS_FILE", "DB_PASSWORD_PREVIOUS_FILE"],
+  api: [
+    "PORT",
+    "HOST",
+    "PUBLIC_ORIGIN",
+    "GOOGLE_OAUTH_REDIRECT_ORIGIN",
+    "TRUSTED_PROXY",
+    "CLIENT_MIN_ANDROID",
+    "CLIENT_LATEST_ANDROID",
+    "CLIENT_MIN_WEB",
+    "ANDROID_DOWNLOAD_URL",
+    "CURSOR_KEY_FILE",
+    "RATE_LIMIT_HMAC_KEY_FILE",
+    "API_SECRETS_KEYS_FILE",
+    "RECOVERY_CODE_HMAC_KEYS_FILE",
+    "DEV_OBJECTS_SIGNING_KEY_FILE",
+    "GOOGLE_SIGNIN_CLIENT_ID",
+    "GOOGLE_SIGNIN_ANDROID_CLIENT_IDS",
+    "GOOGLE_SIGNIN_CLIENT_SECRET_FILE",
+    "GOOGLE_SIGNIN_CALLBACK_ORIGIN",
+    "GOOGLE_SIGNIN_APP_ORIGINS",
+    ...SEALING_KEYS,
+    ...OBJECT_STORE_KEYS,
+  ],
+};
+const ROLE_KEYS: Readonly<Record<WorkerRole, readonly string[]>> = {
+  general: [
+    "QUEUE_DB_USER",
+    "QUEUE_DB_PASSWORD_FILE",
+    "QUEUE_POOL_MAX",
+    "PUBLIC_ORIGIN",
+    "SMTP_URL",
+    "EMAIL_FROM",
+    "SMTP_PASSWORD_FILE",
+    "FX_PROVIDER",
+    "FX_PRIMARY_APP_ID_FILE",
+    "FX_PRIMARY_BASE_URL",
+    "FX_FALLBACK_BASE_URL",
+    "FX_FALLBACK_MIRROR_URL",
+    ...OBJECT_STORE_KEYS,
+  ],
+  capture: [
+    "KMS_PROVIDER",
+    "GCP_CREDENTIALS_FILE",
+    "CAPTURE_PRIVATE_KEY_FILE",
+    "MAILBOX_HMAC_KEY_FILE",
+    "GOOGLE_OAUTH_CLIENT_ID",
+    "GOOGLE_OAUTH_CLIENT_SECRET_FILE",
+    "GOOGLE_OAUTH_REDIRECT_ORIGIN",
+  ],
+};
+
+/**
+ * A-248: the variables `kind` (and, for a worker, those roles; both when none are given) may
+ * read, sorted. loadConfig reads nothing else, so the api never reads a capture secret.
+ */
+export function configKeysFor(kind: ProcessKind, roles?: readonly WorkerRole[]): readonly string[] {
+  const keys = new Set(COMMON_KEYS);
+  if (kind === "worker") {
+    keys.add("WORKER_ROLES");
+    for (const k of SEALING_KEYS) keys.add(k);
+    for (const role of roles ?? (["general", "capture"] as const)) {
+      for (const k of ROLE_KEYS[role]) keys.add(k);
+    }
+  } else {
+    for (const k of KIND_KEYS[kind]) keys.add(k);
+  }
+  return [...keys].sort();
+}
+
 export function allConfigKeys(): string[] {
   return [...ALL_KEYS].sort();
 }

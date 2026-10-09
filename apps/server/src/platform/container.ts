@@ -6,6 +6,14 @@ import { systemClock, uuidv7Generator, type Clock, type IdGenerator } from "@bud
 import type { FastifyInstance } from "fastify";
 import type { PgBoss } from "pg-boss";
 import type { Config, WorkerRole } from "./config/schema.js";
+import { createApiSecretsCipher, type ApiSecretsCipher } from "./crypto/apiSecrets.js";
+import { createCaptureSealer, type CaptureSealer } from "./crypto/captureSealer.js";
+import {
+  createKmsCaptureUnsealer,
+  createLocalCaptureUnsealer,
+  type CaptureUnsealer,
+} from "./crypto/captureUnsealer.js";
+import { lazyKmsClient } from "./crypto/kmsClient.js";
 import { createSealedColumnRegistry, type SealedColumnRegistry } from "./crypto/sealedColumns.js";
 import { createDatabase } from "./db/client.js";
 import type { Database } from "./db/types.js";
@@ -48,6 +56,10 @@ export type ErasureHandler = (userId: string) => Promise<void>;
 
 export interface WorkerContainer extends BaseContainer {
   roles: ReadonlySet<WorkerRole>;
+  /** F-111 (S-8): null when no capture public key is configured. */
+  captureSealer: CaptureSealer | null;
+  /** F-112/F-113 (S-8): capture role only. The API never has one (TP-8.15). */
+  captureUnsealer: CaptureUnsealer | null;
   /** General-only: pg-boss as budmon_queue (supervision and schedules). */
   queueBoss: PgBoss | null;
   /** Capture-only: pg-boss as budmon_capture. */
@@ -61,6 +73,10 @@ export interface ApiContainer extends BaseContainer {
   authHook: AuthHook;
   /** F-63 (S-5): shared rate limits; F-55 also registers the coarse per-IP limit with it. */
   rateLimiter: RateLimiter;
+  /** F-114 (S-8). */
+  apiSecrets: ApiSecretsCipher;
+  /** F-111 (S-8): null when no capture public key is configured. */
+  captureSealer: CaptureSealer | null;
   /** F-100 (S-7). */
   idempotency: Idempotency;
   /** F-103 (S-7), keyed by Config.api.cursorKey. */
@@ -139,7 +155,8 @@ export function createApiContainer(
   const cursorKey = config.api?.cursorKey;
   if (
     (overrides.rateLimiter === undefined && rateLimitKey === undefined) ||
-    (overrides.cursors === undefined && cursorKey === undefined)
+    (overrides.cursors === undefined && cursorKey === undefined) ||
+    (overrides.apiSecrets === undefined && config.api === undefined)
   ) {
     throw new Error("api config required");
   }
@@ -162,6 +179,15 @@ export function createApiContainer(
         clock: base.clock,
       }),
     moduleRoutes: overrides.moduleRoutes ?? [],
+    apiSecrets:
+      overrides.apiSecrets ??
+      createApiSecretsCipher((config.api as NonNullable<Config["api"]>).apiSecretsKeys.reveal()),
+    captureSealer:
+      overrides.captureSealer !== undefined
+        ? overrides.captureSealer
+        : config.sealing === undefined
+          ? null
+          : createCaptureSealer(config.sealing),
     idempotency:
       overrides.idempotency ?? createIdempotency({ clock: base.clock, metrics: base.metrics }),
     cursors:
@@ -172,6 +198,22 @@ export function createApiContainer(
         clock: base.clock,
       }),
   };
+}
+
+/** The capture role's own key (config.capture), else the sealing key any role may hold. */
+function sealingOf(config: Config): Config["sealing"] {
+  const capture = config.capture;
+  return capture === undefined
+    ? config.sealing
+    : { publicKeyPem: capture.publicKeyPem, keyVersion: capture.keyVersion };
+}
+
+function captureUnsealerFor(config: Config, metrics: PlatformMetrics): CaptureUnsealer | null {
+  const kms = config.capture?.kms;
+  if (kms === undefined) return null;
+  return kms.provider === "local"
+    ? createLocalCaptureUnsealer({ privateKeyPem: kms.privateKeyPem.reveal() })
+    : createKmsCaptureUnsealer({ client: lazyKmsClient(kms.credentials.reveal()), metrics });
 }
 
 export function createWorkerContainer(
@@ -206,6 +248,18 @@ export function createWorkerContainer(
     queueBoss,
     captureBoss,
     erasureHandler: overrides.erasureHandler ?? null,
+    captureSealer:
+      overrides.captureSealer !== undefined
+        ? overrides.captureSealer
+        : sealingOf(config) === undefined
+          ? null
+          : createCaptureSealer(sealingOf(config) as NonNullable<Config["sealing"]>),
+    captureUnsealer:
+      overrides.captureUnsealer !== undefined
+        ? overrides.captureUnsealer
+        : roles.has("capture")
+          ? captureUnsealerFor(config, base.metrics)
+          : null,
     onGeneralStarted: overrides.onGeneralStarted ?? [],
     close: closer(base.database, [boss, queueBoss, captureBoss]),
   };

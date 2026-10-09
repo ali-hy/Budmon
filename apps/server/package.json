@@ -16,6 +16,7 @@
     "@fastify/otel": "0.21.1",
     "@fastify/rate-limit": "11.2.0",
     "@formatjs/intl": "6.1.2",
+    "@google-cloud/kms": "6.2.1",
     "@node-rs/argon2": "2.2.1",
     "@opentelemetry/api": "1.9.1",
     "@opentelemetry/core": "2.11.0",
@@ -42,6 +43,7 @@
     "pg-connection-string": "2.14.1",
     "pino": "10.4.0",
     "secure-json-parse": "4.1.0",
+    "undici": "8.11.2",
     "zod": "4.6.5"
   },
   "devDependencies": {

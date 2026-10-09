@@ -10,6 +10,7 @@ import { installFatalHandlers, startupState } from "../platform/observability/fa
 import { createLogger } from "../platform/observability/logger.js";
 import { initSentry } from "../platform/observability/sentry.js";
 import { getTelemetry } from "../platform/observability/telemetryHandle.js";
+import { installProxySupport } from "../platform/crypto/proxy.js";
 import { buildHandlerMap } from "../platform/queue/handlers.js";
 import { heartbeatFile } from "../platform/queue/heartbeat.js";
 import type { JobRegistry } from "../platform/queue/registry.js";
@@ -49,6 +50,8 @@ export async function runWorker(
   env: Readonly<Record<string, string | undefined>>,
   overrides: { registry?: JobRegistry; handlers?: ReadonlyMap<string, JobHandler> } = {},
 ): Promise<{ stop(): Promise<void> }> {
+  // F-122: first, so every outbound connection honours the proxy variables.
+  const proxy = installProxySupport(env);
   const config = loadConfigOrReport("worker", env, readFileSync, (line) =>
     process.stderr.write(`${line}\n`),
   );
@@ -68,6 +71,7 @@ export async function runWorker(
     environment: config.appEnv,
     release: config.release,
     service,
+    ...(proxy.httpsProxy === undefined ? {} : { httpsProxy: proxy.httpsProxy }),
   });
   state.reporter = reporter;
 

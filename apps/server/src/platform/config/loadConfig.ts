@@ -1,5 +1,12 @@
-// F-11: reads every `*_FILE`, validates (F-10) and returns a deep-frozen Config.
-import { parseConfig, type Config, type ConfigProblem, type ProcessKind } from "./schema.js";
+// F-11: reads the `*_FILE`s the kind uses, validates (F-10) and returns a deep-frozen Config.
+import {
+  configKeysFor,
+  parseConfig,
+  type Config,
+  type ConfigProblem,
+  type ProcessKind,
+  type WorkerRole,
+} from "./schema.js";
 
 export class ConfigError extends Error {
   readonly problems: readonly ConfigProblem[];
@@ -31,16 +38,37 @@ export function loadConfig(
   env: Readonly<Record<string, string | undefined>>,
   readFile: (path: string) => Buffer,
 ): Config {
-  const files: Record<string, string | null> = {};
-  for (const [name, value] of Object.entries(env)) {
-    if (!name.endsWith("_FILE") || value === undefined || value === "") continue;
-    try {
-      files[value] = trimOneNewline(readFile(value).toString("utf8"));
-    } catch {
-      files[value] = null;
-    }
+  // A-248: only the variables this kind (and these worker roles) may read; so, for example, the
+  // api never reads CAPTURE_PRIVATE_KEY_FILE.
+  const roles = (env["WORKER_ROLES"] ?? "")
+    .split(",")
+    .map((r) => r.trim())
+    .filter((r): r is WorkerRole => r === "general" || r === "capture");
+  const allowed = new Set(
+    configKeysFor(kind, kind === "worker" && roles.length > 0 ? roles : undefined),
+  );
+  const scoped = Object.fromEntries(Object.entries(env).filter(([name]) => allowed.has(name)));
+  // Each `*_FILE` is read when the schema asks for it, and at most once.
+  const paths = new Set<string>();
+  for (const [name, value] of Object.entries(scoped)) {
+    if (name.endsWith("_FILE") && value !== undefined && value !== "") paths.add(value);
   }
-  const result = parseConfig(kind, { env, files });
+  const cache = new Map<string, string | null>();
+  const target: Record<string, string | null> = {};
+  const files = new Proxy(target, {
+    get(_target, key) {
+      if (typeof key !== "string" || !paths.has(key)) return undefined;
+      if (!cache.has(key)) {
+        try {
+          cache.set(key, trimOneNewline(readFile(key).toString("utf8")));
+        } catch {
+          cache.set(key, null);
+        }
+      }
+      return cache.get(key);
+    },
+  });
+  const result = parseConfig(kind, { env: scoped, files });
   if (!result.ok) {
     throw new ConfigError(result.problems);
   }
