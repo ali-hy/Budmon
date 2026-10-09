@@ -335,7 +335,7 @@ describe("TP-6.6: syncQueues (F-75)", () => {
     }
   });
 
-  it("TP-6.6: (A-227, A-228) step 6b: RLS on job and job_common (not forced) with the same policies; capture's lists match the registry and follow it; every queue non-partitioned", async () => {
+  it("TP-6.6: (A-227, A-228) step 6b: RLS on job and job_common (not forced) with the same policies; capture's lists match the registry as it grows and shrinks; every queue non-partitioned", async () => {
     if (migrator === undefined) throw new Error("no migrator");
     const db = migrator;
     const registry = registryOf([a, b]);
@@ -361,6 +361,14 @@ describe("TP-6.6: syncQueues (F-75)", () => {
       "SELECT name FROM pgboss.queue WHERE partition IS DISTINCT FROM false",
     );
     expect(still).toEqual([]);
+
+    // Round-2 review N-1: the lists shrink too. sync.c leaves the registry (its queue stays,
+    // unregistered) and sync.d is no longer sendable: both drop out of capture's policies.
+    const shrunk = registryOf([a, b, { ...d, sendableFromCapture: false }]);
+    await syncQueues(started(), shrunk, recordingLogger());
+    await applyQueuePolicies(db.handle, shrunk);
+
+    await expectPolicies(db, ["sync.b"], []);
   });
 
   it("TP-6.6: a changed option is updated; a changed policy throws SchemaStepError queue_policy_changed", async () => {
