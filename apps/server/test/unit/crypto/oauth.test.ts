@@ -211,18 +211,35 @@ describe("TP-8.12: exchangeAuthorizationCode (F-120)", () => {
       "rejected",
       false,
     ],
+    // A-259: every malformed 200 is rejected, not retryable (the code is already consumed).
     [
-      "200 with refresh_token but no access_token (A-255)",
+      "200 with refresh_token but no access_token (A-259)",
       () => Promise.resolve(json(200, { refresh_token: "r", expires_in: 3600, scope: "openid" })),
-      "server",
-      true,
+      "rejected",
+      false,
     ],
     [
-      "200 without expires_in (A-255)",
+      "200 without expires_in (A-259)",
       () => Promise.resolve(json(200, { access_token: "a", refresh_token: "r", scope: "openid" })),
-      "server",
-      true,
+      "rejected",
+      false,
     ],
+    ...([0, -5, "abc"] as const).map(
+      (expiresIn): [string, () => Promise<Response>, string, boolean] => [
+        `200 with expires_in ${JSON.stringify(expiresIn)} (A-259)`,
+        () =>
+          Promise.resolve(
+            json(200, {
+              access_token: "a",
+              refresh_token: "r",
+              expires_in: expiresIn,
+              scope: "openid",
+            }),
+          ),
+        "rejected",
+        false,
+      ],
+    ),
     ["a network error", () => Promise.reject(new TypeError("fetch failed")), "network", true],
     [
       "a timeout",

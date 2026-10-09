@@ -234,11 +234,8 @@ describe("TP-8.5: the KMS unsealer (F-112)", () => {
     };
   }
 
-  function kmsEnvelope(plaintext: Buffer): Buffer {
-    return createCaptureSealer({ publicKeyPem: keys.publicPem, keyVersion: KMS_VERSION }).seal(
-      plaintext,
-      CTX,
-    );
+  function kmsEnvelope(plaintext: Buffer, keyVersion = KMS_VERSION): Buffer {
+    return createCaptureSealer({ publicKeyPem: keys.publicPem, keyVersion }).seal(plaintext, CTX);
   }
 
   it("TP-8.5: unseal returns the plaintext; asymmetricDecrypt gets {name, ciphertext} and timeout 5000", async () => {
@@ -302,6 +299,52 @@ describe("TP-8.5: the KMS unsealer (F-112)", () => {
     });
 
     await expectCryptoError(() => unsealer.unseal(envelope, CTX), "KmsUnavailableError");
+  });
+
+  describe("TP-8.5 (A-258): the envelope's key version must be a version of the configured key", () => {
+    const KEY = "projects/p/locations/l/keyRings/r/cryptoKeys";
+    const configuredKeyVersion = `${KEY}/capture/cryptoKeyVersions/1`;
+
+    it("TP-8.5 (A-258): .../capture/cryptoKeyVersions/2 reaches the client and unseals", async () => {
+      const client = fakeKms();
+      const envelope = kmsEnvelope(Buffer.from("v2"), `${KEY}/capture/cryptoKeyVersions/2`);
+
+      const plaintext = await createKmsCaptureUnsealer({
+        client,
+        metrics: observed().metrics,
+        configuredKeyVersion,
+      }).unseal(envelope, CTX);
+
+      expect(plaintext).toEqual(Buffer.from("v2"));
+      expect(client.asymmetricDecrypt).toHaveBeenCalledTimes(1);
+      expect(client.asymmetricDecrypt.mock.calls[0]?.[0].name).toBe(
+        `${KEY}/capture/cryptoKeyVersions/2`,
+      );
+    });
+
+    it.each([
+      ["another key (LLD case)", `${KEY}/other/cryptoKeyVersions/1`],
+      [
+        "TP-8.17x: a key whose name extends the configured one",
+        `${KEY}/captureX/cryptoKeyVersions/1`,
+      ],
+      ["TP-8.17x: a non-numeric version", `${KEY}/capture/cryptoKeyVersions/1a`],
+      ["TP-8.17x: a longer path after the version", `${KEY}/capture/cryptoKeyVersions/1/x`],
+    ])(
+      "TP-8.5 (A-258): %s is UnknownKeyVersionError and the client isn't called",
+      async (_label, keyVersion) => {
+        const client = fakeKms();
+        const envelope = kmsEnvelope(Buffer.from("x"), keyVersion);
+        const unsealer = createKmsCaptureUnsealer({
+          client,
+          metrics: observed().metrics,
+          configuredKeyVersion,
+        });
+
+        await expectCryptoError(() => unsealer.unseal(envelope, CTX), "UnknownKeyVersionError");
+        expect(client.asymmetricDecrypt).not.toHaveBeenCalled();
+      },
+    );
   });
 
   it("TP-8.5: an envelope with provider local-capture is EnvelopeFormatError", async () => {
