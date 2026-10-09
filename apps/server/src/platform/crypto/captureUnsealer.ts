@@ -85,11 +85,19 @@ export function createKmsCaptureUnsealer(deps: {
   };
 }
 
-export function createLocalCaptureUnsealer(cfg: { privateKeyPem: string }): CaptureUnsealer {
+export function createLocalCaptureUnsealer(cfg: {
+  privateKeyPem: string;
+  /** A-263: the one key version this key opens (`local:<n>`). */
+  keyVersion: string;
+}): CaptureUnsealer {
+  if (!/^local:\d+$/.test(cfg.keyVersion)) throw new TypeError("local key version required");
   return {
     unseal(envelope, ctx) {
       const parts = decodeEnvelope(envelope);
       if (parts.provider !== "local-capture") throw new EnvelopeFormatError();
+      if (parts.keyVersion !== cfg.keyVersion) {
+        return Promise.reject(new UnknownKeyVersionError());
+      }
       const aad = aadFor(ctx);
       let dek: Buffer;
       try {

@@ -212,7 +212,10 @@ function captureUnsealerFor(config: Config, metrics: PlatformMetrics): CaptureUn
   const kms = config.capture?.kms;
   if (kms === undefined) return null;
   return kms.provider === "local"
-    ? createLocalCaptureUnsealer({ privateKeyPem: kms.privateKeyPem.reveal() })
+    ? createLocalCaptureUnsealer({
+        privateKeyPem: kms.privateKeyPem.reveal(),
+        keyVersion: (config.capture as NonNullable<Config["capture"]>).keyVersion,
+      })
     : createKmsCaptureUnsealer({
         client: lazyKmsClient(kms.credentials.reveal()),
         metrics,

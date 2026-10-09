@@ -8,6 +8,8 @@ import type { Database } from "../db/types.js";
 import type { Logger } from "../observability/logger.js";
 import { defineJob } from "../queue/jobs.js";
 import type { ApiSecretsCipher } from "./apiSecrets.js";
+import type { CaptureSealer } from "./captureSealer.js";
+import type { CaptureUnsealer } from "./captureUnsealer.js";
 import type { SealContext } from "./envelope.js";
 import type { SealedColumn } from "./sealedColumns.js";
 
@@ -116,28 +118,54 @@ export const captureRewrapJob = defineJob({
   policy: "singleton",
 });
 
-/** F-118's handler: capture-provider columns, re-sealed under config.capture.keyVersion. */
-export async function rewrapCaptureSecrets(
+/** F-118's re-wrap (A-264): capture-provider columns, re-sealed under `keyVersion`. */
+export async function rewrapCaptureSecrets(deps: {
+  database: Database;
+  unsealer: CaptureUnsealer;
+  sealer: CaptureSealer;
+  columns: readonly SealedColumn[];
+  keyVersion: string;
+  logger: Logger;
+}): Promise<number> {
+  const result = await rewrapColumns({
+    database: deps.database,
+    columns: deps.columns.filter((col) => col.provider === "capture"),
+    currentVersion: deps.keyVersion,
+    batchSize: 100,
+    open: (envelope, ctx) => deps.unsealer.unseal(envelope, ctx),
+    seal: (plaintext, ctx) => deps.sealer.seal(plaintext, ctx),
+  });
+  deps.logger.info("capture_rewrap", { count: result.rewrapped });
+  return result.rewrapped;
+}
+
+/**
+ * F-118's job handler. The local provider doesn't support capture-key rotation (A-264): it
+ * re-wraps nothing, warns once and completes. With KMS it re-wraps.
+ */
+export async function runCaptureRewrapJob(
   c: Pick<
     WorkerContainer,
     "database" | "sealedColumns" | "captureSealer" | "captureUnsealer" | "config"
   >,
   logger: Logger,
-): Promise<number> {
-  const keyVersion = c.config.capture?.keyVersion;
+): Promise<void> {
+  const capture = c.config.capture;
   const sealer = c.captureSealer;
   const unsealer = c.captureUnsealer;
-  if (keyVersion === undefined || sealer === null || unsealer === null) {
+  if (capture === undefined || sealer === null || unsealer === null) {
     throw new Error("capture rewrap needs the capture role");
   }
-  const result = await rewrapColumns({
+  if (capture.kms.provider === "local") {
+    logger.warn("capture_rewrap_unsupported");
+    return;
+  }
+  await rewrapCaptureSecrets({
     database: c.database,
-    columns: c.sealedColumns.all().filter((col) => col.provider === "capture"),
-    currentVersion: keyVersion,
-    batchSize: 100,
-    open: (envelope, ctx) => unsealer.unseal(envelope, ctx),
-    seal: (plaintext, ctx) => sealer.seal(plaintext, ctx),
+    unsealer,
+    sealer,
+    columns: c.sealedColumns.all(),
+    keyVersion: capture.keyVersion,
+    logger,
   });
-  logger.info("capture_rewrap", { count: result.rewrapped });
-  return result.rewrapped;
 }
