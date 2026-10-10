@@ -371,6 +371,46 @@ describe("TP-6.6: syncQueues (F-75)", () => {
     await expectPolicies(db, ["sync.b"], []);
   });
 
+  it("TP-6.6: (A-283, F-75 6b) every sendable general queue gets capture INSERT pins on state 'created' and the queue's policy; only one with captureSingletonKeyField also gets the singleton_key pin", async () => {
+    if (migrator === undefined) throw new Error("no migrator");
+    const db = migrator;
+    const d: JobDefinition<unknown> = { ...a, name: "sync.d", sendableFromCapture: true };
+    const e: JobDefinition<unknown> = {
+      ...a,
+      name: "sync.e",
+      sendableFromCapture: true,
+      captureSingletonKeyField: "n",
+    };
+    const registry = registryOf([a, b, d, e]);
+    await syncQueues(started(), registry, recordingLogger());
+    await applyQueuePolicies(db.handle, registry);
+
+    for (const table of ["job", "job_common"] as const) {
+      const { rows } = await db.handle.executeSql(
+        "SELECT with_check FROM pg_policies WHERE schemaname = 'pgboss' AND tablename = $1 AND policyname = 'capture_insert'",
+        [table],
+      );
+      const check = String(rows[0]?.["with_check"]);
+      // Each queue's pin starts "name <> '<queue>'"; split there to read them one by one.
+      const pin = (queue: string): string =>
+        check
+          .split("<> '")
+          .find((part) => part.startsWith(`${queue}'`))
+          ?.split(/<> '/)[0] ?? "";
+
+      expect(pin("sync.d"), `${table} sync.d`).toContain("'created'");
+      expect(pin("sync.d"), `${table} sync.d`).toContain("policy");
+      expect(pin("sync.d"), `${table} sync.d`).not.toContain("singleton_key");
+      expect(pin("sync.e"), `${table} sync.e`).toContain("'created'");
+      expect(pin("sync.e"), `${table} sync.e`).toContain("policy");
+      expect(pin("sync.e"), `${table} sync.e`).toContain("singleton_key");
+      expect(pin("sync.a"), `${table} sync.a (not sendable)`).toBe("");
+      expect(await policyQueues(db, table, "budmon_capture"), table).toMatchObject({
+        insert: ["dead-letter.capture", "sync.b", "sync.d", "sync.e"],
+      });
+    }
+  });
+
   it("TP-6.6: a changed option is updated; a changed policy throws SchemaStepError queue_policy_changed", async () => {
     await syncQueues(started(), registryOf([{ ...a, retryLimit: 4 }, b]), recordingLogger());
     expect(await started().getQueue("sync.a")).toMatchObject({ retryLimit: 4 });

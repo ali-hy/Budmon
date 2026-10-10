@@ -38,17 +38,31 @@ describe("TP-9.22: capture sends to platform.fx-backfill (F-75 6b, A-283)", () =
     query(testDb.urlAs("budmon_capture"), sql, values);
 
   /**
-   * A direct INSERT as budmon_capture that matches an honest send (the queue's dead_letter, A-230)
-   * except for `state` and `policy`; `policy` null means the queue's own.
+   * A direct INSERT into `pgboss.<table>` as budmon_capture that matches an honest send (the
+   * queue's dead_letter, A-230) except for `state`, `policy` (null: the queue's own) and the
+   * singleton key (default: the rateDate).
    */
-  const insertAsCapture = (rateDate: string, state: string, policy: string | null) =>
+  const insertAsCapture = (
+    table: "job" | "job_common",
+    rateDate: string,
+    state: string,
+    policy: string | null,
+    key: string = rateDate,
+  ) =>
     asCapture(
-      `INSERT INTO pgboss.job (name, data, singleton_key, state, policy, dead_letter)
-       SELECT q.name, jsonb_build_object('rateDate', $2::text), $2, $3::pgboss.job_state,
+      `INSERT INTO pgboss.${table} (name, data, singleton_key, state, policy, dead_letter)
+       SELECT q.name, jsonb_build_object('rateDate', $2::text), $5, $3::pgboss.job_state,
               coalesce($4, q.policy), q.dead_letter
        FROM pgboss.queue q WHERE q.name = $1`,
-      [BACKFILL, rateDate, state, policy],
+      [BACKFILL, rateDate, state, policy, key],
     );
+
+  /** Whether a platform.fx-backfill job for `rateDate` is in the queue (read as the owner). */
+  async function queued(rateDate: string): Promise<boolean> {
+    return (await queuedJobs(testDb, BACKFILL)).some(
+      (j) => (j.data as { rateDate?: unknown }).rateDate === rateDate,
+    );
+  }
 
   it("TP-9.22 (a): a send with singletonKey = rateDate returns an id; the same send again returns null and leaves one queued row", async () => {
     const first = await boss().send(
@@ -70,50 +84,72 @@ describe("TP-9.22: capture sends to platform.fx-backfill (F-75 6b, A-283)", () =
     expect(rows).toHaveLength(1);
   });
 
-  it("TP-9.22 (b): a send whose singletonKey isn't the rateDate is 42501", async () => {
+  it("TP-9.22 (b): a send whose singletonKey isn't the rateDate is 42501 and nothing is queued", async () => {
     expect(
       await failureState(() =>
         boss().send(BACKFILL, { rateDate: "2026-10-02" }, { singletonKey: "x" }),
       ),
     ).toBe("42501");
+    expect(await queued("2026-10-02")).toBe(false);
   });
 
-  it("TP-9.22 (c): a send with no singletonKey is 42501", async () => {
+  it("TP-9.22 (c): a send with no singletonKey is 42501 and nothing is queued", async () => {
     expect(await failureState(() => boss().send(BACKFILL, { rateDate: "2026-10-03" }))).toBe(
       "42501",
     );
+    expect(await queued("2026-10-03")).toBe(false);
   });
 
-  it("TP-9.22 (d): a direct INSERT with the matching key but state 'retry' is 42501", async () => {
-    expect(await failureState(() => insertAsCapture("2026-10-04", "retry", null))).toBe("42501");
-  });
-
-  it("TP-9.22 (e): a direct INSERT with the matching key and state 'created' but policy 'standard' is 42501", async () => {
+  it("TP-9.22 (e): the queue's own policy is short (so policy 'standard' below is a mismatch)", async () => {
     const [queue] = await query<{ policy: string }>(
       testDb.urlAs("budmon_queue"),
       "SELECT policy FROM pgboss.queue WHERE name = $1",
       [BACKFILL],
     );
+
     expect(queue?.policy).toBe("short");
-
-    expect(await failureState(() => insertAsCapture("2026-10-05", "created", "standard"))).toBe(
-      "42501",
-    );
   });
 
-  it("TP-9.23x: the same direct INSERT with state 'created' and the queue's policy is allowed (so (d) and (e) are refused by A-283's pins)", async () => {
-    expect(
-      await failureState(() => insertAsCapture("2026-10-06", "created", null)),
-    ).toBeUndefined();
-  });
+  // B-2 (S-9 round 2): the same pins on job_common, which the statements above reach only
+  // through job (A-228: each table carries its own policies).
+  describe.each(["job", "job_common"] as const)("direct INSERTs into pgboss.%s", (table) => {
+    const day = (n: number) => `2026-11-${String(n).padStart(2, "0")}`;
+    const offset = table === "job" ? 0 : 10;
 
-  it("TP-9.23x: nothing refused above reached the queue", async () => {
-    const dates = (await queuedJobs(testDb, BACKFILL)).map(
-      (j) => (j.data as { rateDate?: unknown }).rateDate,
-    );
+    it(`TP-9.22 (d): ${table}: the matching key but state 'retry' is 42501 and nothing is queued`, async () => {
+      const rateDate = day(offset + 1);
 
-    for (const refused of ["2026-10-02", "2026-10-03", "2026-10-04", "2026-10-05"]) {
-      expect(dates).not.toContain(refused);
-    }
+      expect(await failureState(() => insertAsCapture(table, rateDate, "retry", null))).toBe(
+        "42501",
+      );
+      expect(await queued(rateDate)).toBe(false);
+    });
+
+    it(`TP-9.22 (e): ${table}: the matching key, state 'created', policy 'standard' is 42501 and nothing is queued`, async () => {
+      const rateDate = day(offset + 2);
+
+      expect(
+        await failureState(() => insertAsCapture(table, rateDate, "created", "standard")),
+      ).toBe("42501");
+      expect(await queued(rateDate)).toBe(false);
+    });
+
+    it(`TP-9.22 (b): ${table}: singleton_key 'x' for a different rateDate is 42501 and nothing is queued`, async () => {
+      const rateDate = day(offset + 3);
+
+      expect(await failureState(() => insertAsCapture(table, rateDate, "created", null, "x"))).toBe(
+        "42501",
+      );
+      expect(await queued(rateDate)).toBe(false);
+    });
+
+    it(`TP-9.23x: ${table}: the honest row (state 'created', the queue's policy, the matching key) is allowed and queued`, async () => {
+      const rateDate = day(offset + 4);
+
+      expect(
+        await failureState(() => insertAsCapture(table, rateDate, "created", null)),
+      ).toBeUndefined();
+      expect(await queued(rateDate)).toBe(true);
+    });
   });
 });

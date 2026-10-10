@@ -146,7 +146,8 @@ export function templateJobRegistry(): JobRegistry {
 /**
  * The queue names `role`'s policies on `pgboss.<table>` allow, read from pg_policies: `select`
  * from SELECT (or ALL) USING clauses, `modify` from UPDATE/DELETE (or ALL) USING clauses, `insert`
- * from INSERT (or ALL) WITH CHECK clauses. Names are the quoted literals in those expressions.
+ * from INSERT (or ALL) WITH CHECK clauses. Names are the quoted literals in those expressions'
+ * ARRAY[...] lists.
  */
 export async function policyQueues(
   database: Database,
@@ -157,9 +158,11 @@ export async function policyQueues(
     "SELECT cmd, qual, with_check FROM pg_policies WHERE schemaname = 'pgboss' AND tablename = $1 AND $2 = ANY(roles)",
     [table, role],
   );
+  // Only the literals inside ARRAY[...] lists are queue names; A-283's pins add other literals
+  // (state 'created', payload field names) that aren't.
   const names = (text: unknown): string[] =>
-    [...(typeof text === "string" ? text : "").matchAll(/'([a-z0-9][a-z0-9.-]*)'/g)].map(
-      (m) => m[1] ?? "",
+    [...(typeof text === "string" ? text : "").matchAll(/ARRAY\[([^\]]*)\]/g)].flatMap((array) =>
+      [...(array[1] ?? "").matchAll(/'([a-z0-9][a-z0-9.-]*)'/g)].map((m) => m[1] ?? ""),
     );
   const select = new Set<string>();
   const modify = new Set<string>();

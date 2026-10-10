@@ -44,9 +44,9 @@ describe("TP-9.1: lossless parsing and normalisation (F-130)", () => {
   });
 
   it.each([["5e-13"], ["4.999999e-13"]])(
-    'TP-9.23x (B-1): normaliseRate(%j) at the rounding edge is never "0.000000000000"',
+    "TP-9.23x (B-1): normaliseRate(%j) at the rounding edge is null (half-even rounds 5e-13 to 0)",
     (raw) => {
-      expect(normaliseRate(raw)).not.toBe("0.000000000000");
+      expect(normaliseRate(raw)).toBeNull();
     },
   );
 
