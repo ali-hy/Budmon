@@ -108,9 +108,10 @@ describe("TP-6.12: maintenance purges (F-80)", () => {
 });
 
 describe("TP-6.20x: the maintenance definitions (F-80)", () => {
-  it("TP-6.20x: platformMaintenanceJobs has the idempotency and rate-limit purges (A-210, A-215); buildHandlerMap includes the maintenance handlers", () => {
-    // A-215: platform.exports-purge arrives in S-10 with F-144's handler; until then, two.
+  it("TP-6.20x: platformMaintenanceJobs has the idempotency, rate-limit and (from S-10) exports purges (A-210, A-215); buildHandlerMap includes the maintenance handlers", () => {
+    // A-215: platform.exports-purge arrived in S-10 with F-144's handler.
     expect(platformMaintenanceJobs.map((d) => d.name).sort()).toEqual([
+      "platform.exports-purge",
       "platform.idempotency-purge",
       "platform.rate-limit-purge",
     ]);
