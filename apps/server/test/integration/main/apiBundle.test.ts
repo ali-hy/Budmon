@@ -24,7 +24,7 @@ import { CANARIES, scanForCanaries } from "@budmon/test-support";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { bootstrapCluster } from "../../../src/platform/db/clusterBootstrap.js";
 import { runSchemaStep } from "../../../src/platform/db/schemaStep.js";
-import { devApi, devWorker } from "../../support/configEnv.js";
+import { devApi, devWorker, prodWorkerGeneral } from "../../support/configEnv.js";
 import { connectDatabase, schemaStepInput } from "../../support/platform.js";
 import {
   TEST_ROLE_PASSWORDS,
@@ -1535,4 +1535,38 @@ describe("TP-4.24: the built api exports spans through the production start comm
     expect(run.status, run.output).toBe(200);
     expect(exportedSpans(received).filter((s) => s.kind === SPAN_KIND_SERVER)).toEqual([]);
   }, 90_000);
+});
+
+// TP-15.25 (integration part, F-11, F-191): the built worker refuses a placeholder secret file.
+describe("TP-15.25: node dist/main/worker.js with an unfilled placeholder file", () => {
+  it("TP-15.25: S3_ACCESS_KEY_ID_FILE holding __FILL_ME__ exits non-zero with the placeholder line on stderr, without the value", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "budmon-placeholder-"));
+    try {
+      const f = prodWorkerGeneral();
+      const env: Record<string, string> = { PATH: process.env["PATH"] ?? "" };
+      for (const [key, value] of Object.entries(f.env)) {
+        if (value === undefined) continue;
+        const content = f.files.get(value);
+        if (content === undefined) {
+          env[key] = value;
+        } else {
+          const file = path.join(dir, key.toLowerCase());
+          writeFileSync(file, key === "S3_ACCESS_KEY_ID_FILE" ? "__FILL_ME__\n" : content);
+          env[key] = file;
+        }
+      }
+
+      const result = spawnSync(
+        process.execPath,
+        ["--import", "./dist/main/instrument.js", "dist/main/worker.js"],
+        { cwd: SERVER_DIR, env, encoding: "utf8", timeout: 60_000 },
+      );
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toMatch(/S3_ACCESS_KEY_ID(_FILE)?: placeholder not filled/);
+      expect(`${result.stdout}${result.stderr}`).not.toMatch(/__FILL_ME__/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

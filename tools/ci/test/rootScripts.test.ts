@@ -42,6 +42,9 @@ const ROWS: Readonly<Record<string, string>> = {
   "db:pending-report": "pnpm --filter @budmon/server db:pending-report",
   "db:check-migrations": "pnpm --filter @budmon/server db:check-migrations",
   "db:check-risky": "pnpm --filter @budmon/server db:check-risky",
+  // S-15 (A-14)
+  "test:bats":
+    "bash infra/local/test/setup-bats.sh && .tools/bats/bats-core/bin/bats infra/local/test",
   // S-13 (A-14): check:all also runs Android's checks.
   "check:all": "pnpm check && pnpm test:e2e && cd apps/android && ./gradlew check",
 };

@@ -810,3 +810,26 @@ describe("TP-2.83x: SENTRY_DSN and the OTLP endpoint, further cases (A-131, A-13
     expect(problemsOf(f)).toEqual([]);
   });
 });
+
+// TP-15.25 (unit part, F-11, F-191): a placeholder in a secret file stops loadConfig, naming the
+// variable and never the value.
+describe("TP-15.25: an unfilled placeholder file (F-11)", () => {
+  it("TP-15.25: S3_ACCESS_KEY_ID_FILE holding __FILL_ME__\\n is a ConfigError with S3_ACCESS_KEY_ID: placeholder not filled, the value not in the message", () => {
+    const f = prodWorkerGeneral();
+    withFile(f, "S3_ACCESS_KEY_ID_FILE", "__FILL_ME__\n");
+
+    let error: unknown;
+    try {
+      loadConfig("worker", f.env, readFileFrom(f.files));
+    } catch (e) {
+      error = e;
+    }
+
+    expect(error).toBeInstanceOf(ConfigError);
+    const problems = (error as ConfigError).problems;
+    expect(problems).toHaveLength(1);
+    expect(problems[0]?.variable).toMatch(/^S3_ACCESS_KEY_ID(_FILE)?$/);
+    expect(problems[0]?.rule).toBe("placeholder not filled");
+    expect((error as Error).message).not.toContain("__FILL_ME__");
+  });
+});
