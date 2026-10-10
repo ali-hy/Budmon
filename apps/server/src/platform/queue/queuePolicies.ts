@@ -17,31 +17,36 @@ const POLICIES = [
   "app_insert",
 ] as const;
 
-/** A SQL array literal of queue names (names follow F-70's pattern; quotes are doubled anyway). */
+/** A single-quoted SQL string literal. */
 function literal(value: string): string {
   return `'${value.replaceAll("'", "''")}'`;
 }
 
 /**
- * A-283: for each sendable general queue with `captureSingletonKeyField`, capture's rows must be
- * `created`, carry the queue's policy, and take their singleton key from that payload field.
+ * A-283: for each general queue capture may send to, capture's rows must be `created` and carry
+ * the queue's policy; with `captureSingletonKeyField`, their singleton key must also be that
+ * payload field.
  */
 function capturePins(registry: JobRegistry, self: string): string {
   return registry
     .forRole("general")
-    .filter((d) => d.sendableFromCapture === true && d.captureSingletonKeyField !== undefined)
+    .filter((d) => d.sendableFromCapture === true)
     .map((d) => {
       const n = literal(d.name);
-      const field = literal(d.captureSingletonKeyField as string);
+      const key =
+        d.captureSingletonKeyField === undefined
+          ? ""
+          : ` AND ${self}.singleton_key IS NOT DISTINCT FROM ${self}.data->>${literal(d.captureSingletonKeyField)}`;
       return (
         ` AND (${self}.name <> ${n} OR (${self}.state = 'created'` +
         ` AND ${self}.policy IS NOT DISTINCT FROM (SELECT q.policy FROM pgboss.queue q WHERE q.name = ${n})` +
-        ` AND ${self}.singleton_key IS NOT DISTINCT FROM ${self}.data->>${field}))`
+        `${key}))`
       );
     })
     .join("");
 }
 
+/** A SQL array literal of queue names (names follow F-70's pattern; quotes are doubled anyway). */
 function nameArray(names: readonly string[]): string {
   const items = [...new Set(names)].sort().map(literal);
   return `ARRAY[${items.join(", ")}]::text[]`;
