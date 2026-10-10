@@ -10,11 +10,12 @@
   },
   "dependencies": {
     "@formatjs/intl": "6.1.2",
-    "solid-js": "1.9.15"
+    "solid-js": "1.9.16"
   },
   "devDependencies": {
     "@budmon/config": "workspace:*",
     "@budmon/shared": "workspace:*",
+    "@formatjs/icu-messageformat-parser": "3.5.20",
     "@solidjs/testing-library": "0.8.10",
     "@tailwindcss/vite": "4.3.3",
     "jsdom": "30.1.2",

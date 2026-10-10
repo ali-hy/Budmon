@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "devDependencies": {
+    "@formatjs/cli-lib": "10.0.10",
     "tsx": "4.23.15"
   }
 }

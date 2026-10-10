@@ -13,3 +13,4 @@ test-results/
 local.properties
 # Local tooling clones (bats, S-15)
 .tools/
+apps/web/src/i18n/generated/
