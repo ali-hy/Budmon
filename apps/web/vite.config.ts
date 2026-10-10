@@ -11,14 +11,18 @@ const WEB_DIR = path.dirname(fileURLToPath(import.meta.url));
 
 /** F-207: writes src/i18n/generated/{en-XA,ar-XB}.json when VITE_PSEUDO_LOCALES=1. */
 function budmonPseudoLocales(enabled: boolean): Plugin {
+  const enCatalogPath = path.join(WEB_DIR, "src/i18n/messages/en.json");
+  const write = () => {
+    writePseudoLocales({ enCatalogPath, outDir: path.join(WEB_DIR, "src/i18n/generated") });
+  };
   return {
     name: "budmon-pseudo-locales",
     buildStart() {
-      if (!enabled) return;
-      writePseudoLocales({
-        enCatalogPath: path.join(WEB_DIR, "src/i18n/messages/en.json"),
-        outDir: path.join(WEB_DIR, "src/i18n/generated"),
-      });
+      if (enabled) write();
+    },
+    // In dev, an edited English catalog regenerates the pseudo catalogs.
+    handleHotUpdate(ctx) {
+      if (enabled && path.resolve(ctx.file) === enCatalogPath) write();
     },
   };
 }
@@ -53,8 +57,9 @@ export default defineConfig(({ mode }) => {
       port: 5173,
       strictPort: true,
       proxy: {
-        "/api": { target: "http://127.0.0.1:3000", changeOrigin: false },
-        "/health": { target: "http://127.0.0.1:3000", changeOrigin: false },
+        // F-22: exactly /api and /health and their subpaths (a bare prefix would match /apifoo).
+        "^/api(/|$)": { target: "http://127.0.0.1:3000", changeOrigin: false },
+        "^/health(/|$)": { target: "http://127.0.0.1:3000", changeOrigin: false },
       },
     },
   };

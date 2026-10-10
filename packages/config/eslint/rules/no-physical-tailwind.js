@@ -43,8 +43,9 @@ const rule = {
         const { base, directional } = split(token);
         if (directional) continue;
         let bad = PHYSICAL.test(base);
-        if (/^space-x-/.test(base) && !reverse["space-x"]) bad = true;
-        if (/^divide-x-/.test(base) && !reverse["divide-x"]) bad = true;
+        // N-5: negative forms too.
+        if (/^-?space-x-/.test(base) && !reverse["space-x"]) bad = true;
+        if (/^-?divide-x-/.test(base) && !reverse["divide-x"]) bad = true;
         if (bad) context.report({ node, messageId: "physical", data: { cls: base } });
       }
     }

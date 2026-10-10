@@ -18,7 +18,7 @@ const PSEUDO_LOCALES = ["en-XA", "ar-XB"] as const;
 
 /** `en`, plus the pseudo-locales when VITE_PSEUDO_LOCALES=1 (F-207). */
 export function supportedLocales(): readonly string[] {
-  return import.meta.env["VITE_PSEUDO_LOCALES"] === "1" ? ["en", ...PSEUDO_LOCALES] : ["en"];
+  return import.meta.env.VITE_PSEUDO_LOCALES === "1" ? ["en", ...PSEUDO_LOCALES] : ["en"];
 }
 
 /** A-315: every Intl call (relative times, dates, numbers, money, plural rules in t) formats the
@@ -27,13 +27,17 @@ function intlLocaleOf(locale: string): string {
   return (PSEUDO_LOCALES as readonly string[]).includes(locale) ? "en" : locale;
 }
 
-const catalogs = import.meta.glob<Catalog>(["./messages/*.json", "./generated/*.json"], {
-  import: "default",
-});
+const shipped = import.meta.glob<Catalog>("./messages/*.json", { import: "default" });
+// N-2: the generated pseudo catalogs only in pseudo builds; Vite replaces the flag statically, so
+// other builds drop the branch and its chunks.
+const generated: Record<string, () => Promise<Catalog>> =
+  import.meta.env.VITE_PSEUDO_LOCALES === "1"
+    ? import.meta.glob<Catalog>("./generated/*.json", { import: "default" })
+    : {};
 
 async function loadCatalog(locale: string): Promise<Catalog> {
   if (locale === "en") return en;
-  const load = catalogs[`./generated/${locale}.json`] ?? catalogs[`./messages/${locale}.json`];
+  const load = generated[`./generated/${locale}.json`] ?? shipped[`./messages/${locale}.json`];
   return load === undefined ? en : await load();
 }
 
@@ -50,9 +54,14 @@ export function I18nProvider(props: { initialLocale: string; children: JSX.Eleme
   const [intl, setIntl] = createSignal(intlFor("en", en));
   const dir = () => directionOf(locale());
 
+  // B-1: only the latest setLocale applies; an earlier one whose catalog arrives later is dropped.
+  let latestRequest = 0;
   const setLocale = async (requested: string): Promise<void> => {
+    latestRequest += 1;
+    const request = latestRequest;
     const next = resolveLocale(requested, supportedLocales(), "en");
     const messages = await loadCatalog(next);
+    if (request !== latestRequest) return;
     setIntl(intlFor(next, messages));
     setLocaleSignal(next);
     document.documentElement.lang = next;
