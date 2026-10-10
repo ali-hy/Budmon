@@ -104,3 +104,48 @@ describe("TP-11.31x: writePseudoLocales (A-310)", () => {
     }
   });
 });
+
+// Review B-4: select, tags, apostrophes and quoted literals, and the padding rule.
+describe("TP-11.24: more ICU syntax survives (F-207, review B-4)", () => {
+  const SELECT_TAG = "{kind, select, card {Card} other {Other}} <b>bold</b>";
+
+  it.each([
+    ["toAccented", toAccented],
+    ["toRtlPseudo", toRtlPseudo],
+  ])(
+    "TP-11.24: %s keeps a select and a tag: it parses, the shape is equal, and the tag's children are transformed",
+    (_name, fn) => {
+      const original = parse(SELECT_TAG);
+
+      const transformed = parse(fn(SELECT_TAG));
+
+      expect(shape(transformed)).toEqual(shape(original));
+      const tagOf = (els: readonly MessageFormatElement[]) => {
+        const tag = els.find((e) => e.type === TYPE.tag);
+        if (tag?.type !== TYPE.tag) throw new Error("no tag");
+        return tag;
+      };
+      expect(literals(tagOf(transformed).children)).not.toEqual(literals(tagOf(original).children));
+      expect(literals(tagOf(transformed).children).join("")).not.toBe("bold");
+    },
+  );
+
+  it.each([
+    ["toAccented", toAccented],
+    ["toRtlPseudo", toRtlPseudo],
+  ] as const)("TP-11.24: %s keeps an apostrophe and a quoted literal", (_name, fn) => {
+    const apostrophe = parse(fn("You don't"));
+    expect(shape(apostrophe)).toEqual(shape(parse("You don't")));
+    expect(literals(apostrophe).join("")).toContain("'");
+
+    const quoted = parse(fn("Use '{braces}' here"));
+    expect(shape(quoted)).toEqual(shape(parse("Use '{braces}' here")));
+    // The quoted {braces} stays literal text, not an argument.
+    expect(quoted.some((e) => e.type === TYPE.argument)).toBe(false);
+    expect(literals(quoted).join("")).toMatch(/\{.*\}/);
+  });
+
+  it("TP-11.24: toAccented pads one ~ per 3 characters: abcdef is [áƀçðéƒ~~]", () => {
+    expect(toAccented("abcdef")).toBe("[áƀçðéƒ~~]");
+  });
+});

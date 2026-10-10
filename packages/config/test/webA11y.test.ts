@@ -36,6 +36,9 @@ const CASES: [string, string, string[]][] = [
   ["(17)", "<div onClick={f}/>", []],
 ];
 
+/** Every jsx-a11y rule the cases above actually reported (review N-3: from ESLint, not CASES). */
+const reportedByLint = new Set<string>();
+
 describe("TP-11.22: the blocking jsx-a11y rules (F-1, A-13, A-20, A-21)", () => {
   it.each(CASES)("TP-11.22 %s %s: jsx-a11y reports %j", async (_n, jsx, expected) => {
     const messages = await lintFixture({
@@ -49,13 +52,13 @@ describe("TP-11.22: the blocking jsx-a11y rules (F-1, A-13, A-20, A-21)", () => 
           .map((id) => id.slice("jsx-a11y/".length)),
       ),
     ].sort();
+    for (const rule of a11y) reportedByLint.add(rule);
     expect(a11y).toEqual([...expected].sort());
   });
 
+  // Runs after the cases (Vitest runs a file's tests in order) and reads what ESLint reported.
   it("TP-11.22: each of the eight blocking rules reports at least once across the fixtures", () => {
-    const reported = new Set(CASES.flatMap(([, , rules]) => rules));
-
-    expect([...reported].sort()).toEqual(
+    expect([...reportedByLint].sort()).toEqual(
       [
         "alt-text",
         "control-has-associated-label",

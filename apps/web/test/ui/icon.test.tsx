@@ -2,6 +2,7 @@
 import { render } from "@solidjs/testing-library";
 import { describe, expect, it } from "vitest";
 import { Icon } from "../../src/ui/icons/Icon.js";
+import { icons } from "../../src/ui/icons/registry.js";
 
 function svgOf(container: HTMLElement): SVGSVGElement {
   const svg = container.querySelector("svg");
@@ -29,5 +30,27 @@ describe("TP-11.26: Icon (F-215)", () => {
     expect(svg.getAttribute("aria-hidden")).toBeNull();
     expect(svg.getAttribute("data-rtl-probe")).toBe("no-mirror");
     expect(svg.classList.contains("rtl:-scale-x-100")).toBe(false);
+  });
+});
+
+// Review N-4: F-215's eight initial icons and which ones mirror in RTL.
+describe("TP-11.26: the registry's initial icons (F-215)", () => {
+  const EXPECTED: readonly (readonly [string, boolean])[] = [
+    ["alert", false],
+    ["info", false],
+    ["offline", false],
+    ["refresh", false],
+    ["chevron-start", true],
+    ["chevron-end", true],
+    ["arrow-back", true],
+    ["check", false],
+  ];
+
+  it("TP-11.26: the registry holds exactly the eight initial icons", () => {
+    expect(Object.keys(icons).sort()).toEqual(EXPECTED.map(([name]) => name).sort());
+  });
+
+  it.each(EXPECTED)("TP-11.26: %s has mirrorInRtl %s", (name, mirror) => {
+    expect(icons[name as keyof typeof icons].mirrorInRtl).toBe(mirror);
   });
 });
