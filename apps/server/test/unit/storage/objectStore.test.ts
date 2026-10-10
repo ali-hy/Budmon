@@ -1,5 +1,5 @@
 // F-140 key, prefix, TTL and download-name rules, F-143 the memory store and F-144 the exports
-// purge. TP-10.1, TP-10.4 and TP-10.5, plus extra cases TP-10.11x. IDs ending in "x" are
+// purge. TP-10.1, TP-10.4 and TP-10.5, plus extra cases TP-10.12x. IDs ending in "x" are
 // test-architect additions, not LLD test-plan IDs.
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -95,7 +95,7 @@ describe("TP-10.1: key, prefix, TTL and download-name rules (F-140, A-22)", () =
     );
   });
 
-  it.each([[60], [900]])("TP-10.11x: ttlSeconds %i is accepted", async (ttl) => {
+  it.each([[60], [900]])("TP-10.12x: ttlSeconds %i is accepted", async (ttl) => {
     const { store } = memoryStore();
 
     await expect(store.presignGet("exports", exportKey(), ttl)).resolves.toBeInstanceOf(URL);
@@ -170,7 +170,7 @@ describe("TP-10.4: the memory store (F-143, A-22)", () => {
     expect(url.searchParams.get("n")).toBe("budmon-export-2026-10-07.zip");
   });
 
-  it("TP-10.11x: the snapshot holds the body of what was put", async () => {
+  it("TP-10.12x: the snapshot holds the body of what was put", async () => {
     const { store } = memoryStore();
     await store.put("exports", exportKey(), Buffer.from("zip-bytes"), "application/zip");
 
@@ -203,7 +203,7 @@ describe("TP-10.5: exports older than 7 days are purged (F-144)", () => {
     ]);
   });
 
-  it("TP-10.11x: an object exactly 7 days old is kept (lastModified < now − 7 days purges)", async () => {
+  it("TP-10.12x: an object exactly 7 days old is kept (lastModified < now − 7 days purges)", async () => {
     const { store, clock } = memoryStore("2026-09-30T12:00:00Z");
     await store.put("exports", exportKey(), Buffer.from("x"), "application/zip");
     clock.advance({ hours: 7 * 24 });
@@ -250,7 +250,7 @@ describe("TP-10.5 (A-306): the fs store's list skips a stray key", () => {
 
 // Review B-1: every method returns a promise; a validation error is a rejection, never a
 // synchronous throw (F-140, F-143 parity with S3).
-describe("TP-10.11x (B-1): validation errors reject", () => {
+describe("TP-10.12x (B-1): validation errors reject", () => {
   async function rejectsWithoutThrowing(call: () => Promise<unknown>, error: new () => Error) {
     let promise: Promise<unknown> | undefined;
     expect(() => {
@@ -269,13 +269,13 @@ describe("TP-10.11x (B-1): validation errors reject", () => {
       "presignGet with a bad downloadName",
       (s) => s.presignGet("exports", exportKey(), 600, { downloadName: "a b" }),
     ],
-  ])("TP-10.11x (B-1): memory store: %s rejects with RangeError", async (_label, call) => {
+  ])("TP-10.12x (B-1): memory store: %s rejects with RangeError", async (_label, call) => {
     const { store } = memoryStore();
 
     await rejectsWithoutThrowing(() => call(store), RangeError);
   });
 
-  it("TP-10.11x (B-1): fs store: presignGet with a bad key rejects with RangeError; without a signing key (A-303) it rejects with TypeError", async () => {
+  it("TP-10.12x (B-1): fs store: presignGet with a bad key rejects with RangeError; without a signing key (A-303) it rejects with TypeError", async () => {
     const root = mkdtempSync(path.join(tmpdir(), "budmon-fs-reject-"));
     try {
       const make = (signingKey: Buffer | null) =>

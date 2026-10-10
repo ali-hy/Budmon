@@ -1,7 +1,13 @@
 // F-141 the S3 object store against versitygw (A-287), an S3-compatible Testcontainer. TP-10.3,
-// plus extra cases TP-10.11x. IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
+// plus extra cases TP-10.12x. IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 // Not skipped: it runs in every pnpm test:int, in CI through A-284's mirror prefix.
-import { CreateBucketCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import {
+  CreateBucketCommand,
+  DeleteObjectCommand,
+  ListObjectsV2Command,
+  PutObjectCommand,
+  S3Client,
+} from "@aws-sdk/client-s3";
 import { fixedClock } from "@budmon/shared";
 import { GenericContainer, Wait, type StartedTestContainer } from "testcontainers";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -74,6 +80,36 @@ describe("TP-10.3: the S3 store (F-141, A-22, A-287)", () => {
     expect(await keysOf(store, "exports", "users/")).toEqual([]);
   });
 
+  // Review R2-B-1: deletePrefix removes every object under the prefix, including one that fails
+  // assertObjectKey (written around the store), so an erased user's exports leave nothing behind.
+  it("TP-10.3 (R2-B-1): deletePrefix(exports, users/<USER>/) also removes a stray users/<USER>/exports/stray.txt; nothing is left under the prefix", async () => {
+    await store.put("exports", exportKey(), Buffer.from("zip-bytes"), "application/zip");
+    await admin.send(
+      new PutObjectCommand({
+        Bucket: BUCKETS.exports,
+        Key: `users/${USER}/exports/stray.txt`,
+        Body: "stray",
+      }),
+    );
+
+    try {
+      await store.deletePrefix("exports", `users/${USER}/`);
+
+      const left = await admin.send(
+        new ListObjectsV2Command({ Bucket: BUCKETS.exports, Prefix: `users/${USER}/` }),
+      );
+      expect((left.Contents ?? []).map((o) => o.Key)).toEqual([]);
+    } finally {
+      // Leave no stray for later cases (TP-10.5 counts skipped keys) if deletePrefix missed it.
+      await admin.send(
+        new DeleteObjectCommand({
+          Bucket: BUCKETS.exports,
+          Key: `users/${USER}/exports/stray.txt`,
+        }),
+      );
+    }
+  });
+
   it(`TP-10.3: presign without and with downloadName ${NAME}: response-content-disposition is attachment / attachment; filename="…", and the server answers with that header`, async () => {
     await store.put("exports", exportKey(), Buffer.from("zip-bytes"), "application/zip");
 
@@ -122,7 +158,7 @@ describe("TP-10.3: the S3 store (F-141, A-22, A-287)", () => {
   }, 90_000);
 
   // Review B-7: F-141's other error mappings, and lastModified from the listing.
-  it("TP-10.11x (B-7): (a) a wrong secretAccessKey: put is ObjectStoreError with reason denied", async () => {
+  it("TP-10.12x (B-7): (a) a wrong secretAccessKey: put is ObjectStoreError with reason denied", async () => {
     const wrong = createS3ObjectStore(
       { ...cfg(), secretAccessKey: Secret.of("not-the-secret") },
       { logger: recordingLogger() },
@@ -136,7 +172,7 @@ describe("TP-10.3: the S3 store (F-141, A-22, A-287)", () => {
     expect((error as { reason?: unknown }).reason).toBe("denied");
   });
 
-  it("TP-10.11x (B-7): (b) an endpoint on a closed port: put is ObjectStoreError with reason unavailable", async () => {
+  it("TP-10.12x (B-7): (b) an endpoint on a closed port: put is ObjectStoreError with reason unavailable", async () => {
     const closed = createS3ObjectStore(
       { ...cfg(), endpoint: new URL("http://127.0.0.1:1") },
       { logger: recordingLogger() },
@@ -150,7 +186,7 @@ describe("TP-10.3: the S3 store (F-141, A-22, A-287)", () => {
     expect((error as { reason?: unknown }).reason).toBe("unavailable");
   }, 60_000);
 
-  it("TP-10.11x (B-7): (c) list yields a lastModified within a few seconds of the put", async () => {
+  it("TP-10.12x (B-7): (c) list yields a lastModified within a few seconds of the put", async () => {
     const key = exportKey("0190a0b0-1c2d-7e3f-8a4b-0000000000c3");
     const before = Date.now();
     await store.put("exports", key, Buffer.from("x"), "application/zip");

@@ -1,5 +1,5 @@
 // F-10's object-store settings: OBJECT_STORE_KIND required (A-307, TP-10.11) and the dev objects
-// key never read outside development and test (A-303, review B-6, extra cases TP-10.11x). IDs
+// key never read outside development and test (A-303, review B-6, extra cases TP-10.12x). IDs
 // ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { describe, expect, it } from "vitest";
 import { loadConfig } from "../../../src/platform/config/loadConfig.js";
@@ -54,9 +54,9 @@ describe("TP-10.11: OBJECT_STORE_KIND is required for the api and a general work
   });
 });
 
-describe("TP-10.11x (B-6): DEV_OBJECTS_SIGNING_KEY_FILE outside development and test (A-303)", () => {
+describe("TP-10.12x (B-6): DEV_OBJECTS_SIGNING_KEY_FILE outside development and test (A-303)", () => {
   it.each([["rehearsal"], ["production"]] as const)(
-    "TP-10.11x (B-6): an api in %s never reads DEV_OBJECTS_SIGNING_KEY_FILE and has no devObjectsKey",
+    "TP-10.12x (B-6): an api in %s never reads DEV_OBJECTS_SIGNING_KEY_FILE and has no devObjectsKey",
     (appEnv) => {
       const f = prodApi(appEnv);
       withFile(f, "DEV_OBJECTS_SIGNING_KEY_FILE", Buffer.alloc(32, 7).toString("base64"));

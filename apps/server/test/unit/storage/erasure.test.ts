@@ -1,4 +1,4 @@
-// F-146 the erasure log and F-151 replayErasures. TP-10.6 and TP-10.7, plus extra cases TP-10.11x.
+// F-146 the erasure log and F-151 replayErasures. TP-10.6 and TP-10.7, plus extra cases TP-10.12x.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { Temporal, canonicalJson, fixedClock } from "@budmon/shared";
 import { describe, expect, it, vi } from "vitest";
@@ -44,7 +44,7 @@ describe("TP-10.6: the erasure log (F-146)", () => {
     ]);
   });
 
-  it("TP-10.11x: the body is canonicalJson({ userId, erasedAt })", async () => {
+  it("TP-10.12x: the body is canonicalJson({ userId, erasedAt })", async () => {
     const { store, log } = logOnMemory();
 
     await log.append({ userId: U1, erasedAt: T1 });
@@ -54,7 +54,7 @@ describe("TP-10.6: the erasure log (F-146)", () => {
     ]);
   });
 
-  it("TP-10.11x: records with the same erasedAt are sorted by userId; listSince(t) includes t itself", async () => {
+  it("TP-10.12x: records with the same erasedAt are sorted by userId; listSince(t) includes t itself", async () => {
     const { log } = logOnMemory();
 
     await log.append({ userId: U2, erasedAt: T1 });

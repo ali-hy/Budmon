@@ -1,8 +1,17 @@
 // F-142 the filesystem object store and F-145 the development objects route, through a development
 // API container (F-96's objectStore) and its server (F-55 step 6). TP-10.2, plus extra cases
-// TP-10.11x. IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
+// TP-10.12x. IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { createHmac, randomBytes } from "node:crypto";
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { canonicalJson, fixedClock } from "@budmon/shared";
@@ -104,6 +113,29 @@ describe("TP-10.2: the filesystem store (F-142, F-140)", () => {
     expect(await store.deletePrefix("exports", `users/${USER}/`)).toBe(2);
     expect(existsSync(file)).toBe(false);
   });
+
+  // Review R2-B-1: deletePrefix removes every file under the prefix, including one that fails
+  // assertObjectKey (written straight to disk).
+  it("TP-10.2 (R2-B-1): deletePrefix(exports, users/<USER>/) also removes a stray users/<USER>/exports/stray.txt; nothing is left under the prefix", async () => {
+    await store.put("exports", exportKey(), Buffer.from("zip-bytes"), "application/zip");
+    const strayDir = path.join(root, "exports", "users", USER, "exports");
+    mkdirSync(strayDir, { recursive: true });
+    writeFileSync(path.join(strayDir, "stray.txt"), "stray");
+
+    const prefixDir = path.join(root, "exports", "users", USER);
+    try {
+      await store.deletePrefix("exports", `users/${USER}/`);
+
+      const left = existsSync(prefixDir)
+        ? readdirSync(prefixDir, { recursive: true, withFileTypes: true })
+            .filter((e) => !e.isDirectory())
+            .map((e) => path.join(e.parentPath, e.name))
+        : [];
+      expect(left).toEqual([]);
+    } finally {
+      rmSync(strayDir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("TP-10.2: the development objects route (F-145, A-22)", () => {
@@ -150,7 +182,7 @@ describe("TP-10.2: the development objects route (F-145, A-22)", () => {
   });
 
   // Review B-4: the payload changed, the original signature part kept.
-  it("TP-10.11x (B-4): (a) k set to another user's existing export, with the original signature, is a 404 NOT_FOUND envelope", async () => {
+  it("TP-10.12x (B-4): (a) k set to another user's existing export, with the original signature, is a 404 NOT_FOUND envelope", async () => {
     await store.put("exports", OTHER_KEY, Buffer.from("not yours"), "application/zip");
     const url = await store.presignGet("exports", exportKey(), 600);
     const { payload, signature } = tokenOf(url);
@@ -165,7 +197,7 @@ describe("TP-10.2: the development objects route (F-145, A-22)", () => {
     expect(res.json()).toEqual(NOT_FOUND);
   });
 
-  it("TP-10.11x (B-4): (b) exp + 3600 with the original signature is a 404 NOT_FOUND envelope", async () => {
+  it("TP-10.12x (B-4): (b) exp + 3600 with the original signature is a 404 NOT_FOUND envelope", async () => {
     const url = await store.presignGet("exports", exportKey(), 600);
     const { payload, signature } = tokenOf(url);
 
@@ -179,7 +211,7 @@ describe("TP-10.2: the development objects route (F-145, A-22)", () => {
     expect(res.json()).toEqual(NOT_FOUND);
   });
 
-  it("TP-10.11x (B-4): (c) one character flipped in the middle of the signature is a 404 NOT_FOUND envelope", async () => {
+  it("TP-10.12x (B-4): (c) one character flipped in the middle of the signature is a 404 NOT_FOUND envelope", async () => {
     const url = await store.presignGet("exports", exportKey(), 600);
     const { payloadPart, signature } = tokenOf(url);
     const mid = Math.floor(signature.length / 2);
@@ -201,7 +233,7 @@ describe("TP-10.2: the development objects route (F-145, A-22)", () => {
     expect(res.json()).toEqual(NOT_FOUND);
   });
 
-  it('TP-10.11x: the same payload re-signed with the test key (n unchanged) is served, so the a"b refusal is the n check', async () => {
+  it('TP-10.12x: the same payload re-signed with the test key (n unchanged) is served, so the a"b refusal is the n check', async () => {
     const url = await store.presignGet("exports", exportKey(), 600, { downloadName: NAME });
 
     const res = await app.inject({
@@ -212,7 +244,7 @@ describe("TP-10.2: the development objects route (F-145, A-22)", () => {
     expect(res.statusCode).toBe(200);
   });
 
-  it("TP-10.11x: a valid token for a key with no file is a 404 NOT_FOUND envelope", async () => {
+  it("TP-10.12x: a valid token for a key with no file is a 404 NOT_FOUND envelope", async () => {
     const missing = exportKey(EXPORT_ID.replace(/c$/, "f"), "csv");
     const url = await store.presignGet("exports", missing, 600);
 
@@ -248,6 +280,34 @@ describe("TP-10.2: the development objects route (F-145, A-22)", () => {
 
     expect(res.status).toBe(404);
     expect(res.json()).toEqual(NOT_FOUND);
+  });
+
+  // Review R2-B-2: a correctly signed token whose payload part contains "/" (standard base64, which
+  // base64url never produces), so only the character check can refuse it; the base64url control
+  // with the same payload is served.
+  it("TP-10.2 (A-304, R2-B-2): a correctly signed token whose payload part contains / is a 404 NOT_FOUND envelope; the same payload in base64url is served", async () => {
+    const url = await store.presignGet("exports", exportKey(), 600);
+    const base = tokenOf(url).payload;
+    // "???" encodes as "Pz8/" when it starts on a 3-byte boundary; shift it until it does.
+    const payload = ["???", "a???", "aa???"]
+      .map((pad) => ({ ...base, pad }))
+      .find((p) => Buffer.from(canonicalJson(p)).toString("base64").includes("/"));
+    if (payload === undefined) throw new Error("no padding put a / in the standard base64");
+    const sign = (part: string) =>
+      createHmac("sha256", signingKey).update(part).digest("base64url");
+    const slashed = Buffer.from(canonicalJson(payload)).toString("base64").replace(/=+$/, "");
+    const control = b64url(canonicalJson(payload));
+
+    expect(slashed).toContain("/");
+    const refused = await injectJson(app, "GET", `/dev/objects/${slashed}.${sign(slashed)}`);
+    expect(refused.status).toBe(404);
+    expect(refused.json()).toEqual(NOT_FOUND);
+
+    const served = await app.inject({
+      method: "GET",
+      url: `/dev/objects/${control}.${sign(control)}`,
+    });
+    expect(served.statusCode).toBe(200);
   });
 
   it("TP-10.2 (A-304): a correctly signed token padded to exactly 2048 characters is served; padded past 2048 it's a 404 NOT_FOUND envelope", async () => {
@@ -320,7 +380,7 @@ describe("TP-10.2 (A-303): only the API presigns fs objects", () => {
   });
 
   // Review B-6: the route exists only for development or test with the fs store.
-  it("TP-10.11x (B-6): an API with APP_ENV=test and OBJECT_STORE_KIND=s3 has no /dev/objects/* route: GET answers the platform 404", async () => {
+  it("TP-10.12x (B-6): an API with APP_ENV=test and OBJECT_STORE_KIND=s3 has no /dev/objects/* route: GET answers the platform 404", async () => {
     const api = await buildApiContainer(
       {},
       {
@@ -354,7 +414,7 @@ describe("TP-10.2 (A-303): only the API presigns fs objects", () => {
     }
   });
 
-  it("TP-10.11x (B-6): the development API with the fs store has the /dev/objects/* route (the control for the case above)", () => {
+  it("TP-10.12x (B-6): the development API with the fs store has the /dev/objects/* route (the control for the case above)", () => {
     expect(app.hasRoute({ method: "GET", url: "/dev/objects/*" })).toBe(true);
   });
 

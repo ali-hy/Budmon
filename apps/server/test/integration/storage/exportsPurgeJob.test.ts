@@ -1,5 +1,5 @@
 // F-80's platform.exports-purge (A-215): registered with F-144's handler in S-10. Extra cases
-// TP-10.11x (the LLD tests F-144 itself in TP-10.5). IDs ending in "x" are test-architect
+// TP-10.12x (the LLD tests F-144 itself in TP-10.5). IDs ending in "x" are test-architect
 // additions, not LLD test-plan IDs.
 import { Temporal, fixedClock } from "@budmon/shared";
 import { describe, expect, it } from "vitest";
@@ -9,15 +9,15 @@ import { buildWorkerContainer } from "../../support/worker.js";
 import { createMemoryObjectStore } from "../../../src/platform/storage/memoryObjectStore.js";
 import { exportKey, keysOf } from "../../support/s10.js";
 
-describe("TP-10.11x: platform.exports-purge (F-80, A-215)", () => {
-  it("TP-10.11x: the definition is general, cron 15 * * * *, with an empty payload", () => {
+describe("TP-10.12x: platform.exports-purge (F-80, A-215)", () => {
+  it("TP-10.12x: the definition is general, cron 15 * * * *, with an empty payload", () => {
     const def = platformMaintenanceJobs.find((d) => d.name === "platform.exports-purge");
 
     expect(def).toMatchObject({ role: "general", cron: "15 * * * *" });
     expect(def?.payload.safeParse({}).success).toBe(true);
   });
 
-  it("TP-10.11x: the general worker's handler purges exports older than 7 days from its objectStore", async () => {
+  it("TP-10.12x: the general worker's handler purges exports older than 7 days from its objectStore", async () => {
     const clock = fixedClock("2026-09-29T12:00:00Z");
     const store = createMemoryObjectStore(clock);
     const old = exportKey("0190a0b0-1c2d-7e3f-8a4b-000000000008");
