@@ -1,6 +1,7 @@
-// F-210 UpdateNotifier (J-6). TP-11.11; TP-11.12 waits for the planner (see below). The cases that
+// F-210 UpdateNotifier (J-6). TP-11.11 and TP-11.12 (a) (A-325). The cases that
 // show a toast run last: F-212's toasts live in a module-level store shared by the cases.
-import { screen, waitFor } from "@solidjs/testing-library";
+import { screen, waitFor, within } from "@solidjs/testing-library";
+import { createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { loadToaster, loadUpdateNotifier, plain } from "../support/s11b.js";
 import { renderWithI18n } from "../support/render.js";
@@ -127,10 +128,31 @@ describe("TP-11.11: new web build toast (F-210)", () => {
   });
 });
 
-// TP-11.12 needs the global clientUpdateRequired signal that F-201 sets and F-210 reads, and the
-// LLD doesn't say which module exports it or under what name. Question raised with the planner.
-describe("TP-11.12: update required banner (F-210)", () => {
-  it.todo(
-    'TP-11.12: with the clientUpdateRequired signal set, a persistent role="alert" banner with Reload (awaiting the signal\'s module and name from the planner)',
-  );
+// A-325 (a): an injected updateRequired accessor. (b), the global signal, is in
+// updateRequiredGlobal.test.tsx, a fresh file, because markClientUpdateRequired is one-way.
+describe("TP-11.12: update required banner (F-210, A-325)", () => {
+  it('TP-11.12 (a): with updateRequired a signal set to true, a persistent role="alert" banner with Reload', async () => {
+    const { UpdateNotifier } = await loadUpdateNotifier();
+    const [required, setRequired] = createSignal(false);
+    renderWithI18n(() => (
+      <UpdateNotifier
+        buildNumber={7}
+        fetchVersion={() => Promise.resolve({ buildNumber: 7 })}
+        schedule={() => () => undefined}
+        updateRequired={required}
+      />
+    ));
+    expect(screen.queryByRole("alert")).toBeNull();
+
+    setRequired(true);
+
+    const banner = await screen.findByRole("alert");
+    expect(plain(banner.textContent)).toContain(
+      "This version of Budmon is out of date. Reload to continue.",
+    );
+    expect(within(banner).getByRole("button", { name: "Reload" })).toBeTruthy();
+    // Persistent: still there a long time later.
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.getByRole("alert")).toBe(banner);
+  });
 });

@@ -191,3 +191,63 @@ describe("TP-11.6: the last setLocale wins (F-206, review B-1)", () => {
     expect(i18n.t(HOME)).not.toMatch(/[áéíóú]/);
   });
 });
+
+// A-319: only simple {name} arguments are isolated; select and plural see raw values.
+describe("TP-11.6 (A-319): t passes select and plural values raw", () => {
+  it('TP-11.6 (A-319): select with kind "card" is "Card"; plural with count 2 is "2 items"; neither isolated, no NaN', () => {
+    const i18n = provider();
+
+    const card = i18n.t(
+      { id: "test.kind", defaultMessage: "{kind, select, card {Card} other {Other}}" },
+      { kind: "card" },
+    );
+    const items = i18n.t(
+      { id: "test.items", defaultMessage: "{count, plural, one {# item} other {# items}}" },
+      { count: 2 },
+    );
+
+    expect(card).toBe("Card");
+    expect(items).toBe("2 items");
+    for (const text of [card, items]) {
+      expect(text).not.toMatch(/[\u2068\u2069]/);
+      expect(text).not.toContain("NaN");
+    }
+  });
+
+  it("TP-11.6 (A-319): a string count in a plural isn't isolated either (no NaN)", () => {
+    const i18n = provider();
+
+    const items = i18n.t(
+      { id: "test.items", defaultMessage: "{count, plural, one {# item} other {# items}}" },
+      { count: "2" },
+    );
+
+    expect(items).not.toContain("NaN");
+    expect(items).not.toMatch(/[\u2068\u2069]/);
+  });
+});
+
+// A-321: future instants are never relative: up to 5 minutes ahead is "now", further is the date.
+describe("TP-11.6 (A-321): future instants", () => {
+  const ahead = (d: Temporal.DurationLike) => NOW.add(d);
+
+  it("TP-11.6 (A-321): now + 3 min is now", () => {
+    expect(provider().formatRelative(ahead({ minutes: 3 }), NOW, "UTC")).toBe("now");
+  });
+
+  it("TP-11.6 (A-321): now + 2 h is the date 2026-10-07", () => {
+    const i18n = provider();
+
+    expect(i18n.formatRelative(ahead({ hours: 2 }), NOW, "UTC")).toBe(
+      i18n.formatDate(Temporal.PlainDate.from("2026-10-07")),
+    );
+  });
+
+  it("TP-11.6 (A-321): now + 30 d is the date 2026-11-06", () => {
+    const i18n = provider();
+
+    expect(i18n.formatRelative(ahead({ hours: 30 * 24 }), NOW, "UTC")).toBe(
+      i18n.formatDate(Temporal.PlainDate.from("2026-11-06")),
+    );
+  });
+});

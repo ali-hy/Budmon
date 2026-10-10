@@ -1,7 +1,7 @@
 // The web build (F-221, S-11a acceptance criteria, A-313): TP-11.27, AC-11.1 and AC-11.3. Builds go
 // to temporary directories, so apps/web/dist isn't touched.
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -31,6 +31,36 @@ function withOutDir<T>(fn: (outDir: string) => T): T {
   }
 }
 
+/** `vite build` into `outDir` with `env` (an undefined value unsets the variable). */
+function viteBuild(
+  outDir: string,
+  env: Record<string, string | undefined>,
+): { status: number | null; output: string } {
+  const merged: Record<string, string | undefined> = {
+    ...process.env,
+    CI: "true",
+    FORCE_COLOR: "0",
+    NO_COLOR: "1",
+    ...env,
+  };
+  for (const [key, value] of Object.entries(merged)) {
+    if (value === undefined) Reflect.deleteProperty(merged, key);
+  }
+  const result = spawnSync(
+    "pnpm",
+    ["--filter", "@budmon/web", "exec", "vite", "build", "--outDir", outDir, "--emptyOutDir"],
+    { cwd: ROOT, encoding: "utf8", env: merged },
+  );
+  return { status: result.status, output: `${result.stdout}${result.stderr}` };
+}
+
+/** Every file under `dir`, recursively. */
+function filesUnder(dir: string): string[] {
+  return readdirSync(dir, { recursive: true, withFileTypes: true })
+    .filter((e) => e.isFile())
+    .map((e) => path.join(e.parentPath, e.name));
+}
+
 describe("TP-11.27: version.json (F-221)", () => {
   it('TP-11.27: BUDMON_BUILD_NUMBER=12 vite build writes version.json {"buildNumber":12}', () => {
     withOutDir((outDir) => {
@@ -42,6 +72,55 @@ describe("TP-11.27: version.json (F-221)", () => {
 
       expect(status, output).toBe(0);
       expect(readFileSync(path.join(outDir, "version.json"), "utf8")).toBe('{"buildNumber":12}');
+    });
+  }, 300_000);
+
+  // A-320: unset is 0; set (even empty) must match ^\d{1,9}$, read as decimal.
+  it.each([
+    ["unset", undefined, 0],
+    ['"007"', "007", 7],
+  ])(
+    "TP-11.27 (A-320): BUDMON_BUILD_NUMBER %s gives {buildNumber: %i}",
+    (_label, value, expected) => {
+      withOutDir((outDir) => {
+        const { status, output } = viteBuild(outDir, { BUDMON_BUILD_NUMBER: value });
+
+        expect(status, output).toBe(0);
+        expect(readFileSync(path.join(outDir, "version.json"), "utf8")).toBe(
+          JSON.stringify({ buildNumber: expected }),
+        );
+      });
+    },
+    300_000,
+  );
+
+  it.each([[""], ["abc"], ["1234567890"], ["-1"]])(
+    "TP-11.27 (A-320): BUDMON_BUILD_NUMBER %j fails the build, naming the variable, with no version.json",
+    (value) => {
+      withOutDir((outDir) => {
+        const { status, output } = viteBuild(outDir, { BUDMON_BUILD_NUMBER: value });
+
+        expect(status, output).not.toBe(0);
+        expect(output).toContain("BUDMON_BUILD_NUMBER");
+        expect(existsSync(path.join(outDir, "version.json"))).toBe(false);
+      });
+    },
+    300_000,
+  );
+
+  // A-332: fixtures are folded away from a normal build.
+  it("TP-11.27 (A-332): a build without VITE_FIXTURES has no file containing __fixtures", () => {
+    withOutDir((outDir) => {
+      const { status, output } = viteBuild(outDir, {
+        VITE_FIXTURES: undefined,
+        VITE_PSEUDO_LOCALES: undefined,
+      });
+
+      expect(status, output).toBe(0);
+      const offending = filesUnder(outDir).filter((file) =>
+        readFileSync(file).includes("__fixtures"),
+      );
+      expect(offending.map((f) => path.relative(outDir, f))).toEqual([]);
     });
   }, 300_000);
 });

@@ -106,7 +106,13 @@ export interface UpdateNotifierModule {
     fetchVersion?: () => Promise<{ buildNumber: number }>;
     now?: () => number;
     schedule?: (fn: () => void, ms: number) => () => void;
+    /** A-325: defaults to api/clientUpdate.ts's clientUpdateRequired. */
+    updateRequired?: () => boolean;
   }) => JSX.Element;
+}
+export interface ClientUpdateModule {
+  clientUpdateRequired: () => boolean;
+  markClientUpdateRequired: () => void;
 }
 export interface OfflineBannerModule {
   OfflineBanner: (props: Record<string, never>) => JSX.Element;
@@ -169,6 +175,7 @@ const SPECS = {
   rateLimit: `${SRC}/ui/RateLimitNotice.tsx`,
   sentry: `${SRC}/observability/sentry.ts`,
   a11y: `${SRC}/ui/a11y.ts`,
+  clientUpdate: `${SRC}/api/clientUpdate.ts`,
   solidQuery: "@tanstack/solid-query",
   orpcClient: "@orpc/client",
 } as const;
@@ -190,6 +197,7 @@ export const loadForms = () => load<FormsModule>(SPECS.forms);
 export const loadRateLimit = () => load<RateLimitModule>(SPECS.rateLimit);
 export const loadSentry = () => load<SentryModule>(SPECS.sentry);
 export const loadA11y = () => load<A11yModule>(SPECS.a11y);
+export const loadClientUpdate = () => load<ClientUpdateModule>(SPECS.clientUpdate);
 export const loadSolidQuery = () => load<SolidQuery>(SPECS.solidQuery);
 export const loadOrpcClient = () => load<OrpcClientModule>(SPECS.orpcClient);
 

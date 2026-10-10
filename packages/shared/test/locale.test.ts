@@ -74,3 +74,37 @@ describe("F-312 isolate", () => {
     expect(isolate("x")).toBe("⁨x⁩");
   });
 });
+
+// A-319: packages/shared/src/i18n/isolateArgs.ts isn't written yet, so it loads through a variable
+// specifier until it lands.
+const ISOLATE_ARGS = "../src/i18n/isolateArgs.js";
+type IsolateSimpleArguments = (
+  message: string,
+  values: Readonly<Record<string, unknown>>,
+) => Record<string, unknown>;
+
+async function isolateSimpleArguments(): Promise<IsolateSimpleArguments> {
+  return (
+    (await import(/* @vite-ignore */ ISOLATE_ARGS)) as {
+      isolateSimpleArguments: IsolateSimpleArguments;
+    }
+  ).isolateSimpleArguments;
+}
+
+describe("F-312 isolateSimpleArguments (A-319)", () => {
+  it.each([
+    ["{name} paid", { name: "Ali" }, { name: "⁨Ali⁩" }],
+    ["{kind, select, card {Card} other {Other}}", { kind: "card" }, { kind: "card" }],
+    [
+      "{n, plural, one {# item} other {# items}} for {who}",
+      { n: 2, who: "Ali" },
+      { n: 2, who: "⁨Ali⁩" },
+    ],
+    ["{kind} {kind, select, a {A} other {O}}", { kind: "a" }, { kind: "a" }],
+    ["{", { x: "y" }, { x: "y" }],
+  ])("TP-1.13 (A-319): isolateSimpleArguments(%j, %j) is %j", async (message, values, expected) => {
+    const isolateArgs = await isolateSimpleArguments();
+
+    expect(isolateArgs(message, values)).toEqual(expected);
+  });
+});

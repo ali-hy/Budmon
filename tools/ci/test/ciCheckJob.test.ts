@@ -1,7 +1,8 @@
 // TP-2.26: ci.yml's check job runs the integration tests after the unit tests (A-31), plus the extra
 // case TP-2.60x: the main-only dev-smoke job runs TP-2.18's script (§10.1 CI jobs, A-55). TP-0.26:
 // Testcontainers pulls Docker Hub images through mirror.gcr.io in CI (A-284). TP-0.29: the catalog
-// check runs in CI through pnpm lint (A-316).
+// check runs in CI through pnpm lint (A-316). TP-0.31: the e2e job (A-334), which also covers
+// AC-11.2 (the axe report uploaded as an artifact).
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -131,5 +132,61 @@ describe("TP-0.29: the catalog check runs in CI through pnpm lint (A-316)", () =
       .flatMap((run) => run.split("\n").map((line) => line.trim()));
 
     expect(lines).toContain("pnpm lint");
+  });
+});
+
+describe("TP-0.31: ci.yml e2e job (A-334)", () => {
+  interface Step {
+    uses?: unknown;
+    run?: unknown;
+    if?: unknown;
+    with?: Record<string, unknown>;
+  }
+  const workflow = () =>
+    parse(readFileSync(path.join(ROOT, ".github/workflows/ci.yml"), "utf8")) as {
+      on?: Record<string, unknown>;
+      jobs?: Record<string, { if?: unknown; steps?: Step[] }>;
+    };
+  const runLines = (steps: readonly Step[]) =>
+    steps
+      .map((s) => s.run)
+      .filter((r): r is string => typeof r === "string")
+      .flatMap((r) => r.split("\n").map((line) => line.trim()));
+
+  it("TP-0.31: the e2e job runs on pull_request", () => {
+    const wf = workflow();
+    const job = wf.jobs?.["e2e"];
+
+    expect(job).toBeDefined();
+    expect(Object.keys(wf.on ?? {})).toContain("pull_request");
+    expect(typeof job?.if === "string" ? job.if : "").not.toMatch(/push|refs\/heads\/main/);
+  });
+
+  it("TP-0.31: a step runs playwright install --with-deps chromium", () => {
+    const lines = runLines(workflow().jobs?.["e2e"]?.steps ?? []);
+
+    expect(lines.some((l) => /playwright install --with-deps chromium$/.test(l))).toBe(true);
+  });
+
+  it("TP-0.31: a step runs pnpm test:e2e with --project=chromium and --project=pseudo-rtl and no other --project", () => {
+    const lines = runLines(workflow().jobs?.["e2e"]?.steps ?? []).filter((l) =>
+      l.startsWith("pnpm test:e2e"),
+    );
+
+    expect(lines).toHaveLength(1);
+    const projects = [...(lines[0] ?? "").matchAll(/--project[= ](\S+)/g)].map((m) => m[1]);
+    expect(projects.sort()).toEqual(["chromium", "pseudo-rtl"]);
+  });
+
+  it("TP-0.31, AC-11.2: the last step uploads apps/web/playwright-report/ as playwright-report with a SHA-pinned actions/upload-artifact and if: always()", () => {
+    const steps = workflow().jobs?.["e2e"]?.steps ?? [];
+    const last = steps.at(-1);
+
+    expect(typeof last?.uses === "string" ? last.uses : "").toMatch(
+      /^actions\/upload-artifact@[0-9a-f]{40}$/,
+    );
+    expect(last?.if).toBe("always()");
+    expect(last?.with?.["name"]).toBe("playwright-report");
+    expect(last?.with?.["path"]).toBe("apps/web/playwright-report/");
   });
 });

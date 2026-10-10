@@ -33,24 +33,26 @@ function form(m: RateLimitModule) {
 const submit = () => screen.getByRole<HTMLButtonElement>("button", { name: "Save" });
 
 describe("TP-11.10: a rate-limited form (F-214)", () => {
-  it("TP-11.10: block(125): Try again in 3 minutes in role=status and submit disabled; after 65 s, 60 s left and 1 minute; after 60 s more, enabled", async () => {
+  it("TP-11.10 (A-324): block(125): Try again in 3 minutes in role=status and submit disabled; at 61 s left 2 minutes; at 60 s left 1 minute; 60 s later enabled", async () => {
     const m = await loadRateLimit();
     const gate = form(m);
     expect(submit().disabled).toBe(false);
 
     gate.block(125);
     await vi.advanceTimersByTimeAsync(0);
-
     expect(gate.blockedFor()).toBe(125);
     expect(plain(screen.getByRole("status").textContent)).toBe(
       "Too many attempts. Try again in 3 minutes.",
     );
     expect(submit().disabled).toBe(true);
 
-    await vi.advanceTimersByTimeAsync(65_000);
+    await vi.advanceTimersByTimeAsync(64_000);
+    expect(gate.blockedFor()).toBe(61);
+    expect(plain(screen.getByRole("status").textContent)).toBe(
+      "Too many attempts. Try again in 2 minutes.",
+    );
 
-    // F-214: minutes = ceil(seconds / 60): 125 − 65 = 60 s is 1 minute (the TP-11.10 row says
-    // "2 minutes"; reported to the planner).
+    await vi.advanceTimersByTimeAsync(1_000);
     expect(gate.blockedFor()).toBe(60);
     expect(plain(screen.getByRole("status").textContent)).toBe(
       "Too many attempts. Try again in 1 minute.",
@@ -58,22 +60,8 @@ describe("TP-11.10: a rate-limited form (F-214)", () => {
     expect(submit().disabled).toBe(true);
 
     await vi.advanceTimersByTimeAsync(60_000);
-
     expect(gate.blockedFor()).toBe(0);
     expect(submit().disabled).toBe(false);
-  });
-
-  it("TP-11.10: after 64 s (61 s left) the notice still says 2 minutes", async () => {
-    const m = await loadRateLimit();
-    const gate = form(m);
-
-    gate.block(125);
-    await vi.advanceTimersByTimeAsync(64_000);
-
-    expect(gate.blockedFor()).toBe(61);
-    expect(plain(screen.getByRole("status").textContent)).toBe(
-      "Too many attempts. Try again in 2 minutes.",
-    );
   });
 
   it("TP-11.10: blockedFor counts down each second to 0", async () => {

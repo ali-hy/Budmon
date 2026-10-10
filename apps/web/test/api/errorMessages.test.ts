@@ -40,6 +40,8 @@ const ROWS: readonly (readonly [string, AppError, Operation, string, Record<stri
   ],
   ["timeout on a create", { kind: "timeout" }, "create", "error.generic.unknownOutcome"],
   ["timeout on a mutation", { kind: "timeout" }, "mutation", "error.generic.unknownOutcome"],
+  // A-326: a failed read changed nothing.
+  ["timeout on a read", { kind: "timeout" }, "read", "error.generic.read"],
   [
     "INTERNAL not_applied on a read",
     defined("INTERNAL", 500, { outcome: "not_applied" }),

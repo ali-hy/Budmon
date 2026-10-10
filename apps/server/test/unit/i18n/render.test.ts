@@ -19,6 +19,14 @@ describe("TP-4.20: createMessageRenderer", () => {
     expect(() => render("en", "test.nope")).toThrow(new Error("unknown message id"));
   });
 
+  it('TP-4.20 (A-319): a select message with kind "card" renders "Card", not "Other"', () => {
+    const r = createMessageRenderer({
+      en: { "test.kind": "{kind, select, card {Card} other {Other}}" },
+    });
+
+    expect(r("en", "test.kind", { kind: "card" })).toBe("Card");
+  });
+
   it("TP-4.20: catalogues without en throw TypeError", () => {
     expect(() => createMessageRenderer({ ar: {} })).toThrow(TypeError);
   });

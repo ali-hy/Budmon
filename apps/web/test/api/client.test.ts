@@ -89,6 +89,25 @@ describe("TP-11.1: createApiClient (F-201)", () => {
     expect(onClientUpdateRequired).not.toHaveBeenCalled();
   });
 
+  it("TP-11.1 (A-327): the fetch init carries an AbortSignal that isn't aborted", async () => {
+    const { createApiClient } = await loadClient();
+    const signals: (AbortSignal | null | undefined)[] = [];
+    const client = createApiClient({
+      buildNumber: 7,
+      baseUrl: "https://budmon.test/api/v1",
+      fetch: (input: RequestInfo | URL, init?: RequestInit) => {
+        signals.push(init?.signal ?? (input instanceof Request ? input.signal : undefined));
+        return Promise.resolve(Response.json(CLIENT_CONFIG));
+      },
+    });
+
+    await client.meta.clientConfig();
+
+    expect(signals).toHaveLength(1);
+    expect(signals[0]).toBeInstanceOf(AbortSignal);
+    expect(signals[0]?.aborted).toBe(false);
+  });
+
   it("TP-11.32x: the injected fetch is used, with credentials same-origin, at baseUrl", async () => {
     const { createApiClient } = await loadClient();
     const calls: { url: string; credentials: RequestCredentials | undefined }[] = [];
@@ -204,6 +223,30 @@ describe("TP-11.2: toAppError (F-202)", () => {
     });
 
     expect(toAppError(signal.reason)).toEqual({ kind: "timeout" });
+  });
+
+  it.each([
+    ["a bare DOMException TimeoutError", () => new DOMException("t", "TimeoutError"), "timeout"],
+    [
+      "an Error whose cause is that TimeoutError",
+      () => new Error("wrapped", { cause: new DOMException("t", "TimeoutError") }),
+      "timeout",
+    ],
+    [
+      "a TimeoutError three causes deep",
+      () =>
+        new Error("1", {
+          cause: new Error("2", {
+            cause: new Error("3", { cause: new DOMException("t", "TimeoutError") }),
+          }),
+        }),
+      "timeout",
+    ],
+    ["a DOMException AbortError", () => new DOMException("a", "AbortError"), "unknown"],
+  ] as const)("TP-11.2 (A-327): %s is %s", async (_label, make, kind) => {
+    const { toAppError } = await loadErrors();
+
+    expect(toAppError(make())).toEqual({ kind });
   });
 
   it("TP-11.2: anything else is unknown", async () => {
