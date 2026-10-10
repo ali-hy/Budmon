@@ -1,6 +1,6 @@
 // F-257 UpdateRepository: update states. TP-13.6.
 //
-// Assumed shapes: UpdateRepository(api: MetaApi (the generated client), dataStore:
+// Shapes per A-344: UpdateRepository(api: MetaApi (the generated client), dataStore:
 // DataStore<Preferences>, versionCode: Int, clock: java.time.Clock); refresh() is suspend;
 // UpdateState is Required(min) / Available(latest) / None. ClientConfig and
 // ClientConfigAndroid are the generated models (packageName com.budmon.api).

@@ -1,8 +1,8 @@
 // F-253 ErrorMessages: the TP-11.3 table, as Android string resources. TP-13.3.
 //
-// Assumed shapes: Operation { Read, Create, Mutation }; UiText(resId: Int, args: List<Any>), with the
-// plural error_rate_limited as R.plurals and its count as the first argument. CLIENT_UPDATE_REQUIRED
-// has no Android string named in §8.2, so its row waits for the planner.
+// Shapes per A-344: Operation { Read, Create, Mutation }; UiText(resId, args = emptyList(),
+// quantity: Int? = null), where quantity marks a plural. A-346: CLIENT_UPDATE_REQUIRED maps to
+// update_required_body.
 package com.budmon.app.core.error
 
 import com.budmon.app.R
@@ -60,7 +60,7 @@ class ErrorMessagesTest {
         val text = ErrorMessages.forError(defined("RATE_LIMITED", 429, "retryAfterSeconds" to 125), Operation.Create)
 
         assertEquals(R.plurals.error_rate_limited, text.resId)
-        assertEquals(3, (text.args.first() as Number).toInt())
+        assertEquals(3, text.quantity)
     }
 
     @Test
@@ -84,5 +84,13 @@ class ErrorMessagesTest {
         check(defined("TEAPOT", 418), Operation.Create, R.string.error_generic_unknown_outcome)
         check(ApiError.Unknown, Operation.Read, R.string.error_generic_read)
         check(ApiError.Unknown, Operation.Mutation, R.string.error_generic_unknown_outcome)
+    }
+
+    @Test
+    fun `TP-13_3 (A-346) CLIENT_UPDATE_REQUIRED is UiText(update_required_body)`() {
+        assertEquals(
+            UiText(R.string.update_required_body),
+            ErrorMessages.forError(ApiError.Defined("CLIENT_UPDATE_REQUIRED", 426, null), Operation.Read),
+        )
     }
 }

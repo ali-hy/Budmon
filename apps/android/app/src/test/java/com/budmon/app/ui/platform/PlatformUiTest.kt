@@ -1,8 +1,8 @@
 // F-258 platform UI (§8.2), in LTR and RTL and at font scale 2. TP-13.7.
 //
-// Assumed composable parameters (§8.2 gives behaviour and strings, not signatures; see the S-13
-// questions): UpdateRequiredScreen(pending: Int, downloadUrl: String?, onOpenDownload: (String) -> Boolean),
-// SyncIndicator(pending: Int, syncing: Boolean, failed: Int), OfflineBanner(isOnline: Boolean, pending: Int).
+// Parameters per A-344: UpdateRequiredScreen(pending, downloadUrl: String?, onOpenDownload:
+// (String) -> Boolean; false or a null URL shows update_download_failed), SyncIndicator(pending,
+// syncing: Boolean, failed). OfflineBanner(isOnline, pending) is assumed (A-344 doesn't list it).
 package com.budmon.app.ui.platform
 
 import androidx.compose.runtime.CompositionLocalProvider

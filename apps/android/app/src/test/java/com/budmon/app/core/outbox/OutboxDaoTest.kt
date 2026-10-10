@@ -1,6 +1,6 @@
 // F-254 the outbox table and DAO, on an in-memory Room database (Robolectric). TP-13.4.
 //
-// Assumed shapes: BudmonDatabase (the Room database class) with outboxDao(); OutboxEntry's
+// Shapes per A-344: BudmonDatabase (the Room database class) with outboxDao(); OutboxEntry's
 // constructor takes the F-254 columns by name; OutboxCounts(pending, failed, needsConfirmation).
 package com.budmon.app.core.outbox
 

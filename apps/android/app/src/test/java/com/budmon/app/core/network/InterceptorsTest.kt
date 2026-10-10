@@ -1,12 +1,12 @@
 // F-251 interceptors. TP-13.1.
 //
-// Assumed shapes (the LLD gives names, not Kotlin signatures; see the S-13 questions):
-// ClientHeaderInterceptor(versionCode: Int), TraceparentInterceptor(random: java.util.Random),
-// IdempotencyKeyInterceptor(), and the request tag class IdempotencyKey(value: UUID).
+// Signatures per A-344: ClientHeaderInterceptor(versionCode: Int),
+// TraceparentInterceptor(random: kotlin.random.Random = Random.Default), IdempotencyKeyInterceptor(),
+// and the request tag class IdempotencyKey(value: UUID).
 package com.budmon.app.core.network
 
-import java.util.Random
 import java.util.UUID
+import kotlin.random.Random
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.mockwebserver.MockResponse

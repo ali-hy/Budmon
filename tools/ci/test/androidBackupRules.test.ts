@@ -1,5 +1,5 @@
-// F-262 backup and device-transfer rules: the database (and preferences) never leave the phone.
-// TP-13.11, run here as a static check of the XML (it needs no Android SDK).
+// F-262 backup and device-transfer rules: the database, preferences and DataStore files never
+// leave the phone. TP-13.11, a static check of the XML (A-350; it needs no Android SDK).
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -26,40 +26,45 @@ function rules(xml: string, section?: string): Rule[] {
   });
 }
 
-const excludesDb = (list: Rule[]) =>
-  list.some(
-    (r) =>
-      r.kind === "exclude" && r.domain === "database" && (r.path === "budmon.db" || r.path === "."),
+/** A-352's six excludes, the same in every section. */
+const SIX = [
+  "database budmon.db",
+  "database budmon.db-journal",
+  "database budmon.db-shm",
+  "database budmon.db-wal",
+  "file datastore/",
+  "sharedpref .",
+];
+
+const summary = (list: Rule[]) => ({
+  includes: list.filter((r) => r.kind === "include").length,
+  excludes: list
+    .filter((r) => r.kind === "exclude")
+    .map((r) => `${r.domain} ${r.path}`)
+    .sort(),
+});
+
+describe("TP-13.11: backup exclusion (F-262, A-350, A-352)", () => {
+  it.each([["cloud-backup"], ["device-transfer"]])(
+    "TP-13.11: data_extraction_rules.xml's <%s> has exactly the six excludes and no include",
+    (section) => {
+      const file = path.join(XML, "data_extraction_rules.xml");
+      expect(existsSync(file)).toBe(true);
+
+      expect(summary(rules(readFileSync(file, "utf8"), section))).toEqual({
+        includes: 0,
+        excludes: SIX,
+      });
+    },
   );
 
-describe("TP-13.11: backup exclusion (F-262)", () => {
-  it("TP-13.11: data_extraction_rules.xml excludes budmon.db from cloud-backup and device-transfer", () => {
-    const file = path.join(XML, "data_extraction_rules.xml");
-    expect(existsSync(file)).toBe(true);
-    const xml = readFileSync(file, "utf8");
-
-    expect(excludesDb(rules(xml, "cloud-backup"))).toBe(true);
-    expect(excludesDb(rules(xml, "device-transfer"))).toBe(true);
-  });
-
-  it("TP-13.11: backup_rules.xml (Android 11 and below) excludes budmon.db", () => {
+  it("TP-13.11: backup_rules.xml's <full-backup-content> has exactly the six excludes and no include", () => {
     const file = path.join(XML, "backup_rules.xml");
     expect(existsSync(file)).toBe(true);
 
-    expect(excludesDb(rules(readFileSync(file, "utf8")))).toBe(true);
-  });
-
-  it("TP-13.11: shared preferences and DataStore files are excluded too, in both files", () => {
-    const extraction = readFileSync(path.join(XML, "data_extraction_rules.xml"), "utf8");
-    const backup = readFileSync(path.join(XML, "backup_rules.xml"), "utf8");
-    const excludesPrefs = (list: Rule[]) =>
-      list.some((r) => r.kind === "exclude" && r.domain === "sharedpref") &&
-      list.some(
-        (r) => r.kind === "exclude" && r.domain === "file" && r.path.startsWith("datastore"),
-      );
-
-    expect(excludesPrefs(rules(extraction, "cloud-backup"))).toBe(true);
-    expect(excludesPrefs(rules(extraction, "device-transfer"))).toBe(true);
-    expect(excludesPrefs(rules(backup))).toBe(true);
+    expect(summary(rules(readFileSync(file, "utf8"), "full-backup-content"))).toEqual({
+      includes: 0,
+      excludes: SIX,
+    });
   });
 });

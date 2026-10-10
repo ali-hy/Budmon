@@ -1,6 +1,6 @@
 // F-255 SyncWorker: sync outcomes. TP-13.5.
 //
-// Assumed shapes (the LLD fixes behaviour, not the worker's construction; see the S-13 questions):
+// Construction per A-344 (a @HiltWorker, built directly here):
 // SyncWorker(context, params, dao: OutboxDao, http: OkHttpClient, baseUrl: HttpUrl,
 // updates: UpdateRepository, clock: java.time.Clock), built here through TestListenableWorkerBuilder
 // with a WorkerFactory; UpdateRepository exposes state: StateFlow<UpdateState> and markRequired(min).

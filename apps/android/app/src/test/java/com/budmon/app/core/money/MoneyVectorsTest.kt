@@ -1,12 +1,11 @@
 // F-256 money against the shared vectors (F-313, A-37), under Robolectric at the configured SDK.
 // TP-13.9. The vectors come from packages/shared/test-vectors through the test resources source dir.
 //
-// Assumed Kotlin shapes (F-256 says "mirrors of F-300 to F-305" without signatures; see the S-13
-// questions): Money.of(minor: BigInteger, currency: String); Rational(num: BigInteger,
-// den: BigInteger) and parseDecimal(text): Rational; roundHalfEven(r: Rational): BigInteger;
-// allocate(m: Money, weights: List<BigInteger>): List<Money>; convertWithRates(m, RateSide(unitsPerUsd,
-// minorUnits), RateSide(unitsPerUsd, minorUnits, currency)): Money; formatMoney(m, locale: Locale,
-// minorUnits: Int): String; toWire(m): Long throwing MoneyRangeError.
+// Shapes per A-345: Money.of(minor: BigInteger, currency: String); Rational(num, den) and
+// parseDecimal(text): Rational; roundHalfEven(r): BigInteger; allocate(m, weights): List<Money>;
+// RateSide(currency, unitsPerUsd, minorUnits) with convertWithRates(m, from, to); formatMoney(m,
+// Locale, minorUnits); toWire(m): Long and fromWire(amount: Long, currency), both throwing
+// MoneyRangeError beyond ±(2^53 − 1).
 package com.budmon.app.core.money
 
 import java.math.BigInteger
@@ -64,8 +63,8 @@ class MoneyVectorsTest {
             val to = c["to"]!!.jsonObject
             val out = convertWithRates(
                 Money.of(big(c.s("minor")), from.s("currency")),
-                RateSide(parseDecimal(from.s("unitsPerUsd")), from["minorUnits"]!!.jsonPrimitive.int),
-                RateSide(parseDecimal(to.s("unitsPerUsd")), to["minorUnits"]!!.jsonPrimitive.int, to.s("currency")),
+                RateSide(from.s("currency"), parseDecimal(from.s("unitsPerUsd")), from["minorUnits"]!!.jsonPrimitive.int),
+                RateSide(to.s("currency"), parseDecimal(to.s("unitsPerUsd")), to["minorUnits"]!!.jsonPrimitive.int),
             )
             assertEquals(c.toString(), big(c.s("expected")), out.minor)
             assertEquals(to.s("currency"), out.currency)
@@ -73,13 +72,20 @@ class MoneyVectorsTest {
     }
 
     @Test
-    fun `TP-13_9 wire vectors`() {
+    fun `TP-13_9 wire vectors through toWire and fromWire (A-345)`() {
         for (c in cases("wire")) {
-            val m = Money.of(big(c.s("minor")), "EGP")
+            val minor = big(c.s("minor"))
+            val m = Money.of(minor, "EGP")
+            // fromWire takes a Long; a vector beyond Long's range can only go through toWire.
+            val asLong = c.s("minor").toLongOrNull()
             if (c.s("expected") == "MoneyRangeError") {
                 assertThrows(c.toString(), MoneyRangeError::class.java) { toWire(m) }
+                if (asLong != null) {
+                    assertThrows(c.toString(), MoneyRangeError::class.java) { fromWire(asLong, "EGP") }
+                }
             } else {
                 assertEquals(c.toString(), c.s("expected").toLong(), toWire(m))
+                assertEquals(c.toString(), minor, fromWire(checkNotNull(asLong), "EGP").minor)
             }
         }
     }

@@ -191,29 +191,97 @@ describe("TP-0.31: ci.yml e2e job (A-334)", () => {
   });
 });
 
-// TP-13.18x (test-architect addition): CI step 6 (D-27, §10.1 Android): the android job runs the
-// JVM tests, lint and ktlint. Its path filter and release-candidate trigger wait for the planner.
-describe("TP-13.18x: ci.yml android job (§10.1, S-13)", () => {
-  it("TP-13.18x: an android job runs ./gradlew testDebugUnitTest lint ktlintCheck in apps/android", () => {
-    const workflow = parse(readFileSync(path.join(ROOT, ".github/workflows/ci.yml"), "utf8")) as {
-      jobs?: Record<
-        string,
-        {
-          defaults?: { run?: { "working-directory"?: unknown } };
-          steps?: { run?: unknown; "working-directory"?: unknown }[];
-        }
-      >;
-    };
-    const job = workflow.jobs?.["android"];
-    const steps = (job?.steps ?? []).filter(
-      (s) => typeof s.run === "string" && s.run.includes("testDebugUnitTest"),
+// TP-0.32 (A-351): CI step 6, the changes and android jobs (replaces the earlier TP-13.18x).
+describe("TP-0.32: ci.yml android job (A-351)", () => {
+  interface AStep {
+    uses?: unknown;
+    run?: unknown;
+    if?: unknown;
+    with?: Record<string, unknown>;
+    "working-directory"?: unknown;
+  }
+  interface AJob {
+    needs?: unknown;
+    if?: unknown;
+    outputs?: Record<string, unknown>;
+    defaults?: { run?: { "working-directory"?: unknown } };
+    steps?: AStep[];
+  }
+  const jobsOf = () =>
+    (
+      parse(readFileSync(path.join(ROOT, ".github/workflows/ci.yml"), "utf8")) as {
+        jobs?: Record<string, AJob>;
+      }
+    ).jobs ?? {};
+  const text = (v: unknown) => (typeof v === "string" ? v : "");
+
+  it("TP-0.32: android needs changes and runs on its android output or a release/hotfix head branch", () => {
+    const android = jobsOf()["android"];
+    const cond = text(android?.if);
+
+    expect([android?.needs].flat()).toContain("changes");
+    expect(cond).toMatch(/needs\.changes\.outputs\.android\s*==\s*'true'/);
+    expect(cond).toMatch(/release\//);
+    expect(cond).toMatch(/hotfix\//);
+  });
+
+  it("TP-0.32: the changes job's filter lists exactly the four paths", () => {
+    const changes = jobsOf()["changes"];
+    const runText = (changes?.steps ?? []).map((s) => text(s.run)).join("\n");
+    const paths = [
+      "apps/android/",
+      "packages/shared/test-vectors/",
+      "packages/contract/openapi.json",
+      ".github/workflows/ci.yml",
+    ];
+
+    expect(changes).toBeDefined();
+    expect(runText).toMatch(
+      /git (-c \S+ )?diff[^\n]*--name-only[^\n]*origin\/\$\{?BASE_REF\}?\.\.\.HEAD/,
+    );
+    for (const p of paths) expect(runText).toContain(p);
+    const quoted = [...runText.matchAll(/(apps|packages|\.github)\/[A-Za-z0-9_./-]+/g)].map(
+      (m) => m[0],
+    );
+    expect([...new Set(quoted)].sort()).toEqual([...paths].sort());
+    expect(Object.keys(changes?.outputs ?? {})).toContain("android");
+  });
+
+  it("TP-0.32: steps run in apps/android: ./gradlew testDebugUnitTest lint ktlintCheck; connectedDebugAndroidTest only on release candidates", () => {
+    const android = jobsOf()["android"];
+    const steps = android?.steps ?? [];
+    const dir = (s: AStep) =>
+      s["working-directory"] ?? android?.defaults?.run?.["working-directory"];
+    const unit = steps.filter((s) =>
+      /\.\/gradlew testDebugUnitTest lint ktlintCheck/.test(text(s.run)),
+    );
+    const connected = steps.filter(
+      (s) =>
+        /connectedDebugAndroidTest/.test(text(s.run)) ||
+        /connectedDebugAndroidTest/.test(text(s.with?.["script"])),
     );
 
-    expect(job).toBeDefined();
-    expect(steps).toHaveLength(1);
-    const step = steps[0];
-    expect(String(step?.run)).toMatch(/\.\/gradlew testDebugUnitTest lint ktlintCheck/);
-    const dir = step?.["working-directory"] ?? job?.defaults?.run?.["working-directory"];
-    expect(dir).toBe("apps/android");
+    expect(unit).toHaveLength(1);
+    expect(dir(unit[0] ?? {})).toBe("apps/android");
+    expect(connected).toHaveLength(1);
+    const c = connected[0] ?? {};
+    expect(text(c.if)).toMatch(/release\//);
+    expect(text(c.if)).toMatch(/hotfix\//);
+    expect(text(c.uses)).toMatch(/^reactivecircus\/android-emulator-runner@[0-9a-f]{40}$/);
+    expect(String(c.with?.["api-level"])).toBe("34");
+  });
+
+  it("TP-0.32: Temurin 21 through actions/setup-java and gradle/actions/setup-gradle; every uses: SHA-pinned", () => {
+    const steps = jobsOf()["android"]?.steps ?? [];
+    const java = steps.find((s) => text(s.uses).startsWith("actions/setup-java@"));
+
+    expect(java?.with?.["distribution"]).toBe("temurin");
+    expect(String(java?.with?.["java-version"])).toBe("21");
+    expect(steps.some((s) => text(s.uses).startsWith("gradle/actions/setup-gradle@"))).toBe(true);
+    for (const s of [...steps, ...(jobsOf()["changes"]?.steps ?? [])]) {
+      if (text(s.uses) !== "" && !text(s.uses).startsWith("./")) {
+        expect(text(s.uses)).toMatch(/@[0-9a-f]{40}$/);
+      }
+    }
   });
 });
