@@ -4,7 +4,7 @@
 // workspace files and 5.0.3 throws on them (A-8).
 //
 // Projects are added as their slices create them: `web-unit` (jsdom, @solidjs/testing-library,
-// MSW) in S-11a; `server-int`'s `globalSetup` (Testcontainers Postgres) came with S-2.
+// MSW) came with S-11a; `server-int`'s `globalSetup` (Testcontainers Postgres) with S-2.
 //
 // Root scripts (§2.2.2): `pnpm test` = `vitest run --project=!server-int`;
 // `pnpm test:int` = `vitest run --project=server-int`;
@@ -62,6 +62,19 @@ export default defineConfig({
           globalSetup: ["apps/server/test/setup/globalSetup.ts"],
           testTimeout: 60_000,
           hookTimeout: 180_000,
+        },
+      },
+      {
+        // S-11a: components and i18n in jsdom, through the web app's Vite config (Solid's plugin).
+        // A-310: pseudo-locale catalogs are generated before the run, and pseudo-locales are on.
+        extends: "./apps/web/vite.config.ts",
+        root: "apps/web",
+        test: {
+          name: "web-unit",
+          environment: "jsdom",
+          include: ["test/**/*.test.{ts,tsx}"],
+          globalSetup: ["test/setup/pseudoLocales.ts"],
+          env: { VITE_PSEUDO_LOCALES: "1" },
         },
       },
       {

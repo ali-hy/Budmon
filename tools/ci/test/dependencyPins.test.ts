@@ -111,3 +111,49 @@ describe("TP-0.20: ESLint 10 dependency pins (A-13)", () => {
     expect(output).not.toContain("Ignored build scripts");
   }, 300_000);
 });
+
+// TP-0.28 (A-314): solid-js moves in lockstep with babel-preset-solid, read from the lockfile
+// without an install.
+describe("TP-0.28: the Solid lockstep (§2.4, A-314)", () => {
+  function lockPackages(): string[] {
+    const lock = parse(readFileSync(path.join(ROOT, "pnpm-lock.yaml"), "utf8")) as {
+      packages?: Record<string, unknown>;
+      snapshots?: Record<string, unknown>;
+    };
+    return [...Object.keys(lock.packages ?? {}), ...Object.keys(lock.snapshots ?? {})];
+  }
+
+  /** Every resolved version of `name` in the lockfile (peer suffixes stripped). */
+  function resolved(name: string): string[] {
+    const prefix = `${name}@`;
+    return [
+      ...new Set(
+        lockPackages()
+          .filter((key) => key.startsWith(prefix))
+          .map((key) => key.slice(prefix.length).split("(")[0] ?? ""),
+      ),
+    ].sort();
+  }
+
+  function webSolid(): string | undefined {
+    const pkg = JSON.parse(
+      readFileSync(path.join(ROOT, "apps/web/package.json"), "utf8"),
+    ) as PackageJson;
+    return pkg.dependencies?.["solid-js"];
+  }
+
+  it("TP-0.28: apps/web's solid-js is an exact version", () => {
+    expect(webSolid()).toMatch(/^\d+\.\d+\.\d+$/);
+  });
+
+  it("TP-0.28: every babel-preset-solid in the lockfile has solid-js's version", () => {
+    const presets = resolved("babel-preset-solid");
+
+    expect(presets.length).toBeGreaterThan(0);
+    expect(presets).toEqual([webSolid()]);
+  });
+
+  it("TP-0.28: solid-js resolves to exactly one version, apps/web's", () => {
+    expect(resolved("solid-js")).toEqual([webSolid()]);
+  });
+});
