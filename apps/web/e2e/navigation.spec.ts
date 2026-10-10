@@ -1,4 +1,4 @@
-// Focus and announcements on navigation (F-216, F-218, A-333), and the 360 px layout. TP-11.15,
+// Focus and announcements on navigation (F-216, F-218, A-333, A-336), and the 360 px layout. TP-11.15,
 // TP-11.16.
 import { expect, test, type Page } from "./fixtures.js";
 
@@ -26,7 +26,7 @@ test("TP-11.15 (A-333): on load focus stays on body and #live-polite is empty; n
   await expect(page.locator("body")).toBeFocused();
   await expect(page.locator("#live-polite")).toHaveText("");
 
-  await navigate(page, "/this-page-does-not-exist");
+  await navigate(page, "/no-such-page");
   await expectFocusedHeading(page, "Page not found");
 
   await page.getByRole("link", { name: "Go to home" }).click();

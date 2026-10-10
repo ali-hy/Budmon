@@ -20,7 +20,9 @@ async function tabTo(page: Page, target: Locator): Promise<void> {
   throw new Error("Tab never reached the target");
 }
 
-test.beforeEach(async ({ page }) => {
+test.beforeEach(async ({ page }, testInfo) => {
+  // A-337: chromium only (en-US, UTC), so the native date input's segment order is known.
+  test.skip(testInfo.project.name !== "chromium", "chromium project only");
   await page.goto("/__fixtures/kobalte-spike");
 });
 
@@ -61,7 +63,8 @@ test('TP-11.28: the "Date" field takes 2026-10-07 from the keyboard', async ({ p
   const date = page.getByLabel("Date");
 
   await tabTo(page, date);
-  // A native date input takes its segments in the locale's order; en-US is month, day, year.
+  // A native date input takes its segments in the locale's order; chromium runs en-US (A-337):
+  // month, day, year.
   await page.keyboard.type("10072026");
 
   await expect(date).toHaveValue("2026-10-07");
