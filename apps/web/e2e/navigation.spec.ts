@@ -1,13 +1,13 @@
 // Focus and announcements on navigation (F-216, F-218, A-333, A-336), and the 360 px layout. TP-11.15,
 // TP-11.16.
-import { expect, test, type Page } from "./fixtures.js";
+import { catalogText, expect, test, type Page } from "./fixtures.js";
 
 async function expectFocusedHeading(page: Page, text: string): Promise<void> {
   const h1 = page.locator("main h1");
-  await expect(h1).toHaveText(text);
+  await expect(h1).toHaveText(catalogText(text));
   await expect(h1).toBeFocused();
   await expect(h1).toHaveAttribute("tabindex", "-1");
-  await expect(page.locator("#live-polite")).toHaveText(text);
+  await expect(page.locator("#live-polite")).toHaveText(catalogText(text));
 }
 
 /** A client-side navigation through the router's history (no page load). */
@@ -22,7 +22,7 @@ test("TP-11.15 (A-333): on load focus stays on body and #live-polite is empty; n
   page,
 }) => {
   await page.goto("/");
-  await expect(page.locator("main h1")).toHaveText("Budmon");
+  await expect(page.locator("main h1")).toHaveText(catalogText("Budmon"));
   await expect(page.locator("body")).toBeFocused();
   await expect(page.locator("#live-polite")).toHaveText("");
 

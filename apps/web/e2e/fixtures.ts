@@ -43,3 +43,13 @@ export const test = base.extend<{ withAxe: undefined }>({
 
 export { expect };
 export type { Locator, Page };
+
+/**
+ * `text` as a whole-string pattern that tolerates the bidi marks the ar-XB pseudo-locale wraps
+ * around literal segments (U+200F, F-207) and the isolates `t` adds around values (U+2068/U+2069).
+ */
+export function catalogText(text: string): RegExp {
+  const marks = "[\\u200f\\u2068\\u2069]*";
+  const escaped = text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`^${marks}${escaped}${marks}$`);
+}
