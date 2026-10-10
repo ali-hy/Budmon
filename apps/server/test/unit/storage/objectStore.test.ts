@@ -158,7 +158,8 @@ describe("TP-10.4: the memory store (F-143, A-22)", () => {
     const url = await store.presignGet("exports", exportKey(), 600);
 
     expect(url.href.startsWith(`memory://exports/${exportKey()}?exp=`)).toBe(true);
-    expect(url.searchParams.get("exp")).toMatch(/^\d+$/);
+    // A-290: epoch seconds, floor(now / 1000) + ttl.
+    expect(url.searchParams.get("exp")).toBe(String(Math.floor(Date.parse(NOW) / 1000) + 600));
     expect(url.searchParams.has("n")).toBe(false);
   });
 
@@ -190,9 +191,9 @@ describe("TP-10.5: exports older than 7 days are purged (F-144)", () => {
     const old = exportKey("0190a0b0-1c2d-7e3f-8a4b-000000000008");
     const recent = exportKey("0190a0b0-1c2d-7e3f-8a4b-000000000006");
     await store.put("exports", old, Buffer.from("old"), "application/zip");
-    clock.advance({ days: 2 });
+    clock.advance({ hours: 2 * 24 });
     await store.put("exports", recent, Buffer.from("recent"), "application/zip");
-    clock.advance({ days: 6 });
+    clock.advance({ hours: 6 * 24 });
     const logger = recordingLogger();
 
     const count = await purgeExpiredExports({ store, clock, logger });
@@ -208,7 +209,7 @@ describe("TP-10.5: exports older than 7 days are purged (F-144)", () => {
     const { purgeExpiredExports } = await s10.exportsPurge();
     const { store, clock } = await memoryStore("2026-09-30T12:00:00Z");
     await store.put("exports", exportKey(), Buffer.from("x"), "application/zip");
-    clock.advance({ days: 7 });
+    clock.advance({ hours: 7 * 24 });
 
     expect(await purgeExpiredExports({ store, clock, logger: recordingLogger() })).toBe(0);
     expect(await keysOf(store, "exports", "users/")).toEqual([exportKey()]);

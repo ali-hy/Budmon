@@ -23,9 +23,9 @@ describe("TP-10.11x: platform.exports-purge (F-80, A-215)", () => {
     const old = exportKey("0190a0b0-1c2d-7e3f-8a4b-000000000008");
     const recent = exportKey("0190a0b0-1c2d-7e3f-8a4b-000000000006");
     await store.put("exports", old, Buffer.from("old"), "application/zip");
-    clock.advance({ days: 2 });
+    clock.advance({ hours: 2 * 24 });
     await store.put("exports", recent, Buffer.from("recent"), "application/zip");
-    clock.advance({ days: 6 });
+    clock.advance({ hours: 6 * 24 });
     const built = await buildWorkerContainer("general", {
       clock,
       ...({ objectStore: store } as object),

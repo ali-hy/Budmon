@@ -88,15 +88,15 @@ describe("TP-10.2: the filesystem store (F-142, F-140)", () => {
     const file = path.join(root, "exports", exportKey());
 
     expect(readFileSync(file, "utf8")).toBe("zip-bytes");
-    const listed: { key: string; ms: number }[] = [];
+    const listed: { key: string; ns: bigint }[] = [];
     for await (const e of store.list("exports", `users/${USER}/`)) {
-      listed.push({ key: e.key, ms: e.lastModified.epochMilliseconds });
+      listed.push({ key: e.key, ns: e.lastModified.epochNanoseconds });
     }
     expect(listed.map((e) => e.key).sort()).toEqual([exportKey(), exportKey(other, "csv")].sort());
-    // The file's mtime, to the millisecond (how sub-millisecond parts round isn't specified).
-    expect(
-      Math.abs((listed.find((e) => e.key === exportKey())?.ms ?? 0) - statSync(file).mtimeMs),
-    ).toBeLessThan(1);
+    // A-292: not rounded, from a bigint fs.stat.
+    expect(listed.find((e) => e.key === exportKey())?.ns).toBe(
+      statSync(file, { bigint: true }).mtimeNs,
+    );
 
     await store.delete("exports", exportKey(other, "csv"));
     await expect(store.delete("exports", exportKey(other, "csv"))).resolves.toBeUndefined();
@@ -127,6 +127,8 @@ describe("TP-10.2: the development objects route (F-145, A-22)", () => {
     const { payload } = tokenOf(url);
     expect(payload).toMatchObject({ b: "exports", k: exportKey() });
     expect("n" in payload).toBe(false);
+    // A-290: exp is integer epoch seconds, floor(now / 1000) + ttl.
+    expect(payload["exp"]).toBe(Math.floor(clock.now().epochMilliseconds / 1000) + 600);
   });
 
   it(`TP-10.2: presign with downloadName ${NAME} then GET: Content-Disposition attachment; filename="${NAME}"`, async () => {

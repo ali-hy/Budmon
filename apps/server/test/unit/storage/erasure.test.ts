@@ -119,10 +119,12 @@ describe("TP-10.7: replayErasures (F-151)", () => {
 
     await expect(replayErasures({ log: fakeLog(two), handler, logger }, T1)).rejects.toBe(boom);
     expect(handler).toHaveBeenCalledTimes(2);
-    expect(
-      logger.lines.some(
-        (l) => (l.fields as { fields?: { replayed?: unknown } }).fields?.replayed === 1,
-      ),
-    ).toBe(true);
+    // A-295: exactly one error line, with the count completed before the failure and no user id.
+    const failed = logger.lines.filter((l) => l.event === "erasure_replay_failed");
+    expect(failed).toHaveLength(1);
+    expect(failed[0]?.level).toBe("error");
+    expect(failed[0]?.fields).toMatchObject({ fields: { replayed: 1 } });
+    expect(JSON.stringify(failed)).not.toContain(U1);
+    expect(JSON.stringify(failed)).not.toContain(U2);
   });
 });

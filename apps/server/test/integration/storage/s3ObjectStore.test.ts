@@ -1,33 +1,19 @@
-// F-141 the S3 object store against an S3-compatible Testcontainer. TP-10.3, plus extra cases
-// TP-10.11x. IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
-//
-// Skipped unless BUDMON_S3_TEST_IMAGE names an image: the LLD's MinIO isn't on mirror.gcr.io (A-284's
-// CI mirror) and Docker Hub pulls are rate-limited there, so the image choice is with the planner.
-// The bucket set-up uses @aws-sdk/client-s3, which F-141 adds to the server's dependencies.
+// F-141 the S3 object store against versitygw (A-287), an S3-compatible Testcontainer. TP-10.3,
+// plus extra cases TP-10.11x. IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
+// Not skipped: it runs in every pnpm test:int, in CI through A-284's mirror prefix.
+import { CreateBucketCommand, S3Client } from "@aws-sdk/client-s3";
 import { GenericContainer, Wait, type StartedTestContainer } from "testcontainers";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Secret } from "../../../src/platform/observability/redaction.js";
+import { S3_TEST_IMAGE } from "../../setup/s3Image.js";
 import { USER, exportKey, failure, keysOf, s10, type ObjectStore } from "../../support/s10.js";
-
-/** The S3-compatible (MinIO) image for TP-10.3, until the planner pins one. */
-const S3_TEST_IMAGE = process.env["BUDMON_S3_TEST_IMAGE"];
-/** A variable specifier: typecheck doesn't resolve it before F-141 adds the dependency. */
-const AWS_S3 = "@aws-sdk/client-s3";
 
 const ACCESS = "budmontest";
 const SECRET = "budmontest-secret-key";
 const BUCKETS = { exports: "budmon-exports", erasureLog: "budmon-erasure-log" };
 const NAME = "budmon-export-2026-10-07.zip";
 
-interface S3Admin {
-  S3Client: new (cfg: unknown) => {
-    send: (command: unknown) => Promise<unknown>;
-    destroy: () => void;
-  };
-  CreateBucketCommand: new (input: { Bucket: string }) => unknown;
-}
-
-describe.skipIf(S3_TEST_IMAGE === undefined)("TP-10.3: the S3 store (F-141, A-22)", () => {
+describe("TP-10.3: the S3 store (F-141, A-22, A-287)", () => {
   let container: StartedTestContainer;
   let endpoint: URL;
   let store: ObjectStore;
@@ -42,14 +28,13 @@ describe.skipIf(S3_TEST_IMAGE === undefined)("TP-10.3: the S3 store (F-141, A-22
   });
 
   beforeAll(async () => {
-    container = await new GenericContainer(S3_TEST_IMAGE ?? "unset")
-      .withEnvironment({ MINIO_ROOT_USER: ACCESS, MINIO_ROOT_PASSWORD: SECRET })
-      .withCommand(["server", "/data"])
-      .withExposedPorts(9000)
-      .withWaitStrategy(Wait.forHttp("/minio/health/live", 9000))
+    container = await new GenericContainer(S3_TEST_IMAGE)
+      .withEnvironment({ ROOT_ACCESS_KEY: ACCESS, ROOT_SECRET_KEY: SECRET })
+      .withCommand(["posix", "/tmp"])
+      .withExposedPorts(7070)
+      .withWaitStrategy(Wait.forListeningPorts())
       .start();
-    endpoint = new URL(`http://${container.getHost()}:${String(container.getMappedPort(9000))}`);
-    const { S3Client, CreateBucketCommand } = (await import(/* @vite-ignore */ AWS_S3)) as S3Admin;
+    endpoint = new URL(`http://${container.getHost()}:${String(container.getMappedPort(7070))}`);
     const admin = new S3Client({
       endpoint: endpoint.href,
       region: "us-east-1",
@@ -103,16 +88,23 @@ describe.skipIf(S3_TEST_IMAGE === undefined)("TP-10.3: the S3 store (F-141, A-22
     expect(namedRes.headers.get("content-disposition")).toBe(`attachment; filename="${NAME}"`);
   });
 
-  it("TP-10.3: put to a bucket that doesn't exist is ObjectStoreError", async () => {
+  it("TP-10.3: S3_TEST_IMAGE is pinned by digest", () => {
+    expect(S3_TEST_IMAGE).toMatch(/^[^@]+@sha256:[0-9a-f]{64}$/);
+  });
+
+  it("TP-10.3: put to a bucket that doesn't exist is ObjectStoreError with reason not_found (A-293)", async () => {
     const { ObjectStoreError } = await s10.objectStore();
     const { createS3ObjectStore } = await s10.s3ObjectStore();
     const missing = createS3ObjectStore(
       cfg({ exports: "budmon-no-such-bucket", erasureLog: BUCKETS.erasureLog }),
     );
 
-    expect(
-      await failure(() => missing.put("exports", exportKey(), Buffer.from("x"), "application/zip")),
-    ).toBeInstanceOf(ObjectStoreError);
+    const error = await failure(() =>
+      missing.put("exports", exportKey(), Buffer.from("x"), "application/zip"),
+    );
+
+    expect(error).toBeInstanceOf(ObjectStoreError);
+    expect((error as { reason?: unknown }).reason).toBe("not_found");
   });
 
   it("TP-10.3: a presigned URL is refused (403) after ttlSeconds", async () => {

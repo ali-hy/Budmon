@@ -1,6 +1,6 @@
 // F-150 verifyRestore and F-93's erasure:replay and restore:verify. TP-10.8 to TP-10.10, plus
 // extra cases TP-10.11x. IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { Temporal, fixedClock } from "@budmon/shared";
@@ -9,12 +9,28 @@ import { runCli } from "../../../src/main/cli.js";
 import { runSchemaStep } from "../../../src/platform/db/schemaStep.js";
 import type { Database } from "../../../src/platform/db/types.js";
 import { SERVER_DIR, recordingLogger, schemaStepInput } from "../../support/platform.js";
-import { query } from "../../support/postgres.js";
+import { devMigrate, withFile } from "../../support/configEnv.js";
+import { TEST_ROLE_PASSWORDS, query } from "../../support/postgres.js";
 import { s10 } from "../../support/s10.js";
 import { createTestDatabase, type TestDatabase } from "../../support/testDatabase.js";
 import { testWorkerEnv } from "../../support/worker.js";
 
 const EMPTY_JOURNAL = path.join(SERVER_DIR, "test/fixtures/migrations-empty");
+const MIGRATIONS_ONE = path.join(SERVER_DIR, "test/fixtures/migrations-one");
+const REPO_MIGRATIONS = path.join(SERVER_DIR, "drizzle");
+
+/** runCli (F-93) with recorded stdout and stderr; `deps` as A-288 documents. */
+async function runWith(
+  argv: string[],
+  env: Readonly<Record<string, string | undefined>>,
+  deps?: { migrationsFolder?: string },
+) {
+  const stdout: string[] = [];
+  const stderr: string[] = [];
+  const io = { stdout: (l: string) => stdout.push(l), stderr: (l: string) => stderr.push(l) };
+  const code = await (deps === undefined ? runCli(argv, env, io) : runCli(argv, env, io, deps));
+  return { code, stdout, stderr };
+}
 const U1 = "0190a0b0-1c2d-7e3f-8a4b-000000000001";
 const U2 = "0190a0b0-1c2d-7e3f-8a4b-000000000002";
 
@@ -49,21 +65,33 @@ describe("TP-10.8: erasure:replay (F-93, F-151)", () => {
     await testDb.drop();
   });
 
-  async function cli(argv: string[]) {
-    const stdout: string[] = [];
-    const stderr: string[] = [];
-    const code = await runCli(argv, env, {
-      stdout: (l) => stdout.push(l),
-      stderr: (l) => stderr.push(l),
-    });
-    return { code, stdout, stderr };
-  }
+  const cli = (argv: string[]) => runWith(argv, env);
 
   it("TP-10.8: --since before the records with no erasure handler registered exits 2", async () => {
     const { code, stderr } = await cli(["erasure:replay", "--since", "2026-10-01T00:00:00Z"]);
 
     expect(code, stderr.join("\n")).toBe(2);
   });
+
+  it.each([
+    ["no --since", ["erasure:replay"]],
+    ["a date with no time", ["erasure:replay", "--since", "2026-10-01"]],
+    ["a time with no offset", ["erasure:replay", "--since", "2026-10-01T00:00:00"]],
+    ["an extra argument", ["erasure:replay", "--since", "2026-10-01T00:00:00Z", "extra"]],
+  ])(
+    "TP-10.8 (A-294): %s exits 64 with the usage text, reading no configuration",
+    async (_label, argv) => {
+      // The usage text, as an unknown command prints it after its own line.
+      const usage = (await runWith(["no-such-command"], {})).stderr.slice(1).join("\n");
+
+      // An empty environment: reading the configuration would fail with another exit code.
+      const { code, stderr } = await runWith(argv, {});
+
+      expect(usage).toContain("erasure:replay");
+      expect(code).toBe(64);
+      expect(stderr.join("\n")).toContain(usage);
+    },
+  );
 
   it('TP-10.11x: --since after every record prints {"replayed":0} and exits 0', async () => {
     const { code, stdout, stderr } = await cli([
@@ -103,7 +131,7 @@ describe("TP-10.9: verifyRestore on a migrated database (F-150, A-229)", () => {
     await testDb.drop();
   });
 
-  it("TP-10.9: ok, schema ok, no amcheck failures; indexesChecked is the count of B-tree indexes in public and pgboss; every table counted; pgboss.job counts 3 jobs and job_common isn't listed", async () => {
+  it("TP-10.9: ok, schema ok, no amcheck failures; indexesChecked is the count of leaf B-tree indexes (relkind 'i') in public and pgboss, partitioned parents excluded (A-291); every table counted; pgboss.job counts 3 jobs and job_common isn't listed", async () => {
     const { verifyRestore } = await s10.restoreVerify();
 
     const report = await verifyRestore({
@@ -155,8 +183,63 @@ describe("TP-10.9: verifyRestore on a migrated database (F-150, A-229)", () => {
   });
 });
 
-describe("TP-10.10: restore:verify on a database missing one journal migration (F-93)", () => {
-  // The CLI reads the repository's journal, which is empty until the first release, and F-93
-  // defines no way to give it another; how the test reaches "behind" is with the planner.
-  it.todo("TP-10.10: restore:verify exits 6 with a report whose schema is behind");
+describe("TP-10.10: restore:verify (F-93, F-150, A-288, A-289)", () => {
+  let testDb: TestDatabase;
+  let dir: string;
+  let env: Record<string, string>;
+
+  beforeAll(async () => {
+    testDb = await createTestDatabase();
+    const migrator = testDb.connectAs("budmon_migrator");
+    try {
+      // A release-path database, migrated with the repository's (empty) journal.
+      await runSchemaStep(schemaStepInput(migrator, "migrate", recordingLogger(), REPO_MIGRATIONS));
+    } finally {
+      await migrator.close();
+    }
+    dir = mkdtempSync(path.join(tmpdir(), "budmon-restore-cli-"));
+    // A-289: a migrate-kind environment, connected as budmon_migrator.
+    const f = devMigrate();
+    withFile(f, "DB_PASSWORD_FILE", `${TEST_ROLE_PASSWORDS.budmon_migrator}\n`);
+    env = {};
+    for (const [key, value] of Object.entries(f.env)) {
+      if (value === undefined) continue;
+      const content = f.files.get(value);
+      if (content === undefined) {
+        env[key] = value;
+      } else {
+        const file = path.join(dir, key.toLowerCase());
+        writeFileSync(file, content);
+        env[key] = file;
+      }
+    }
+    Object.assign(env, {
+      DB_HOST: testDb.endpoint.host,
+      DB_PORT: String(testDb.endpoint.port),
+      DB_NAME: testDb.name,
+      DB_USER: "budmon_migrator",
+    });
+  }, 120_000);
+
+  afterAll(async () => {
+    rmSync(dir, { recursive: true, force: true });
+    await testDb.drop();
+  });
+
+  it("TP-10.10: with a migrations folder holding one migration the database lacks, exit 6 and a report with schema behind and ok false", async () => {
+    const { code, stdout, stderr } = await runWith(["restore:verify"], env, {
+      migrationsFolder: MIGRATIONS_ONE,
+    });
+
+    expect(code, stderr.join("\n")).toBe(6);
+    expect(stdout).toHaveLength(1);
+    expect(JSON.parse(stdout[0] ?? "null")).toMatchObject({ schema: "behind", ok: false });
+  });
+
+  it("TP-10.10: with the default (repository) folder, exit 0 and schema ok", async () => {
+    const { code, stdout, stderr } = await runWith(["restore:verify"], env);
+
+    expect(code, stderr.join("\n")).toBe(0);
+    expect(JSON.parse(stdout[0] ?? "null")).toMatchObject({ schema: "ok", ok: true });
+  });
 });
