@@ -1,5 +1,5 @@
 // F-131 fxRepo and F-132 createFxService on template copies. TP-9.2 to TP-9.8, TP-9.5b and
-// TP-9.16, plus extra cases TP-9.23x. IDs ending in "x" are test-architect additions, not LLD
+// TP-9.16, plus extra cases TP-9.24x. IDs ending in "x" are test-architect additions, not LLD
 // test-plan IDs.
 //
 // Rates are stored as budmon_migrator (support/s9.ts storeDay), independent of F-131; the service
@@ -93,7 +93,7 @@ describe("TP-9.2 to TP-9.4, TP-9.6 to TP-9.8: conversion on one stored day (F-13
     expect(r.money.minor).toBe(380n);
   });
 
-  it("TP-9.23x: USD is 1 implicitly: USD 1.00 to EGP is EGP 48.50; EGP 48.50 to USD is USD 1.00", async () => {
+  it("TP-9.24x: USD is 1 implicitly: USD 1.00 to EGP is EGP 48.50; EGP 48.50 to USD is USD 1.00", async () => {
     const toEgp = converted(await fx.convert(Money.of(100n, USD), EGP, day("2026-10-04")));
     const toUsd = converted(await fx.convert(Money.of(4850n, EGP), USD, day("2026-10-04")));
 
@@ -114,7 +114,7 @@ describe("TP-9.2 to TP-9.4, TP-9.6 to TP-9.8: conversion on one stored day (F-13
     ).rejects.toBeInstanceOf(UnknownCurrencyError);
   });
 
-  it("TP-9.23x: converting from ZZZ throws UnknownCurrencyError too", async () => {
+  it("TP-9.24x: converting from ZZZ throws UnknownCurrencyError too", async () => {
     await expect(
       fx.convert(Money.of(100n, asCurrencyCode("ZZZ")), USD, day("2026-10-04")),
     ).rejects.toBeInstanceOf(UnknownCurrencyError);
@@ -157,7 +157,7 @@ describe("TP-9.2 to TP-9.4, TP-9.6 to TP-9.8: conversion on one stored day (F-13
     expect(r.provisional).toBe(false);
   });
 
-  it("TP-9.23x: convertSum with one item missing a rate is no_rate with that item's reason", async () => {
+  it("TP-9.24x: convertSum with one item missing a rate is no_rate with that item's reason", async () => {
     const r = await fx.convertSum(
       [
         { money: Money.of(30n, EGP), onDate: day("2026-10-04") },
@@ -232,7 +232,7 @@ describe("TP-9.5: no stored day (F-132)", () => {
     expect(warned[0]?.fields).toMatchObject({ fields: { rateDate: "2025-01-10" } });
   });
 
-  it("TP-9.23x: converting 2025-01-10 again doesn't add a second backfill job (singletonKey)", async () => {
+  it("TP-9.24x: converting 2025-01-10 again doesn't add a second backfill job (singletonKey)", async () => {
     const fx = serviceOn(built, "2026-10-05T12:00:00Z");
 
     await fx.convert(Money.of(100n, USD), EGP, day("2025-01-10"));
@@ -329,7 +329,7 @@ describe("TP-9.16: stored days are final (F-131)", () => {
     ]);
   });
 
-  it("TP-9.23x: the other repo reads: latest day on or before, next day after, day exists, rates on a day, currencies", async () => {
+  it("TP-9.24x: the other repo reads: latest day on or before, next day after, day exists, rates on a day, currencies", async () => {
     const h = built.container.database.handle;
     await storeDay(built.testDb, "2026-10-07", { EGP: "48.7" });
 

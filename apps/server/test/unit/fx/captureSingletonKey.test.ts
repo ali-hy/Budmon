@@ -1,4 +1,4 @@
-// F-71 and A-283's captureSingletonKeyField. TP-9.22 (f), plus extra cases TP-9.23x. IDs ending in
+// F-71 and A-283's captureSingletonKeyField. TP-9.22 (f), plus extra cases TP-9.24x. IDs ending in
 // "x" are test-architect additions, not LLD test-plan IDs.
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -18,7 +18,7 @@ describe("TP-9.22 (f): captureSingletonKeyField needs sendableFromCapture (F-71,
     expect(() => createJobRegistry([def])).toThrow(TypeError);
   });
 
-  it("TP-9.23x: with sendableFromCapture the registry accepts it", () => {
+  it("TP-9.24x: with sendableFromCapture the registry accepts it", () => {
     const def = defineJob({
       name: "test.keyed",
       role: "general",
@@ -30,7 +30,7 @@ describe("TP-9.22 (f): captureSingletonKeyField needs sendableFromCapture (F-71,
     expect(createJobRegistry([def]).get("test.keyed")).toBe(def);
   });
 
-  it("TP-9.23x: platform.fx-backfill is sendable from capture with captureSingletonKeyField rateDate (A-275, A-283)", () => {
+  it("TP-9.24x: platform.fx-backfill is sendable from capture with captureSingletonKeyField rateDate (A-275, A-283)", () => {
     expect(fxBackfillJob.sendableFromCapture).toBe(true);
     expect(fxBackfillJob.captureSingletonKeyField).toBe("rateDate");
   });

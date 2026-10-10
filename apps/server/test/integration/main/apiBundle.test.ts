@@ -736,6 +736,8 @@ function devWorkerEnvironment(
     ...env,
     APP_ENV: "test",
     WORKER_ROLES: roles,
+    // A-299: a capture-only worker connects as budmon_capture.
+    ...(roles === "capture" ? { DB_USER: "budmon_capture" } : {}),
     // A-226: a heartbeat file of its own, never /tmp/heartbeat (healthcheck.test.ts reads it).
     HEARTBEAT_FILE: path.join(dir, "heartbeat"),
     DB_HOST: db.host,

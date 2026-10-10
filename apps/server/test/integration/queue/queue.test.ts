@@ -394,15 +394,26 @@ describe("TP-6.6: syncQueues (F-75)", () => {
       // Each queue's pin starts "name <> '<queue>'"; split there to read them one by one.
       const pin = (queue: string): string =>
         check.split("<> '").find((part) => part.startsWith(`${queue}'`)) ?? "";
-      // The deparsed policy pin: NOT (policy IS DISTINCT FROM (SELECT q.policy … WHERE q.name = …)).
+      // A-296's deparsed queue-options pin: EXISTS (SELECT 1 FROM pgboss.queue q WHERE
+      // ((q.name = '<queue>'::text) AND (NOT (<table>.policy IS DISTINCT FROM q.policy)) AND …).
       const policyPin = (queue: string) =>
         new RegExp(
-          `NOT \\((?:\\w+\\.)?policy IS DISTINCT FROM \\(\\s*SELECT q\\.policy\\s+FROM pgboss\\.queue q\\s+WHERE \\(q\\.name = '${queue.replaceAll(".", "\\.")}'::text\\)`,
+          `EXISTS \\( SELECT 1\\s+FROM pgboss\\.queue q\\s+WHERE \\(\\(q\\.name = '${queue.replaceAll(".", "\\.")}'::text\\) AND \\(NOT \\((?:\\w+\\.)?policy IS DISTINCT FROM q\\.policy\\)\\)`,
         );
 
       expect(pin("sync.d"), `${table} sync.d`).toContain("'created'");
       expect(pin("sync.d"), `${table} sync.d`).toMatch(policyPin("sync.d"));
       expect(pin("sync.d"), `${table} sync.d`).not.toContain("singleton_key");
+      // A-296: the job options are pinned too.
+      for (const column of [
+        "retry_limit",
+        "expire_seconds",
+        "keep_until",
+        "priority",
+        "retry_count",
+      ]) {
+        expect(pin("sync.d"), `${table} sync.d ${column}`).toContain(column);
+      }
       expect(pin("sync.e"), `${table} sync.e`).toContain("'created'");
       expect(pin("sync.e"), `${table} sync.e`).toMatch(policyPin("sync.e"));
       expect(pin("sync.e"), `${table} sync.e`).toContain("singleton_key");

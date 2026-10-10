@@ -1,5 +1,5 @@
 // F-70 defineJob, F-71 createJobRegistry, F-72 assertPayloadSafe. TP-6.1 to TP-6.3, plus extra
-// cases TP-6.16x. IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
+// cases TP-6.22x. IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { CANARIES } from "@budmon/test-support";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -38,22 +38,22 @@ describe("TP-6.1: defineJob (F-70)", () => {
   });
 });
 
-describe("TP-6.16x: defineJob, further cases (F-70)", () => {
+describe("TP-6.22x: defineJob, further cases (F-70)", () => {
   it.each([["platform"], ["a.B"], ["1a.b"], ["a.b.c"], ["a_b.c"], [""]])(
-    "TP-6.16x: the name %j throws TypeError",
+    "TP-6.22x: the name %j throws TypeError",
     (name) => {
       expect(() => defineJob({ name, role: "general", payload })).toThrow(TypeError);
     },
   );
 
   it.each([["platform.idempotency-purge"], ["fx.gap-check"], ["a1.b-2"]])(
-    "TP-6.16x: the name %j is accepted",
+    "TP-6.22x: the name %j is accepted",
     (name) => {
       expect(defineJob({ name, role: "general", payload }).name).toBe(name);
     },
   );
 
-  it("TP-6.16x: a general job with a 5-field cron keeps it; given options override the defaults", () => {
+  it("TP-6.22x: a general job with a 5-field cron keeps it; given options override the defaults", () => {
     const def = defineJob({
       name: "test.cron",
       role: "general",
@@ -100,8 +100,8 @@ describe("TP-6.2: createJobRegistry (F-71)", () => {
   });
 });
 
-describe("TP-6.16x: createJobRegistry, further cases (F-71)", () => {
-  it("TP-6.16x: all, forRole and get return the definitions; dead-letter queues aren't definitions", () => {
+describe("TP-6.22x: createJobRegistry, further cases (F-71)", () => {
+  it("TP-6.22x: all, forRole and get return the definitions; dead-letter queues aren't definitions", () => {
     const g = defineJob({ name: "test.g", role: "general", payload });
     const c = defineJob({ name: "test.c", role: "capture", payload });
 
@@ -154,7 +154,7 @@ describe("TP-6.3: assertPayloadSafe (F-72)", () => {
   );
 });
 
-describe("TP-6.16x: assertPayloadSafe, further cases (F-72)", () => {
+describe("TP-6.22x: assertPayloadSafe, further cases (F-72)", () => {
   it.each([
     ["an RFC 3339 instant", { at: "2026-10-05T12:00:00.000Z" }],
     ["an enum token with + and :", { t: "a+b:c" }],
@@ -162,7 +162,7 @@ describe("TP-6.16x: assertPayloadSafe, further cases (F-72)", () => {
     ["an array of 100 scalars", { a: Array<number>(100).fill(1) }],
     ["one nested object", { a: { b: 1, c: "x", d: null } }],
     ["an empty object", {}],
-  ])("TP-6.16x: %s passes", (_label, value) => {
+  ])("TP-6.22x: %s passes", (_label, value) => {
     expect(() => {
       assertPayloadSafe(value);
     }).not.toThrow();
@@ -175,7 +175,7 @@ describe("TP-6.16x: assertPayloadSafe, further cases (F-72)", () => {
     ["an array holding an object", { a: [{ b: 1 }] }, "a.0"],
     ["a nested array of objects", { a: { b: [{ c: 1 }] } }, "a.b.0"],
     ["a string with /", { s: "a/b" }, "s"],
-  ])("TP-6.16x: %s throws with path %s", (_label, value, path) => {
+  ])("TP-6.22x: %s throws with path %s", (_label, value, path) => {
     expect(() => {
       assertPayloadSafe(value);
     }).toThrow(UnsafeJobPayloadError);
@@ -191,7 +191,7 @@ describe("TP-6.16x: assertPayloadSafe, further cases (F-72)", () => {
     ["a string", "x"],
     ["null", null],
     ["a Date", new Date(0)],
-  ])("TP-6.16x: a payload that is %s, not a plain object, is refused", (_label, value) => {
+  ])("TP-6.22x: a payload that is %s, not a plain object, is refused", (_label, value) => {
     expect(() => {
       assertPayloadSafe(value);
     }).toThrow(UnsafeJobPayloadError);

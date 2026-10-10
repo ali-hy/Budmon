@@ -1,5 +1,5 @@
 // F-133 FX providers. TP-9.12 (Open Exchange Rates) and TP-9.13 (fawazahmed0), plus extra cases
-// TP-9.23x. IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
+// TP-9.24x. IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { describe, expect, it, vi } from "vitest";
 import { Secret } from "../../../src/platform/observability/redaction.js";
 import {
@@ -176,7 +176,7 @@ describe("TP-9.13: fawazahmed0 (F-133)", () => {
     );
   });
 
-  it("TP-9.23x: a primary network error also retries once on the mirror", async () => {
+  it("TP-9.24x: a primary network error also retries once on the mirror", async () => {
     const { provider, fetchImpl } = fawaz(() => Promise.reject(new TypeError("fetch failed")), ok);
 
     await provider.fetchDay(DATE, new AbortController().signal);
@@ -184,7 +184,7 @@ describe("TP-9.13: fawazahmed0 (F-133)", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
-  it("TP-9.23x: a primary 200 doesn't touch the mirror", async () => {
+  it("TP-9.24x: a primary 200 doesn't touch the mirror", async () => {
     const { provider, fetchImpl } = fawaz(ok);
 
     await provider.fetchDay(DATE, new AbortController().signal);
@@ -215,8 +215,8 @@ describe("TP-9.13: fawazahmed0 (F-133)", () => {
   });
 });
 
-describe("TP-9.23x: the fixed provider (F-133)", () => {
-  it("TP-9.23x: returns the seven fixed rates for any date", async () => {
+describe("TP-9.24x: the fixed provider (F-133)", () => {
+  it("TP-9.24x: returns the seven fixed rates for any date", async () => {
     const provider = createFixedProvider();
 
     const rates = await provider.fetchDay("2020-01-01", new AbortController().signal);

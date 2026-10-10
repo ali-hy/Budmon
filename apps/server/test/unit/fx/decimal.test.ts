@@ -1,4 +1,4 @@
-// F-130 provider decimal parsing. TP-9.1, plus extra cases TP-9.23x.
+// F-130 provider decimal parsing. TP-9.1, plus extra cases TP-9.24x.
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { describe, expect, it } from "vitest";
 import {
@@ -44,13 +44,13 @@ describe("TP-9.1: lossless parsing and normalisation (F-130)", () => {
   });
 
   it.each([["5e-13"], ["4.999999e-13"]])(
-    "TP-9.23x (B-1): normaliseRate(%j) at the rounding edge is null (half-even rounds 5e-13 to 0)",
+    "TP-9.24x (B-1): normaliseRate(%j) at the rounding edge is null (half-even rounds 5e-13 to 0)",
     (raw) => {
       expect(normaliseRate(raw)).toBeNull();
     },
   );
 
-  it("TP-9.23x (A-281): strings, booleans and null are unchanged; numbers in arrays are JsonNumbers", () => {
+  it("TP-9.24x (A-281): strings, booleans and null are unchanged; numbers in arrays are JsonNumbers", () => {
     expect(parseJsonKeepingNumberText('{"a":"1.50","b":true,"c":[0.10,2],"d":null}')).toEqual({
       a: "1.50",
       b: true,
@@ -63,7 +63,7 @@ describe("TP-9.1: lossless parsing and normalisation (F-130)", () => {
     ["48.5", "48.500000000000"],
     ["0.000000000001", "0.000000000001"],
     ["999999999999.999999999999", "999999999999.999999999999"],
-  ])("TP-9.23x: normaliseRate(%j) is %j", (raw, normalised) => {
+  ])("TP-9.24x: normaliseRate(%j) is %j", (raw, normalised) => {
     expect(normaliseRate(raw)).toBe(normalised);
   });
 });

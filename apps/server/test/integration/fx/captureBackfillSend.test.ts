@@ -1,6 +1,6 @@
 // A-283: capture's INSERT policy on the platform.fx-backfill queue pins singleton_key to
 // data->>'rateDate', state to 'created' and policy to the queue's. TP-9.22 (a) to (e), plus extra
-// cases TP-9.23x. IDs ending in "x" are test-architect additions, not LLD test-plan IDs. (f) is a
+// cases TP-9.24x. IDs ending in "x" are test-architect additions, not LLD test-plan IDs. (f) is a
 // unit case (unit/fx/captureSingletonKey.test.ts); TP-6.8's capture cases run in
 // queue/workers.test.ts.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -38,9 +38,10 @@ describe("TP-9.22: capture sends to platform.fx-backfill (F-75 6b, A-283)", () =
     query(testDb.urlAs("budmon_capture"), sql, values);
 
   /**
-   * A direct INSERT into `pgboss.<table>` as budmon_capture that matches an honest send (the
-   * queue's dead_letter, A-230) except for `state`, `policy` (null: the queue's own) and the
-   * singleton key (default: the rateDate).
+   * A direct INSERT into `pgboss.<table>` as budmon_capture that matches an honest send in every
+   * pinned column (A-230's dead_letter; A-283's state, policy and key; A-296's job options, from
+   * `pgboss.queue`) except for `state`, `policy` (null: the queue's own), the singleton key
+   * (default: the rateDate) and any `columns` given as SQL expressions over `now` and `q`.
    */
   const insertAsCapture = (
     table: "job" | "job_common",
@@ -48,14 +49,32 @@ describe("TP-9.22: capture sends to platform.fx-backfill (F-75 6b, A-283)", () =
     state: string,
     policy: string | null,
     key: string = rateDate,
-  ) =>
-    asCapture(
-      `INSERT INTO pgboss.${table} (name, data, singleton_key, state, policy, dead_letter)
+    columns: Record<string, string> = {},
+  ) => {
+    const honest: Record<string, string> = {
+      retry_limit: "q.retry_limit",
+      retry_delay: "q.retry_delay",
+      retry_backoff: "q.retry_backoff",
+      retry_delay_max: "q.retry_delay_max",
+      expire_seconds: "q.expire_seconds",
+      deletion_seconds: "q.deletion_seconds",
+      heartbeat_seconds: "q.heartbeat_seconds",
+      start_after: "now",
+      keep_until: "now + q.retention_seconds * interval '1 second'",
+      priority: "0",
+      blocking: "false",
+      retry_count: "0",
+      ...columns,
+    };
+    const names = Object.keys(honest);
+    return asCapture(
+      `INSERT INTO pgboss.${table} (name, data, singleton_key, state, policy, dead_letter, ${names.join(", ")})
        SELECT q.name, jsonb_build_object('rateDate', $2::text), $5, $3::pgboss.job_state,
-              coalesce($4, q.policy), q.dead_letter
-       FROM pgboss.queue q WHERE q.name = $1`,
+              coalesce($4, q.policy), q.dead_letter, ${names.map((n) => honest[n]).join(", ")}
+       FROM pgboss.queue q, (SELECT pg_catalog.now() AS now) t WHERE q.name = $1`,
       [BACKFILL, rateDate, state, policy, key],
     );
+  };
 
   /** Whether a platform.fx-backfill job for `rateDate` is in the queue (read as the owner). */
   async function queued(rateDate: string): Promise<boolean> {
@@ -143,7 +162,38 @@ describe("TP-9.22: capture sends to platform.fx-backfill (F-75 6b, A-283)", () =
       expect(await queued(rateDate)).toBe(false);
     });
 
-    it(`TP-9.23x: ${table}: the honest row (state 'created', the queue's policy, the matching key) is allowed and queued`, async () => {
+    // A-296: each job-option column must equal the queue's (or its fixed honest value).
+    it.each([
+      ["retry_limit 2147483647", { retry_limit: "2147483647" }, 1],
+      ["priority 10", { priority: "10" }, 2],
+      ["keep_until 2999-01-01", { keep_until: "'2999-01-01'::timestamptz" }, 3],
+      ["expire_seconds 86400", { expire_seconds: "86400" }, 4],
+      ["retry_delay 1", { retry_delay: "1" }, 5],
+      [
+        "start_after tomorrow",
+        {
+          start_after: "now + interval '1 day'",
+          keep_until: "now + interval '1 day' + q.retention_seconds * interval '1 second'",
+        },
+        6,
+      ],
+      ["blocking true", { blocking: "true" }, 7],
+      ["retry_count 5", { retry_count: "5" }, 8],
+    ] as const)(
+      `TP-9.22 (A-296): ${table}: an otherwise valid row with %s is 42501 and nothing is queued`,
+      async (_label, columns, n) => {
+        const rateDate = `2026-12-${String(offset + n).padStart(2, "0")}`;
+
+        expect(
+          await failureState(() =>
+            insertAsCapture(table, rateDate, "created", null, rateDate, { ...columns }),
+          ),
+        ).toBe("42501");
+        expect(await queued(rateDate)).toBe(false);
+      },
+    );
+
+    it(`TP-9.24x: ${table}: the honest row (state 'created', the queue's policy, the matching key) is allowed and queued`, async () => {
       const rateDate = day(offset + 4);
 
       expect(

@@ -631,6 +631,8 @@ describe("TP-2.35: APP_ENV=test allows the local origin and no OAuth client id (
     const f = devWorker();
     f.env["APP_ENV"] = "test";
     f.env["WORKER_ROLES"] = "capture";
+    // A-299: a capture-only worker connects as budmon_capture.
+    f.env["DB_USER"] = "budmon_capture";
     delete f.env["GOOGLE_OAUTH_CLIENT_ID"];
 
     expect(problemsOf(f)).toEqual([]);

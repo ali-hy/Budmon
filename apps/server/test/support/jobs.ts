@@ -76,6 +76,12 @@ export const TEST_JOBS = {
     retryDelaySeconds: 0,
     retryBackoff: false,
   }),
+  /** TP-6.17 (A-297): a payload that must parse; three retries, no delay. */
+  parse: job("test.parse", "general", z.object({ n: z.number().int() }), {
+    retryLimit: 3,
+    retryDelaySeconds: 0,
+    retryBackoff: false,
+  }),
   /** TP-6.8 (A-227): a general queue that capture may send to (F-70's sendableFromCapture). */
   fromCapture: {
     ...job("test.from-capture", "general", z.object({ n: z.number().int() }), { retryLimit: 0 }),
