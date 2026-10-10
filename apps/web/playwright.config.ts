@@ -7,6 +7,9 @@
 import { defineConfig, devices } from "@playwright/test";
 
 // A-329: F-222 serves vite preview on 127.0.0.1:4173.
+// Tests tagged @perf (TP-12.4) run only in the perf project (§10.1: release candidates).
+const PERF = /@perf/;
+
 const BASE_URL = process.env["E2E_BASE_URL"] ?? "http://127.0.0.1:4173";
 
 export default defineConfig({
@@ -33,17 +36,19 @@ export default defineConfig({
       name: "chromium",
       // A-337: a fixed locale and zone, so TP-11.28's date entry is deterministic.
       use: { ...devices["Desktop Chrome"], locale: "en-US", timezoneId: "UTC" },
+      grepInvert: PERF,
     },
     {
       name: "pseudo-rtl",
       use: { ...devices["Desktop Chrome"], locale: "ar-XB" },
+      grepInvert: PERF,
     },
-    { name: "firefox", use: { ...devices["Desktop Firefox"] } },
-    { name: "webkit", use: { ...devices["Desktop Safari"] } },
+    { name: "firefox", use: { ...devices["Desktop Firefox"] }, grepInvert: PERF },
+    { name: "webkit", use: { ...devices["Desktop Safari"] }, grepInvert: PERF },
     {
       name: "perf",
       use: { ...devices["Desktop Chrome"] },
-      grep: /@perf/,
+      grep: PERF,
     },
   ],
 });
