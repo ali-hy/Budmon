@@ -1,5 +1,5 @@
-// TP-2.25: apps/server has a tsconfig the ESLint project service and `pnpm typecheck` use (A-30).
-// (c), the web app, is added in S-11a.
+// TP-2.25: apps/server and (from S-11a, (c)) apps/web have tsconfigs the ESLint project service and
+// `pnpm typecheck` use (A-30).
 import { spawnSync } from "node:child_process";
 import { appendFileSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -52,6 +52,40 @@ describe("TP-2.25: app tsconfigs (A-30)", () => {
 
       expect(typecheck.status).not.toBe(0);
       expect(typecheck.output).toContain("apps/server/src/main/api.ts");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 600_000);
+
+  it("TP-2.25 (c): ESLint parses apps/web/src/main.tsx with the project service", () => {
+    const { status, output } = run(
+      path.join(ROOT, "node_modules/.bin/eslint"),
+      ["apps/web/src/main.tsx"],
+      ROOT,
+    );
+
+    expect(status, output).toBe(0);
+    expect(output).not.toMatch(/project service/i);
+    expect(output).not.toMatch(/Parsing error/i);
+  }, 120_000);
+
+  it("TP-2.25 (c): pnpm typecheck fails on a type error planted in apps/web/src/main.tsx, naming the file", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "budmon-typecheck-web-"));
+    try {
+      const checkout = path.join(dir, "budmon");
+      const clone = run("git", ["clone", "--quiet", "--no-hardlinks", ROOT, checkout], dir);
+      expect(clone.status, clone.output).toBe(0);
+      const install = run("pnpm", ["install", "--frozen-lockfile", "--prefer-offline"], checkout);
+      expect(install.status, install.output).toBe(0);
+      appendFileSync(
+        path.join(checkout, "apps/web/src/main.tsx"),
+        '\nexport const plantedTypeError: number = "not a number";\n',
+      );
+
+      const typecheck = run("pnpm", ["typecheck"], checkout);
+
+      expect(typecheck.status).not.toBe(0);
+      expect(typecheck.output).toContain("apps/web/src/main.tsx");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

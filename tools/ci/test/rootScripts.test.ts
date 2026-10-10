@@ -13,9 +13,11 @@ const ROWS: Readonly<Record<string, string>> = {
   // S-0 (format to test:int)
   format: "prettier --write .",
   "format:check": "prettier --check .",
-  lint: "eslint .",
-  // S-2 (A-30): typecheck also checks apps/server.
-  typecheck: "tsc -p tsconfig.json && tsc -p apps/server/tsconfig.json",
+  // S-11a (A-14): lint also runs lint:css.
+  lint: "eslint . && pnpm lint:css",
+  // S-2, S-11a (A-30): typecheck also checks apps/server and apps/web.
+  typecheck:
+    "tsc -p tsconfig.json && tsc -p apps/server/tsconfig.json && tsc -p apps/web/tsconfig.json",
   test: "vitest run --project=!server-int",
   "test:int": "vitest run --project=server-int",
   // S-1 (A-35): test:coverage added; check runs it after test.
@@ -29,6 +31,8 @@ const ROWS: Readonly<Record<string, string>> = {
   "db:migrate": "pnpm --filter @budmon/server db:migrate",
   // S-4 (A-14)
   "contract:openapi": "pnpm --filter @budmon/contract contract:openapi",
+  // S-11a (A-14, F-4)
+  "lint:css": 'stylelint "apps/web/src/**/*.css"',
 };
 
 /** §2.2.2's package-script column for apps/server, plus F-24's build (A-43). */
