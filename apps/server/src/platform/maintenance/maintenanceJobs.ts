@@ -16,6 +16,10 @@ export const idempotencyPurgeJob = defineJob({
   role: "general",
   payload: empty,
   cron: "0 3 * * *",
+  // A-358: one retry after 5 minutes; the next scheduled run covers the rest.
+  retryLimit: 1,
+  retryDelaySeconds: 300,
+  retryBackoff: false,
 });
 
 export const rateLimitPurgeJob = defineJob({
@@ -23,6 +27,10 @@ export const rateLimitPurgeJob = defineJob({
   role: "general",
   payload: empty,
   cron: "*/10 * * * *",
+  // A-358: one retry after 5 minutes; the next scheduled run covers the rest.
+  retryLimit: 1,
+  retryDelaySeconds: 300,
+  retryBackoff: false,
 });
 
 /** A-215: registered with F-144's handler (S-10). */
@@ -31,6 +39,10 @@ export const exportsPurgeJob = defineJob({
   role: "general",
   payload: empty,
   cron: "15 * * * *",
+  // A-358: one retry after 5 minutes; the next scheduled run covers the rest.
+  retryLimit: 1,
+  retryDelaySeconds: 300,
+  retryBackoff: false,
 });
 
 export const platformMaintenanceJobs = [

@@ -55,7 +55,9 @@ export function describeFailure(err: unknown): {
     if (
       name === "ResetRefusedError" ||
       name === "PostgresNotReadyError" ||
-      name === "FxProviderError"
+      name === "FxProviderError" ||
+      // A-357
+      name === "ObjectStoreError"
     ) {
       reason = token(read(err, "reason"));
     }

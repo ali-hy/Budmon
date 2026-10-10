@@ -24,7 +24,11 @@ export async function replayErasures(
       await (deps.handler as ErasureHandler)(record.userId);
     } catch (error) {
       // A-295: the count completed so far, never the user id.
-      deps.logger.error("erasure_replay_failed", { replayed, ...describeFailure(error) }, error);
+      deps.logger.error(
+        "erasure_replay_failed",
+        { count: replayed, ...describeFailure(error) },
+        error,
+      );
       throw error;
     }
     replayed += 1;

@@ -36,6 +36,7 @@ import {
 import { appRouter } from "./appRouter.js";
 import { clientVersionMiddleware, parseClientHeader } from "./clientVersion.js";
 import type { RequestContext } from "./context.js";
+import { isRoute } from "../observability/safeFields.js";
 import { registerDevObjectsRoute } from "./devObjects.js";
 import { registerHealthRoutes } from "./health.js";
 import { registerCoarseRateLimit } from "../security/rateLimiter.js";
@@ -266,7 +267,8 @@ export async function createApiServer(
       },
     ],
   });
-  app.all(`${PREFIX}/*`, async (request, reply) => {
+  // A-355: marked, so the request log knows this route's template is oRPC's, not Fastify's.
+  app.all(`${PREFIX}/*`, { config: { orpcCatchAll: true } }, async (request, reply) => {
     const context = request.budmon;
     if (context === null) return reply.code(404).send(NOT_FOUND);
     const result = await handler.handle(request, reply, { prefix: PREFIX, context });
@@ -297,18 +299,20 @@ export async function createApiServer(
       addHook: (name, hook) =>
         app.addHook(name, async (request, reply) => {
           const context = request.budmon;
-          const orpcRoute = context?.matched.route ?? request.orpcRoute;
+          // A-355: the oRPC catch-all logs the procedure's template (or /unmatched when a
+          // request was refused before oRPC matched); any other route logs its own template
+          // when it passes F-30's route rule, else /unmatched.
+          const catchAll =
+            (request.routeOptions.config as { orpcCatchAll?: unknown } | undefined)
+              ?.orpcCatchAll === true;
+          const url = request.routeOptions.url;
           const logged: RequestLogRequest = {
             method: request.method,
             url: request.url,
-            routeOptions: {
-              // The oRPC catch-all's own pattern isn't a route: a request refused before oRPC
-              // matched (a body error) is logged as /unmatched.
-              ...(request.routeOptions.url === undefined || request.routeOptions.url.includes("*")
-                ? {}
-                : { url: request.routeOptions.url }),
-            },
-            ...(orpcRoute === undefined ? {} : { orpcRoute }),
+            routeOptions: !catchAll && url !== undefined && isRoute(url) ? { url } : {},
+            ...(catchAll
+              ? { orpcRoute: context?.matched.route ?? request.orpcRoute ?? "/unmatched" }
+              : {}),
             requestId: request.id,
             ...(context?.principal?.userId === undefined
               ? {}

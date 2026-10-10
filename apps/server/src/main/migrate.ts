@@ -64,7 +64,8 @@ export async function runMigrate(
     destination: { write: (line: string) => process.stderr.write(line) },
   });
   if (config.db.user !== "budmon_migrator") {
-    logger.error("startup_failed", { reason: "DB_USER must be budmon_migrator" });
+    // A-359: a token-safe reason (the old sentence failed F-30 and was logged as [invalid]).
+    logger.error("startup_failed", { reason: "db_user_not_migrator" });
     return 1;
   }
   const migrationsFolder = path.join(serverRoot(), "drizzle");

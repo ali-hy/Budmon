@@ -727,6 +727,26 @@ function readCapturePublic(r: Reader): { publicKeyPem: string; keyVersion: strin
     : { publicKeyPem, keyVersion };
 }
 
+/**
+ * A-356: https, or in development and test `http://localhost:<port>` or `http://127.0.0.1:<port>`
+ * (a local S3-compatible server).
+ */
+function readS3Endpoint(r: Reader): URL | undefined {
+  const raw = r.required("S3_ENDPOINT");
+  if (raw === undefined) return undefined;
+  const url = parseUrl(raw);
+  if (
+    url !== null &&
+    !r.prod &&
+    url.protocol === "http:" &&
+    (url.hostname === "localhost" || url.hostname === "127.0.0.1") &&
+    url.port !== ""
+  ) {
+    return url;
+  }
+  return r.httpsUrl("S3_ENDPOINT", raw);
+}
+
 function readObjectStore(r: Reader): Config["objectStore"] | undefined {
   const kind = r.oneOf("OBJECT_STORE_KIND", ["fs", "s3"] as const);
   if (kind === undefined) return undefined;
@@ -738,7 +758,7 @@ function readObjectStore(r: Reader): Config["objectStore"] | undefined {
     const root = r.required("OBJECT_STORE_FS_ROOT");
     return root === undefined ? undefined : { kind: "fs", root };
   }
-  const endpoint = r.httpsUrl("S3_ENDPOINT", r.required("S3_ENDPOINT"));
+  const endpoint = readS3Endpoint(r);
   const region = r.required("S3_REGION");
   const exports = r.required("S3_BUCKET_EXPORTS");
   const erasureLog = r.required("S3_BUCKET_ERASURE_LOG");
