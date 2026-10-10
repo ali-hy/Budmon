@@ -52,6 +52,13 @@ export default defineConfig(({ mode }) => {
   const pseudo = (process.env["VITE_PSEUDO_LOCALES"] ?? env["VITE_PSEUDO_LOCALES"]) === "1";
   return {
     plugins: [solid(), tailwindcss(), budmonPseudoLocales(pseudo), budmonVersion()],
+    // F-222 (A-329): `vite preview` in e2e:serve proxies the in-process API.
+    preview: {
+      proxy: {
+        "^/api(/|$)": { target: "http://127.0.0.1:8787", changeOrigin: false },
+        "^/dev/objects(/|$)": { target: "http://127.0.0.1:8787", changeOrigin: false },
+      },
+    },
     server: {
       host: "127.0.0.1",
       port: 5173,

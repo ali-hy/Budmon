@@ -6,15 +6,24 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@formatjs/intl": "6.1.2",
+    "@kobalte/core": "0.13.14",
+    "@orpc/client": "1.15.4",
+    "@orpc/contract": "1.15.4",
+    "@orpc/openapi-client": "1.15.4",
+    "@sentry/solid": "11.4.0",
+    "@tanstack/solid-query": "5.104.1",
+    "@tanstack/solid-router": "1.170.38",
     "solid-js": "1.9.16"
   },
   "devDependencies": {
     "@axe-core/playwright": "4.13.0",
     "@budmon/config": "workspace:*",
+    "@budmon/contract": "workspace:*",
     "@budmon/shared": "workspace:*",
     "@formatjs/icu-messageformat-parser": "3.5.20",
     "@playwright/test": "1.63.0",

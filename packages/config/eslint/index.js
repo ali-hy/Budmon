@@ -194,6 +194,17 @@ export function createBudmonEslintConfig({ tsconfigRootDir }) {
         "jsx-a11y/tabindex-no-positive": "error",
       },
     },
+    // A-332: fixture pages (development and E2E only) use literal strings and stay out of the
+    // catalogs.
+    {
+      files: ["apps/web/src/fixtures/**/*.{ts,tsx}"],
+      rules: {
+        "formatjs/enforce-default-message": "off",
+        "formatjs/no-invalid-icu": "off",
+        "formatjs/no-literal-string-in-jsx": "off",
+        "budmon/message-id": "off",
+      },
+    },
     prettier,
   ];
 }

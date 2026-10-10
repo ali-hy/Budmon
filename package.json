@@ -22,7 +22,9 @@
     "db:migrate": "pnpm --filter @budmon/server db:migrate",
     "contract:openapi": "pnpm --filter @budmon/contract contract:openapi",
     "lint:css": "stylelint \"apps/web/src/**/*.css\"",
-    "lint:catalogs": "pnpm --filter @budmon/tools-ci lint:catalogs"
+    "lint:catalogs": "pnpm --filter @budmon/tools-ci lint:catalogs",
+    "test:e2e": "pnpm --filter @budmon/web test:e2e",
+    "check:all": "pnpm check && pnpm test:e2e && cd apps/android && ./gradlew check"
   },
   "devDependencies": {
     "@budmon/config": "workspace:*",

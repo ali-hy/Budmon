@@ -24,9 +24,10 @@ const USAGE = "Usage: checkCatalogs [--root <dir>]  (default: the repository roo
 
 /** The IDs used in `apps/web/src/**\/*.{ts,tsx}`, as F-1's formatjs settings see them (A-12). */
 export async function usedMessageIds(root: string = ROOT): Promise<Set<string>> {
-  const files = globSync("apps/web/src/**/*.{ts,tsx}", { cwd: root }).map((f) =>
-    path.join(root, f),
-  );
+  // A-332: fixtures stay out of the catalogs.
+  const files = globSync("apps/web/src/**/*.{ts,tsx}", { cwd: root })
+    .filter((f) => !f.replaceAll("\\", "/").startsWith("apps/web/src/fixtures/"))
+    .map((f) => path.join(root, f));
   if (files.length === 0) return new Set();
   const extracted = JSON.parse(
     await extract(files, { additionalFunctionNames: ["t"], throws: true }),
