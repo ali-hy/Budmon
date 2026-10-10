@@ -75,6 +75,7 @@ export default defineConfig({
           include: ["test/**/*.test.{ts,tsx}"],
           globalSetup: ["test/setup/pseudoLocales.ts"],
           env: { VITE_PSEUDO_LOCALES: "1" },
+          server: { deps: { inline: [/[\\/]msw[\\/]/, /@mswjs[\\/]interceptors/] } },
         },
       },
       {

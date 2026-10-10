@@ -35,6 +35,9 @@ const ROWS: Readonly<Record<string, string>> = {
   "lint:css": 'stylelint "apps/web/src/**/*.css"',
   // S-11a (A-316, F-9)
   "lint:catalogs": "pnpm --filter @budmon/tools-ci lint:catalogs",
+  // S-11b (A-14)
+  "test:e2e": "pnpm --filter @budmon/web test:e2e",
+  "check:all": "pnpm check && pnpm test:e2e",
 };
 
 /** §2.2.2's package-script column for apps/server, plus F-24's build (A-43). */
@@ -94,5 +97,18 @@ describe("TP-0.26x: packages/contract package scripts (§2.2.2, F-347)", () => {
 
     expect(pkg.name).toBe("@budmon/contract");
     expect(pkg.scripts?.["contract:openapi"]).toBe("tsx scripts/emitOpenapi.ts");
+  });
+});
+
+// TP-0.26x: the web package's script that the root test:e2e delegates to (§2.2.2, S-11b).
+describe("TP-0.26x: apps/web package scripts (§2.2.2, S-11b)", () => {
+  it('TP-0.26x: test:e2e is "playwright test"', () => {
+    const pkg = JSON.parse(readFileSync(path.join(ROOT, "apps/web/package.json"), "utf8")) as {
+      name?: string;
+      scripts?: Record<string, unknown>;
+    };
+
+    expect(pkg.name).toBe("@budmon/web");
+    expect(pkg.scripts?.["test:e2e"]).toBe("playwright test");
   });
 });
