@@ -28,7 +28,12 @@ export function createPgBoss(
   logger?: Logger,
 ): PgBoss {
   const queue = cfg.worker?.queue;
-  const queueLogin = mode === "general" || mode === "cli";
+  // A-299: a worker that also runs general (development only) gives its capture instance the
+  // queue login; a capture-only worker connects as DB_USER (budmon_capture, F-10).
+  const queueLogin =
+    mode === "general" ||
+    mode === "cli" ||
+    (mode === "capture" && cfg.worker?.roles.has("general") === true);
   if (queueLogin && queue === undefined) {
     throw new Error(`a ${mode} pg-boss needs the queue login`);
   }
@@ -129,7 +134,7 @@ export async function startWorkers(
         // 3.
         await boss.work(
           def.name,
-          { batchSize: 1, pollingIntervalSeconds: 2, includeMetadata: true },
+          { batchSize: 1, pollingIntervalSeconds: 2, includeMetadata: true, perJobResults: true },
           wrapHandler(def, handler, {
             logger: c.logger,
             metrics: c.metrics,

@@ -51,8 +51,14 @@ export function describeFailure(err: unknown): {
     if (typeof code === "string" && (SQLSTATE.test(code) || SYSTEM_CODE.test(code))) {
       errorCode = code;
     }
-    if (name === "ResetRefusedError" || name === "PostgresNotReadyError")
+    // A-298: FxProviderError's reason too.
+    if (
+      name === "ResetRefusedError" ||
+      name === "PostgresNotReadyError" ||
+      name === "FxProviderError"
+    ) {
       reason = token(read(err, "reason"));
+    }
   }
   return {
     errorClass,

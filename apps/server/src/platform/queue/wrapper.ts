@@ -6,8 +6,10 @@ import { BudmonError } from "../errors/BudmonError.js";
 import type { ErrorReporter } from "../observability/errorReporter.js";
 import type { Logger } from "../observability/logger.js";
 import type { PlatformMetrics } from "../observability/metrics.js";
+import { describeFailure } from "../observability/describeFailure.js";
 import { ERROR_KEY } from "../observability/safeFields.js";
 import { sanitizeError } from "../observability/sanitize.js";
+import { JobPayloadInvalidError } from "./jobQueue.js";
 import type { JobDefinition } from "./jobs.js";
 
 /**
@@ -46,12 +48,20 @@ function jobFailure(err: unknown): JobFailure {
   return failure;
 }
 
+/** A-297: one disposition per job (pg-boss `perJobResults`). */
+export interface JobDisposition {
+  id: string;
+  status: "completed" | "failed" | "deadletter";
+  output?: JobFailure;
+}
+
 export function wrapHandler<P>(
   def: JobDefinition<P>,
   handler: (payload: P, ctx: JobContext) => Promise<unknown>,
   deps: { logger: Logger; metrics: PlatformMetrics; reporter: ErrorReporter; clock: Clock },
-): (jobs: WorkJob[]) => Promise<void> {
+): (jobs: WorkJob[]) => Promise<JobDisposition[]> {
   return async (jobs) => {
+    const results: JobDisposition[] = [];
     for (const job of jobs) {
       // A-207: pg-boss counts retries from 0.
       const attempt = job.retryCount + 1;
@@ -61,9 +71,26 @@ export function wrapHandler<P>(
         deps.metrics.jobDuration.record(seconds, { queue: def.name });
         deps.metrics.jobsProcessed.add(1, { queue: def.name, job_state: state });
       };
+      const parsed = def.payload.safeParse(job.data);
+      if (!parsed.success) {
+        // A-297: a planted row or a shape changed across a deploy; retrying can't fix either, so
+        // the job goes straight to the role's dead-letter queue and the handler isn't called.
+        const err = new JobPayloadInvalidError(parsed.error.issues);
+        record("failed");
+        deps.logger.warn("job_failed", {
+          jobName: def.name,
+          attempt,
+          errorClass: "JobPayloadInvalidError",
+          outcome: "dead_lettered",
+        });
+        deps.reporter.report(err, { jobName: def.name });
+        deps.metrics.jobsDeadLettered.add(1, { queue: def.name });
+        const output = new JobFailure("JobPayloadInvalidError");
+        output.stack = "JobFailure: JobPayloadInvalidError";
+        results.push({ id: job.id, status: "deadletter", output });
+        continue;
+      }
       try {
-        const parsed = def.payload.safeParse(job.data);
-        if (!parsed.success) throw new Error("invalid job payload");
         await handler(parsed.data, {
           jobId: job.id,
           attempt,
@@ -75,9 +102,11 @@ export function wrapHandler<P>(
         });
         // The return value is discarded: completed jobs store no output.
         record("completed");
+        results.push({ id: job.id, status: "completed" });
       } catch (err) {
         record("failed");
         const s = sanitizeError(err);
+        const { reason } = describeFailure(err);
         deps.logger.warn(
           "job_failed",
           {
@@ -85,6 +114,9 @@ export function wrapHandler<P>(
             attempt,
             errorClass: s.class,
             ...(s.key !== undefined && ERROR_KEY.test(s.key) ? { errorKey: s.key } : {}),
+            // A-298: the failure's reason and HTTP status, when it has them.
+            ...(reason === undefined ? {} : { reason }),
+            ...(s.status === undefined ? {} : { status: s.status }),
           },
           err,
         );
@@ -94,8 +126,9 @@ export function wrapHandler<P>(
         if (attempt > def.retryLimit) {
           deps.metrics.jobsDeadLettered.add(1, { queue: def.name });
         }
-        throw jobFailure(err);
+        results.push({ id: job.id, status: "failed", output: jobFailure(err) });
       }
     }
+    return results;
   };
 }

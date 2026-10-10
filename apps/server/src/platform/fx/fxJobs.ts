@@ -117,8 +117,13 @@ async function storeDayFrom(
     if (count > 0) await enqueueRatesAdded(tx, deps.fx, deps.queue, rateDate);
     return count;
   });
-  deps.metrics.fxRatesFetched.add(1, { provider: provider.name });
-  ctx.logger.info("fx_day_stored", { rateDate, provider: provider.name, inserted, rejected });
+  // A-300: counted and logged as stored only when this run inserted the day.
+  if (inserted > 0) {
+    deps.metrics.fxRatesFetched.add(1, { provider: provider.name });
+    ctx.logger.info("fx_day_stored", { rateDate, provider: provider.name, inserted, rejected });
+  } else {
+    ctx.logger.info("fx_day_already_stored", { rateDate, provider: provider.name });
+  }
 }
 
 const PRIMARY_WINDOW_MS = 6 * 3_600_000;

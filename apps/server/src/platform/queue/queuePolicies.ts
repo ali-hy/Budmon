@@ -23,9 +23,11 @@ function literal(value: string): string {
 }
 
 /**
- * A-283: for each general queue capture may send to, capture's rows must be `created` and carry
- * the queue's policy; with `captureSingletonKeyField`, their singleton key must also be that
- * payload field.
+ * A-283, A-296: for each general queue capture may send to, capture's rows must be `created`,
+ * carry exactly the queue's job options (as pg-boss's own send writes them), start now or earlier
+ * with no priority, group, blocking or dependencies, and not have been retried; with
+ * `captureSingletonKeyField`, their singleton key must also be that payload field. Every row
+ * column is qualified (`<table>.col`): unqualified, the subquery would resolve it to `q`.
  */
 function capturePins(registry: JobRegistry, self: string): string {
   return registry
@@ -33,13 +35,31 @@ function capturePins(registry: JobRegistry, self: string): string {
     .filter((d) => d.sendableFromCapture === true)
     .map((d) => {
       const n = literal(d.name);
+      const r = (column: string) => `${self}.${column}`;
+      const queueOptions =
+        `EXISTS (SELECT 1 FROM pgboss.queue q WHERE q.name = ${n}` +
+        ` AND ${r("policy")} IS NOT DISTINCT FROM q.policy` +
+        ` AND ${r("retry_limit")} = q.retry_limit` +
+        ` AND ${r("retry_delay")} = q.retry_delay` +
+        ` AND ${r("retry_backoff")} = COALESCE(q.retry_backoff, false)` +
+        ` AND ${r("retry_delay_max")} IS NOT DISTINCT FROM q.retry_delay_max` +
+        ` AND ${r("expire_seconds")} = q.expire_seconds` +
+        ` AND ${r("deletion_seconds")} = q.deletion_seconds` +
+        ` AND ${r("heartbeat_seconds")} IS NOT DISTINCT FROM q.heartbeat_seconds` +
+        ` AND ${r("keep_until")} = ${r("start_after")} + q.retention_seconds * interval '1 second')`;
       const key =
         d.captureSingletonKeyField === undefined
           ? ""
-          : ` AND ${self}.singleton_key IS NOT DISTINCT FROM ${self}.data->>${literal(d.captureSingletonKeyField)}`;
+          : ` AND ${r("singleton_key")} IS NOT DISTINCT FROM ${r("data")}->>${literal(d.captureSingletonKeyField)}`;
       return (
-        ` AND (${self}.name <> ${n} OR (${self}.state = 'created'` +
-        ` AND ${self}.policy IS NOT DISTINCT FROM (SELECT q.policy FROM pgboss.queue q WHERE q.name = ${n})` +
+        ` AND (${r("name")} <> ${n} OR (${r("state")} = 'created'` +
+        ` AND ${queueOptions}` +
+        ` AND ${r("priority")} = 0` +
+        ` AND ${r("start_after")} <= pg_catalog.now()` +
+        ` AND ${r("group_id")} IS NULL AND ${r("group_tier")} IS NULL` +
+        ` AND NOT ${r("blocked")} AND NOT ${r("blocking")}` +
+        ` AND ${r("pending_dependencies")} = 0` +
+        ` AND ${r("retry_count")} = 0` +
         `${key}))`
       );
     })

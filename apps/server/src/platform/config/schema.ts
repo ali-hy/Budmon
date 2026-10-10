@@ -602,6 +602,16 @@ function readDb(
   const host = r.required("DB_HOST");
   const name = r.required("DB_NAME");
   const user = r.required("DB_USER");
+  // A-299: a capture-only worker's pg-boss connects as DB_USER, which RLS allows only as
+  // budmon_capture.
+  if (
+    user !== undefined &&
+    roles?.size === 1 &&
+    roles.has("capture") &&
+    user !== "budmon_capture"
+  ) {
+    r.fail("DB_USER", "must be budmon_capture for a capture-only worker");
+  }
   const port = r.int("DB_PORT", 1, 65535, 5432);
   const password = r.file("DB_PASSWORD_FILE", true);
   const sslmode = r.oneOf("DB_SSLMODE", ["disable", "verify-full"] as const, "disable");
