@@ -257,6 +257,20 @@ describe("TP-2.37: node dist/main/migrate.js failure logs (A-81)", () => {
     expectNoEndpoint(output, "127.0.0.1", closedPort, MIGRATOR_PASSWORD);
   });
 
+  it('TP-2.37 (A-359): DB_USER=budmon_app exits 1 with one startup_failed line carrying reason "db_user_not_migrator", not [invalid]', () => {
+    const env = { ...migrateEnv(pg.host, pg.port, MIGRATOR_PASSWORD), DB_USER: "budmon_app" };
+
+    const { status, stdout, stderr } = runMigrateBundle(env);
+    const output = `${stdout}${stderr}`;
+
+    expect(status, output).toBe(1);
+    expect(stdout).toBe("");
+    const failures = startupFailures(stderr);
+    expect(failures).toHaveLength(1);
+    expect(failures[0]?.["reason"]).toBe("db_user_not_migrator");
+    expect(stderr).not.toContain("[invalid]");
+  });
+
   // The control for (a): with the right password the run gets past authentication. What happens
   // next (the schema step on a bare bootstrapped database) isn't what this case is about.
   it("TP-2.75x: the right password on the same database isn't a 28P01 failure", () => {

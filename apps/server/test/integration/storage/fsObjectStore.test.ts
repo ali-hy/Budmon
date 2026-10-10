@@ -1,6 +1,6 @@
 // F-142 the filesystem object store and F-145 the development objects route, through a development
 // API container (F-96's objectStore) and its server (F-55 step 6). TP-10.2, plus extra cases
-// TP-10.12x. IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
+// TP-10.13x. IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { createHmac, randomBytes } from "node:crypto";
 import {
   existsSync,
@@ -18,7 +18,7 @@ import { canonicalJson, fixedClock } from "@budmon/shared";
 import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createApiServer } from "../../../src/platform/http/server.js";
-import { buildApiContainer, injectJson, type BuiltContainer } from "../../support/api.js";
+import { buildApiContainer, injectJson, observed, type BuiltContainer } from "../../support/api.js";
 import { devApi, withFile } from "../../support/configEnv.js";
 import { type ObjectStore } from "../../../src/platform/storage/objectStore.js";
 import { EXPORT_ID, USER, exportKey, failure, keysOf } from "../../support/s10.js";
@@ -182,7 +182,7 @@ describe("TP-10.2: the development objects route (F-145, A-22)", () => {
   });
 
   // Review B-4: the payload changed, the original signature part kept.
-  it("TP-10.12x (B-4): (a) k set to another user's existing export, with the original signature, is a 404 NOT_FOUND envelope", async () => {
+  it("TP-10.13x (B-4): (a) k set to another user's existing export, with the original signature, is a 404 NOT_FOUND envelope", async () => {
     await store.put("exports", OTHER_KEY, Buffer.from("not yours"), "application/zip");
     const url = await store.presignGet("exports", exportKey(), 600);
     const { payload, signature } = tokenOf(url);
@@ -197,7 +197,7 @@ describe("TP-10.2: the development objects route (F-145, A-22)", () => {
     expect(res.json()).toEqual(NOT_FOUND);
   });
 
-  it("TP-10.12x (B-4): (b) exp + 3600 with the original signature is a 404 NOT_FOUND envelope", async () => {
+  it("TP-10.13x (B-4): (b) exp + 3600 with the original signature is a 404 NOT_FOUND envelope", async () => {
     const url = await store.presignGet("exports", exportKey(), 600);
     const { payload, signature } = tokenOf(url);
 
@@ -211,7 +211,7 @@ describe("TP-10.2: the development objects route (F-145, A-22)", () => {
     expect(res.json()).toEqual(NOT_FOUND);
   });
 
-  it("TP-10.12x (B-4): (c) one character flipped in the middle of the signature is a 404 NOT_FOUND envelope", async () => {
+  it("TP-10.13x (B-4): (c) one character flipped in the middle of the signature is a 404 NOT_FOUND envelope", async () => {
     const url = await store.presignGet("exports", exportKey(), 600);
     const { payloadPart, signature } = tokenOf(url);
     const mid = Math.floor(signature.length / 2);
@@ -233,7 +233,7 @@ describe("TP-10.2: the development objects route (F-145, A-22)", () => {
     expect(res.json()).toEqual(NOT_FOUND);
   });
 
-  it('TP-10.12x: the same payload re-signed with the test key (n unchanged) is served, so the a"b refusal is the n check', async () => {
+  it('TP-10.13x: the same payload re-signed with the test key (n unchanged) is served, so the a"b refusal is the n check', async () => {
     const url = await store.presignGet("exports", exportKey(), 600, { downloadName: NAME });
 
     const res = await app.inject({
@@ -244,7 +244,7 @@ describe("TP-10.2: the development objects route (F-145, A-22)", () => {
     expect(res.statusCode).toBe(200);
   });
 
-  it("TP-10.12x: a valid token for a key with no file is a 404 NOT_FOUND envelope", async () => {
+  it("TP-10.13x: a valid token for a key with no file is a 404 NOT_FOUND envelope", async () => {
     const missing = exportKey(EXPORT_ID.replace(/c$/, "f"), "csv");
     const url = await store.presignGet("exports", missing, 600);
 
@@ -380,7 +380,7 @@ describe("TP-10.2 (A-303): only the API presigns fs objects", () => {
   });
 
   // Review B-6: the route exists only for development or test with the fs store.
-  it("TP-10.12x (B-6): an API with APP_ENV=test and OBJECT_STORE_KIND=s3 has no /dev/objects/* route: GET answers the platform 404", async () => {
+  it("TP-10.13x (B-6): an API with APP_ENV=test and OBJECT_STORE_KIND=s3 has no /dev/objects/* route: GET answers the platform 404", async () => {
     const api = await buildApiContainer(
       {},
       {
@@ -414,7 +414,7 @@ describe("TP-10.2 (A-303): only the API presigns fs objects", () => {
     }
   });
 
-  it("TP-10.12x (B-6): the development API with the fs store has the /dev/objects/* route (the control for the case above)", () => {
+  it("TP-10.13x (B-6): the development API with the fs store has the /dev/objects/* route (the control for the case above)", () => {
     expect(app.hasRoute({ method: "GET", url: "/dev/objects/*" })).toBe(true);
   });
 
@@ -431,4 +431,51 @@ describe("TP-10.2 (A-303): only the API presigns fs objects", () => {
       await worker.close();
     }
   });
+});
+
+// A-355: the development objects route is logged and counted under its template, not /unmatched.
+describe("TP-10.2 (A-355): /dev/objects/* in the request log and metrics", () => {
+  it("TP-10.2 (A-355): one GET /dev/objects/<token> logs route /dev/objects/* and counts http_route /dev/objects/*", async () => {
+    const obs = observed();
+    const routeRoot = mkdtempSync(path.join(tmpdir(), "budmon-objects-route-"));
+    const own = await buildApiContainer(
+      { clock, ...obs.overrides },
+      { OBJECT_STORE_KIND: "fs", OBJECT_STORE_FS_ROOT: routeRoot },
+      () => {
+        const f = devApi();
+        withFile(f, "DEV_OBJECTS_SIGNING_KEY_FILE", signingKey.toString("base64"));
+        return f;
+      },
+    );
+    const server = await createApiServer(own.container);
+    try {
+      await server.ready();
+      await own.container.objectStore.put(
+        "exports",
+        exportKey(),
+        Buffer.from("x"),
+        "application/zip",
+      );
+      const url = await own.container.objectStore.presignGet("exports", exportKey(), 600);
+      const before = obs.capture.records().length;
+
+      const res = await server.inject({ method: "GET", url: url.pathname });
+
+      expect(res.statusCode).toBe(200);
+      const lines = obs.capture
+        .records()
+        .slice(before)
+        .filter((l) => l["event"] === "http_request");
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toMatchObject({ route: "/dev/objects/*", status: 200 });
+      const counter = (await obs.collect()).get("http_server_requests_total");
+      const routes = (counter?.dataPoints ?? []).map((p) => p.attributes["http_route"]);
+      expect(routes).toContain("/dev/objects/*");
+      expect(routes).not.toContain("/unmatched");
+    } finally {
+      await server.close();
+      await own.close();
+      rmSync(routeRoot, { recursive: true, force: true });
+    }
+  }, 60_000);
 });

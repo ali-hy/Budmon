@@ -1,5 +1,5 @@
 // F-141 the S3 object store against versitygw (A-287), an S3-compatible Testcontainer. TP-10.3,
-// plus extra cases TP-10.12x. IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
+// plus extra cases TP-10.13x. IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 // Not skipped: it runs in every pnpm test:int, in CI through A-284's mirror prefix.
 import {
   CreateBucketCommand,
@@ -158,7 +158,7 @@ describe("TP-10.3: the S3 store (F-141, A-22, A-287)", () => {
   }, 90_000);
 
   // Review B-7: F-141's other error mappings, and lastModified from the listing.
-  it("TP-10.12x (B-7): (a) a wrong secretAccessKey: put is ObjectStoreError with reason denied", async () => {
+  it("TP-10.13x (B-7): (a) a wrong secretAccessKey: put is ObjectStoreError with reason denied", async () => {
     const wrong = createS3ObjectStore(
       { ...cfg(), secretAccessKey: Secret.of("not-the-secret") },
       { logger: recordingLogger() },
@@ -172,7 +172,7 @@ describe("TP-10.3: the S3 store (F-141, A-22, A-287)", () => {
     expect((error as { reason?: unknown }).reason).toBe("denied");
   });
 
-  it("TP-10.12x (B-7): (b) an endpoint on a closed port: put is ObjectStoreError with reason unavailable", async () => {
+  it("TP-10.13x (B-7): (b) an endpoint on a closed port: put is ObjectStoreError with reason unavailable", async () => {
     const closed = createS3ObjectStore(
       { ...cfg(), endpoint: new URL("http://127.0.0.1:1") },
       { logger: recordingLogger() },
@@ -186,7 +186,7 @@ describe("TP-10.3: the S3 store (F-141, A-22, A-287)", () => {
     expect((error as { reason?: unknown }).reason).toBe("unavailable");
   }, 60_000);
 
-  it("TP-10.12x (B-7): (c) list yields a lastModified within a few seconds of the put", async () => {
+  it("TP-10.13x (B-7): (c) list yields a lastModified within a few seconds of the put", async () => {
     const key = exportKey("0190a0b0-1c2d-7e3f-8a4b-0000000000c3");
     const before = Date.now();
     await store.put("exports", key, Buffer.from("x"), "application/zip");
