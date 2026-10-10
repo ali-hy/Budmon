@@ -201,34 +201,23 @@ function fxProvidersFor(config: Config): FxProviders | null {
 }
 
 /**
- * F-141/F-142 from config.objectStore. The filesystem store signs with the API's development key
- * (F-145 verifies with it); without one, its presignGet refuses.
+ * F-141/F-142 from config.objectStore. Only the API presigns (A-303): its filesystem store signs
+ * with the development/test key that F-145 verifies with; a worker's gets no key.
  */
 function objectStoreFor(
   config: Config,
   base: BaseCore,
-  fs: { publicOrigin: URL | undefined; signingKey: Buffer | undefined },
+  fs: { publicOrigin: URL; signingKey: Buffer | null },
 ): ObjectStore | null {
   const store = config.objectStore;
   if (store === undefined) return null;
   if (store.kind === "s3") return createS3ObjectStore(store);
-  const { publicOrigin, signingKey } = fs;
-  if (publicOrigin !== undefined && signingKey !== undefined) {
-    return createFsObjectStore({ root: store.root, publicOrigin, signingKey, clock: base.clock });
-  }
-  // TODO(S-10, raised with the planner): F-96 gives a filesystem store no signing key outside a
-  // development API, so its presigned URLs couldn't be served; refuse them instead.
-  const unsigned = createFsObjectStore({
+  return createFsObjectStore({
     root: store.root,
-    publicOrigin: publicOrigin ?? new URL("http://localhost"),
-    signingKey: Buffer.alloc(32),
+    publicOrigin: fs.publicOrigin,
+    signingKey: fs.signingKey,
     clock: base.clock,
   });
-  return {
-    ...unsigned,
-    presignGet: () =>
-      Promise.reject(new Error("presigned URLs need the development API's signing key")),
-  };
 }
 
 /** F-96 step 5 (A-266): every rates-added subscriber is the registry's own definition. */
@@ -263,8 +252,9 @@ export function createApiContainer(
   const objectStore =
     overrides.objectStore ??
     objectStoreFor(config, base, {
-      publicOrigin: config.api?.publicOrigin,
-      signingKey: config.api?.devObjectsKey?.reveal(),
+      // api config is absent only when tests override its members.
+      publicOrigin: config.api?.publicOrigin ?? new URL("http://localhost"),
+      signingKey: config.api?.devObjectsKey?.reveal() ?? null,
     });
   if (objectStore === null) throw new Error("object store config required");
   return assertFxSubscribersRegistered({
@@ -358,8 +348,9 @@ export function createWorkerContainer(
       ? overrides.objectStore
       : roles.has("general")
         ? objectStoreFor(config, base, {
-            publicOrigin: config.email?.publicOrigin,
-            signingKey: undefined,
+            // A worker never presigns (A-303); the origin is unused without a key.
+            publicOrigin: config.email?.publicOrigin ?? new URL("http://localhost"),
+            signingKey: null,
           })
         : null;
   return assertFxSubscribersRegistered({

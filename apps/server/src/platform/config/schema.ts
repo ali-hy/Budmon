@@ -974,7 +974,8 @@ function readApi(r: Reader): {
   const sealing = readCapturePublic(r);
   const objectStore = readObjectStore(r);
   let devKey: Buffer | undefined;
-  if (r.appEnv === "development") {
+  // A-303: the API presigns filesystem URLs in development and test.
+  if ((r.appEnv === "development" || r.appEnv === "test") && objectStore?.kind === "fs") {
     devKey = r.base64(
       "DEV_OBJECTS_SIGNING_KEY_FILE",
       r.file("DEV_OBJECTS_SIGNING_KEY_FILE", true),

@@ -96,7 +96,8 @@ async function walk(dir: string, rel: string): Promise<string[]> {
 export function createFsObjectStore(cfg: {
   root: string;
   publicOrigin: URL;
-  signingKey: Buffer;
+  /** A-303: null outside the API, where presignGet isn't supported. */
+  signingKey: Buffer | null;
   clock: Clock;
 }): ObjectStore {
   /** The stored keys under `prefix` that match the bucket's key rule. */
@@ -147,6 +148,7 @@ export function createFsObjectStore(cfg: {
     },
     presignGet(bucket, key, ttlSeconds, opts = {}) {
       const ttl = checkPresign(bucket, key, ttlSeconds, opts);
+      if (cfg.signingKey === null) throw new TypeError("presignGet needs the API's signing key");
       // A-290: integer epoch seconds.
       const exp = Math.floor(cfg.clock.now().epochMilliseconds / 1000) + ttl;
       const token = signObjectToken(cfg.signingKey, {

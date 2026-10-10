@@ -276,10 +276,14 @@ export async function createApiServer(
   });
   app.setNotFoundHandler((_request, reply) => reply.code(404).send(NOT_FOUND));
 
-  // 6. In development only, F-145's dev objects route for the filesystem store's URLs.
+  // 6. In development and test with the filesystem store, F-145's dev objects route (A-303).
   const store = c.config.objectStore;
   const devObjectsKey = api?.devObjectsKey;
-  if (c.config.appEnv === "development" && store?.kind === "fs" && devObjectsKey !== undefined) {
+  if (
+    (c.config.appEnv === "development" || c.config.appEnv === "test") &&
+    store?.kind === "fs" &&
+    devObjectsKey !== undefined
+  ) {
     registerDevObjectsRoute(app, {
       root: store.root,
       signingKey: devObjectsKey.reveal(),

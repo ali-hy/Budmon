@@ -8,6 +8,7 @@ import { objectPath, verifyObjectToken } from "../storage/fsObjectStore.js";
 
 /** The platform's 404 envelope (as server.ts answers unknown routes). */
 const NOT_FOUND = { defined: true, code: "NOT_FOUND", status: 404, message: "Not found" };
+const MAX_TOKEN_LENGTH = 2048;
 
 export function registerDevObjectsRoute(
   app: FastifyInstance,
@@ -15,7 +16,12 @@ export function registerDevObjectsRoute(
 ): void {
   // A wildcard, not `:token`: tokens are longer than find-my-way's 100-character parameter limit.
   app.get<{ Params: { "*": string } }>("/dev/objects/*", async (request, reply) => {
-    const payload = verifyObjectToken(deps.signingKey, request.params["*"], deps.clock.now());
+    const token = request.params["*"];
+    // A-304: refused before any decoding.
+    if (token === "" || token.includes("/") || token.length > MAX_TOKEN_LENGTH) {
+      return reply.code(404).send(NOT_FOUND);
+    }
+    const payload = verifyObjectToken(deps.signingKey, token, deps.clock.now());
     if (payload === null) return reply.code(404).send(NOT_FOUND);
     const file = objectPath(deps.root, payload.b, payload.k);
     const isFile = await stat(file).then(
