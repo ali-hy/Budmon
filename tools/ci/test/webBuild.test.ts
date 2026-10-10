@@ -125,6 +125,23 @@ describe("TP-11.27: version.json (F-221)", () => {
   }, 300_000);
 });
 
+describe("TP-11.27 (A-342): the MSW worker ships only with fixtures", () => {
+  it("TP-11.27 (A-342): a normal build has no mockServiceWorker.js; a VITE_FIXTURES=1 build does", () => {
+    withOutDir((normal) => {
+      const plain = viteBuild(normal, { VITE_FIXTURES: undefined });
+      expect(plain.status, plain.output).toBe(0);
+      expect(filesUnder(normal).filter((f) => path.basename(f) === "mockServiceWorker.js")).toEqual(
+        [],
+      );
+    });
+    withOutDir((fixtures) => {
+      const built = viteBuild(fixtures, { VITE_FIXTURES: "1" });
+      expect(built.status, built.output).toBe(0);
+      expect(existsSync(path.join(fixtures, "mockServiceWorker.js"))).toBe(true);
+    });
+  }, 600_000);
+});
+
 describe("S-11a acceptance criteria", () => {
   it("AC-11.1: pnpm --filter @budmon/web build produces the app (index.html) and version.json (buildNumber 0 outside release builds)", () => {
     withOutDir((outDir) => {

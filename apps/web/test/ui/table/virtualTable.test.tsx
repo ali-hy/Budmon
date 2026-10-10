@@ -3,8 +3,10 @@
 //
 // jsdom has no layout, so every element reports an 800 × 800 box and ResizeObserver is a stub:
 // with rowHeight 40 the viewport holds 20 rows, and overscan 10 renders rows 0..29.
-import { render, screen } from "@solidjs/testing-library";
+import { fireEvent, screen } from "@solidjs/testing-library";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import type { AppError } from "../../support/s11b.js";
+import { renderWithI18n } from "../../support/render.js";
 import { type Column, type InfiniteListSource, loadVirtualTable } from "../../support/s12.js";
 
 interface Row {
@@ -19,8 +21,11 @@ const DROPPED = { from: 20, to: 29 };
 
 function fakeSource(): InfiniteListSource<Row> {
   return {
+    pageSize: 10,
     rowCount: () => TOTAL,
     totalCount: () => TOTAL,
+    hasMore: () => false,
+    retry: vi.fn<() => void>(),
     rowAt: (index: number) =>
       index < 0 || index >= TOTAL || (index >= DROPPED.from && index <= DROPPED.to)
         ? undefined
@@ -68,7 +73,7 @@ afterAll(() => {
 
 async function mount(source = fakeSource()) {
   const { VirtualTable } = await loadVirtualTable();
-  const result = render(() => (
+  const result = renderWithI18n(() => (
     <VirtualTable<Row>
       label="Transactions"
       columns={COLUMNS}
@@ -129,6 +134,8 @@ describe("TP-12.2: grid semantics and placeholders (F-219)", () => {
     );
     for (const p of placeholders) {
       expect(p.getAttribute("aria-busy")).toBe("true");
+      // A-343: inline heights on both kinds of row.
+      expect(p.style.height).toBe(`${String(ROW_HEIGHT)}px`);
       expect(p.style.height).toBe(data?.style.height);
     }
   });
@@ -139,6 +146,50 @@ describe("TP-12.2: grid semantics and placeholders (F-219)", () => {
     const count = bodyRows(grid).length;
     expect(count).toBeGreaterThan(0);
     expect(count).toBeLessThan(200);
+  });
+
+  it("TP-12.2 (A-341): header cells are columnheaders and every cell has aria-colindex = column + 1", async () => {
+    const { grid } = await mount();
+
+    const headers = [...grid.querySelectorAll('[role="columnheader"]')];
+    expect(headers.map((h) => h.getAttribute("aria-colindex"))).toEqual(["1", "2"]);
+    const rows = bodyRows(grid).filter((r) => !r.hasAttribute("data-placeholder"));
+    for (const row of rows) {
+      expect(
+        [...row.querySelectorAll('[role="gridcell"]')].map((c) => c.getAttribute("aria-colindex")),
+      ).toEqual(["1", "2"]);
+    }
+  });
+
+  it('TP-12.2 (A-341): exactly one row has tabindex="0", the first data row', async () => {
+    const { grid } = await mount();
+
+    const stops = [...grid.querySelectorAll('[tabindex="0"]')];
+    expect(stops).toHaveLength(1);
+    expect(stops[0]?.getAttribute("role")).toBe("row");
+    expect(stops[0]?.getAttribute("aria-rowindex")).toBe("2");
+  });
+
+  it("TP-12.2 (A-338): with error() set, an error row shows the read message and Try again calls retry(); no ensurePage call", async () => {
+    const error: AppError = { kind: "unknown" };
+    const source = { ...fakeSource(), error: () => error, hasMore: () => true };
+    const { grid } = await mount(source);
+
+    const errorRow = [...grid.querySelectorAll<HTMLElement>('[role="row"]')].find((r) =>
+      r.textContent.includes("Something went wrong on our side. Try again in a moment."),
+    );
+    expect(errorRow).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+
+    expect(source.retry).toHaveBeenCalledTimes(1);
+    expect(source.ensurePage).not.toHaveBeenCalled();
+  });
+
+  it("TP-12.6x (A-340): a placeholder page in view is requested as ensurePage(floor(index / pageSize))", async () => {
+    const source = fakeSource();
+    await mount(source);
+
+    expect(source.ensurePage).toHaveBeenCalledWith(2);
   });
 
   it("TP-12.6x: an unknown totalCount gives aria-rowcount -1", async () => {

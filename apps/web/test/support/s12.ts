@@ -5,17 +5,25 @@ import type { JSX } from "solid-js";
 import type { AppError } from "./s11b.js";
 
 export interface InfiniteListSource<T> {
+  /** A-340 */
+  readonly pageSize: number;
   rowCount: () => number;
   totalCount: () => number | null;
+  /** A-340 */
+  hasMore: () => boolean;
   rowAt: (index: number) => T | undefined;
   ensurePage: (pageIndex: number) => void;
+  /** A-338 */
+  retry: () => void;
   loading: () => boolean;
   error: () => AppError | null;
 }
 
 export interface InfiniteListModule {
   createInfiniteList: <T>(opts: {
-    fetchPage: (cursor: string | null) => Promise<{ items: T[]; nextCursor: string | null }>;
+    fetchPage: (
+      cursor: string | null,
+    ) => Promise<{ items: T[]; nextCursor: string | null; totalCount?: number }>;
     pageSize: number;
     maxPagesInMemory?: number;
   }) => InfiniteListSource<T>;
