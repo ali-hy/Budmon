@@ -393,16 +393,18 @@ describe("TP-6.6: syncQueues (F-75)", () => {
       const check = String(rows[0]?.["with_check"]);
       // Each queue's pin starts "name <> '<queue>'"; split there to read them one by one.
       const pin = (queue: string): string =>
-        check
-          .split("<> '")
-          .find((part) => part.startsWith(`${queue}'`))
-          ?.split(/<> '/)[0] ?? "";
+        check.split("<> '").find((part) => part.startsWith(`${queue}'`)) ?? "";
+      // The deparsed policy pin: NOT (policy IS DISTINCT FROM (SELECT q.policy … WHERE q.name = …)).
+      const policyPin = (queue: string) =>
+        new RegExp(
+          `NOT \\((?:\\w+\\.)?policy IS DISTINCT FROM \\(\\s*SELECT q\\.policy\\s+FROM pgboss\\.queue q\\s+WHERE \\(q\\.name = '${queue.replaceAll(".", "\\.")}'::text\\)`,
+        );
 
       expect(pin("sync.d"), `${table} sync.d`).toContain("'created'");
-      expect(pin("sync.d"), `${table} sync.d`).toContain("policy");
+      expect(pin("sync.d"), `${table} sync.d`).toMatch(policyPin("sync.d"));
       expect(pin("sync.d"), `${table} sync.d`).not.toContain("singleton_key");
       expect(pin("sync.e"), `${table} sync.e`).toContain("'created'");
-      expect(pin("sync.e"), `${table} sync.e`).toContain("policy");
+      expect(pin("sync.e"), `${table} sync.e`).toMatch(policyPin("sync.e"));
       expect(pin("sync.e"), `${table} sync.e`).toContain("singleton_key");
       expect(pin("sync.a"), `${table} sync.a (not sendable)`).toBe("");
       expect(await policyQueues(db, table, "budmon_capture"), table).toMatchObject({
