@@ -1,0 +1,161 @@
+// F-142: the development object store on the filesystem, and the signed tokens of F-145's route.
+import { createHmac, timingSafeEqual } from "node:crypto";
+import { mkdir, readdir, rm, stat, writeFile } from "node:fs/promises";
+import path from "node:path";
+import { Temporal, canonicalJson, type Clock } from "@budmon/shared";
+import {
+  assertObjectKey,
+  assertObjectPrefix,
+  checkPresign,
+  isDownloadName,
+  type BucketName,
+  type ObjectStore,
+} from "./objectStore.js";
+
+/** A token's payload: bucket, key, expiry and the optional download name (A-22). */
+export interface ObjectTokenPayload {
+  b: BucketName;
+  k: string;
+  exp: number;
+  n?: string;
+}
+
+function mac(signingKey: Buffer, payloadPart: string): Buffer {
+  return createHmac("sha256", signingKey).update(payloadPart).digest();
+}
+
+export function signObjectToken(signingKey: Buffer, payload: ObjectTokenPayload): string {
+  const payloadPart = Buffer.from(canonicalJson(payload)).toString("base64url");
+  return `${payloadPart}.${mac(signingKey, payloadPart).toString("base64url")}`;
+}
+
+/**
+ * F-145's checks: the HMAC (constant time), then the payload's shape, the key rules, `exp ≥ now`
+ * and `n`'s pattern. Any failure is null.
+ */
+export function verifyObjectToken(
+  signingKey: Buffer,
+  token: string,
+  now: Temporal.Instant,
+): ObjectTokenPayload | null {
+  const parts = token.split(".");
+  if (parts.length !== 2) return null;
+  const [payloadPart = "", sigPart = ""] = parts;
+  // Compared as text: base64url's last character has unused bits, so decoding first would accept
+  // more than one spelling of the same signature.
+  const expected = Buffer.from(mac(signingKey, payloadPart).toString("base64url"));
+  const given = Buffer.from(sigPart);
+  if (given.length !== expected.length || !timingSafeEqual(given, expected)) return null;
+  let payload: unknown;
+  try {
+    payload = JSON.parse(Buffer.from(payloadPart, "base64url").toString("utf8"));
+  } catch {
+    return null;
+  }
+  if (typeof payload !== "object" || payload === null) return null;
+  const { b, k, exp, n } = payload as Record<string, unknown>;
+  if (b !== "exports" && b !== "erasure-log") return null;
+  if (typeof k !== "string" || typeof exp !== "number" || !Number.isSafeInteger(exp)) return null;
+  try {
+    assertObjectKey(b, k);
+  } catch {
+    return null;
+  }
+  if (n !== undefined && (typeof n !== "string" || !isDownloadName(n))) return null;
+  // A-290: integer epoch seconds, accepted while exp ≥ floor(now / 1000).
+  if (exp < Math.floor(now.epochMilliseconds / 1000)) return null;
+  return n === undefined ? { b, k, exp } : { b, k, exp, n };
+}
+
+/** `<root>/<bucket>/<key>`; keys are validated first, so they never leave the root. */
+export function objectPath(root: string, bucket: BucketName, key: string): string {
+  return path.join(root, bucket, ...key.split("/"));
+}
+
+function isMissing(error: unknown): boolean {
+  return (error as { code?: unknown } | null)?.code === "ENOENT";
+}
+
+async function walk(dir: string, rel: string): Promise<string[]> {
+  let entries;
+  try {
+    entries = await readdir(dir, { withFileTypes: true });
+  } catch (error) {
+    if (isMissing(error)) return [];
+    throw error;
+  }
+  const out: string[] = [];
+  for (const entry of entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
+    const childRel = rel === "" ? entry.name : `${rel}/${entry.name}`;
+    if (entry.isDirectory()) out.push(...(await walk(path.join(dir, entry.name), childRel)));
+    else if (entry.isFile()) out.push(childRel);
+  }
+  return out;
+}
+
+export function createFsObjectStore(cfg: {
+  root: string;
+  publicOrigin: URL;
+  signingKey: Buffer;
+  clock: Clock;
+}): ObjectStore {
+  /** The stored keys under `prefix` that match the bucket's key rule. */
+  const keysUnder = async (bucket: BucketName, prefix: string): Promise<string[]> => {
+    const base = path.join(cfg.root, bucket, ...prefix.split("/").filter((s) => s !== ""));
+    const rel = prefix.replace(/\/$/, "");
+    const keys = await walk(base, rel);
+    return keys.filter((key) => {
+      try {
+        assertObjectKey(bucket, key);
+        return true;
+      } catch {
+        return false;
+      }
+    });
+  };
+
+  return {
+    async put(bucket, key, body) {
+      assertObjectKey(bucket, key);
+      const file = objectPath(cfg.root, bucket, key);
+      await mkdir(path.dirname(file), { recursive: true });
+      await writeFile(file, body);
+    },
+    async delete(bucket, key) {
+      assertObjectKey(bucket, key);
+      await rm(objectPath(cfg.root, bucket, key), { force: true });
+    },
+    async deletePrefix(bucket, prefix) {
+      assertObjectPrefix(bucket, prefix);
+      const keys = await keysUnder(bucket, prefix);
+      for (const key of keys) await rm(objectPath(cfg.root, bucket, key), { force: true });
+      return keys.length;
+    },
+    async *list(bucket, prefix) {
+      assertObjectPrefix(bucket, prefix);
+      for (const key of await keysUnder(bucket, prefix)) {
+        let mtimeNs: bigint;
+        try {
+          mtimeNs = (await stat(objectPath(cfg.root, bucket, key), { bigint: true })).mtimeNs;
+        } catch (error) {
+          if (isMissing(error)) continue;
+          throw error;
+        }
+        // A-292: the exact mtime, not rounded.
+        yield { key, lastModified: Temporal.Instant.fromEpochNanoseconds(mtimeNs) };
+      }
+    },
+    presignGet(bucket, key, ttlSeconds, opts = {}) {
+      const ttl = checkPresign(bucket, key, ttlSeconds, opts);
+      // A-290: integer epoch seconds.
+      const exp = Math.floor(cfg.clock.now().epochMilliseconds / 1000) + ttl;
+      const token = signObjectToken(cfg.signingKey, {
+        b: bucket,
+        k: key,
+        exp,
+        ...(opts.downloadName === undefined ? {} : { n: opts.downloadName }),
+      });
+      return Promise.resolve(new URL(`/dev/objects/${token}`, cfg.publicOrigin));
+    },
+  };
+}

@@ -36,6 +36,7 @@ import {
 import { appRouter } from "./appRouter.js";
 import { clientVersionMiddleware, parseClientHeader } from "./clientVersion.js";
 import type { RequestContext } from "./context.js";
+import { registerDevObjectsRoute } from "./devObjects.js";
 import { registerHealthRoutes } from "./health.js";
 import { registerCoarseRateLimit } from "../security/rateLimiter.js";
 
@@ -274,6 +275,17 @@ export async function createApiServer(
     return reply;
   });
   app.setNotFoundHandler((_request, reply) => reply.code(404).send(NOT_FOUND));
+
+  // 6. In development only, F-145's dev objects route for the filesystem store's URLs.
+  const store = c.config.objectStore;
+  const devObjectsKey = api?.devObjectsKey;
+  if (c.config.appEnv === "development" && store?.kind === "fs" && devObjectsKey !== undefined) {
+    registerDevObjectsRoute(app, {
+      root: store.root,
+      signingKey: devObjectsKey.reveal(),
+      clock: c.clock,
+    });
+  }
 
   // 7. The request log.
   registerRequestLog(

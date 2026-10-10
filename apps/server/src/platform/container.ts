@@ -25,6 +25,10 @@ import {
   type FxProviders,
 } from "./fx/providers.js";
 import { noAuthHook, type AuthHook } from "./http/context.js";
+import { createErasureLog, type ErasureHandler, type ErasureLog } from "./storage/erasureLog.js";
+import { createFsObjectStore } from "./storage/fsObjectStore.js";
+import type { ObjectStore } from "./storage/objectStore.js";
+import { createS3ObjectStore } from "./storage/s3ObjectStore.js";
 import type { ErrorReporter } from "./observability/errorReporter.js";
 import { createLogger, type Logger } from "./observability/logger.js";
 import {
@@ -59,7 +63,7 @@ export interface BaseContainer {
 }
 
 /** A-26 (F-146): what erasing a user means for the modules; null until a module provides it. */
-export type ErasureHandler = (userId: string) => Promise<void>;
+export type { ErasureHandler } from "./storage/erasureLog.js";
 
 export interface WorkerContainer extends BaseContainer {
   roles: ReadonlySet<WorkerRole>;
@@ -78,6 +82,10 @@ export interface WorkerContainer extends BaseContainer {
   fx: FxService;
   /** F-133 (S-9): general role only. */
   fxProviders: FxProviders | null;
+  /** F-140 (S-10): general role only. */
+  objectStore: ObjectStore | null;
+  /** F-146 (S-10): general role only, on objectStore. */
+  erasureLog: ErasureLog | null;
 }
 
 export interface ApiContainer extends BaseContainer {
@@ -96,6 +104,8 @@ export interface ApiContainer extends BaseContainer {
   moduleRoutes: ((app: FastifyInstance) => void)[];
   /** F-132 (S-9). */
   fx: FxService;
+  /** F-140 (S-10). */
+  objectStore: ObjectStore;
 }
 
 function platformMetrics(): PlatformMetrics {
@@ -190,6 +200,37 @@ function fxProvidersFor(config: Config): FxProviders | null {
   };
 }
 
+/**
+ * F-141/F-142 from config.objectStore. The filesystem store signs with the API's development key
+ * (F-145 verifies with it); without one, its presignGet refuses.
+ */
+function objectStoreFor(
+  config: Config,
+  base: BaseCore,
+  fs: { publicOrigin: URL | undefined; signingKey: Buffer | undefined },
+): ObjectStore | null {
+  const store = config.objectStore;
+  if (store === undefined) return null;
+  if (store.kind === "s3") return createS3ObjectStore(store);
+  const { publicOrigin, signingKey } = fs;
+  if (publicOrigin !== undefined && signingKey !== undefined) {
+    return createFsObjectStore({ root: store.root, publicOrigin, signingKey, clock: base.clock });
+  }
+  // TODO(S-10, raised with the planner): F-96 gives a filesystem store no signing key outside a
+  // development API, so its presigned URLs couldn't be served; refuse them instead.
+  const unsigned = createFsObjectStore({
+    root: store.root,
+    publicOrigin: publicOrigin ?? new URL("http://localhost"),
+    signingKey: Buffer.alloc(32),
+    clock: base.clock,
+  });
+  return {
+    ...unsigned,
+    presignGet: () =>
+      Promise.reject(new Error("presigned URLs need the development API's signing key")),
+  };
+}
+
 /** F-96 step 5 (A-266): every rates-added subscriber is the registry's own definition. */
 function assertFxSubscribersRegistered<C extends { fx: FxService; registry: JobRegistry }>(
   c: C,
@@ -219,10 +260,18 @@ export function createApiContainer(
   const registry = overrides.registry ?? buildJobRegistry();
   const boss = overrides.boss ?? createPgBoss(config, "send-only", base.logger);
   const queue = overrides.queue ?? createJobQueue({ boss, registry });
+  const objectStore =
+    overrides.objectStore ??
+    objectStoreFor(config, base, {
+      publicOrigin: config.api?.publicOrigin,
+      signingKey: config.api?.devObjectsKey?.reveal(),
+    });
+  if (objectStore === null) throw new Error("object store config required");
   return assertFxSubscribersRegistered({
     ...base,
     registry,
     boss,
+    objectStore,
     queue,
     fx: overrides.fx ?? fxServiceFor(base, queue),
     sealedColumns: overrides.sealedColumns ?? createSealedColumnRegistry(),
@@ -304,9 +353,25 @@ export function createWorkerContainer(
   // Checked above: at least one role, so at least one instance.
   const boss = overrides.boss ?? ((queueBoss ?? captureBoss) as PgBoss);
   const queue = overrides.queue ?? createJobQueue({ boss, registry });
+  const objectStore =
+    overrides.objectStore !== undefined
+      ? overrides.objectStore
+      : roles.has("general")
+        ? objectStoreFor(config, base, {
+            publicOrigin: config.email?.publicOrigin,
+            signingKey: undefined,
+          })
+        : null;
   return assertFxSubscribersRegistered({
     ...base,
     roles,
+    objectStore,
+    erasureLog:
+      overrides.erasureLog !== undefined
+        ? overrides.erasureLog
+        : objectStore === null
+          ? null
+          : createErasureLog(objectStore),
     registry,
     boss,
     queue,

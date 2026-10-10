@@ -7,6 +7,7 @@ import type { Logger } from "../observability/logger.js";
 import { defineJob } from "../queue/jobs.js";
 import type { JobHandler } from "../queue/workers.js";
 import { deleteExpired } from "../security/rateLimitRepo.js";
+import { purgeExpiredExports } from "../storage/exportsPurge.js";
 
 const empty = z.object({});
 
@@ -24,11 +25,19 @@ export const rateLimitPurgeJob = defineJob({
   cron: "*/10 * * * *",
 });
 
-/**
- * The maintenance definitions. `platform.exports-purge` (cron `15 * * * *`) joins with its
- * handler, F-144, in a later slice: a registered job without a handler stops the worker (F-78).
- */
-export const platformMaintenanceJobs = [idempotencyPurgeJob, rateLimitPurgeJob] as const;
+/** A-215: registered with F-144's handler (S-10). */
+export const exportsPurgeJob = defineJob({
+  name: "platform.exports-purge",
+  role: "general",
+  payload: empty,
+  cron: "15 * * * *",
+});
+
+export const platformMaintenanceJobs = [
+  idempotencyPurgeJob,
+  rateLimitPurgeJob,
+  exportsPurgeJob,
+] as const;
 
 interface PurgeDeps {
   database: Database;
@@ -83,6 +92,14 @@ export function maintenanceHandlers(c: WorkerContainer): ReadonlyMap<string, Job
       rateLimitPurgeJob.name,
       async (_payload, ctx) => {
         await purgeRateLimitCounters(deps(ctx.logger));
+      },
+    ],
+    [
+      exportsPurgeJob.name,
+      async (_payload, ctx) => {
+        // General-only member; the job is general, so it's present wherever this runs.
+        if (c.objectStore === null) throw new Error("exports purge needs the general role");
+        await purgeExpiredExports({ store: c.objectStore, clock: c.clock, logger: ctx.logger });
       },
     ],
   ]);
