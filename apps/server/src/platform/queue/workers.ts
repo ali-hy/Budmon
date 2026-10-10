@@ -19,8 +19,10 @@ export class MissingQueueError extends Error {
 }
 
 /**
- * F-77. send-only (api) and capture use the configured database login (`budmon_app` for the api,
- * `budmon_capture` for worker-capture); general uses the queue login, `budmon_queue`.
+ * F-77. send-only (the api) uses the configured database login (`budmon_app`); general and cli use
+ * the queue login (`budmon_queue`). capture uses `budmon_capture` (DB_USER) in a capture-only
+ * worker, and the queue login when the worker also runs general (A-299); only the login changes,
+ * so its pool and instance registration stay capture's.
  */
 export function createPgBoss(
   cfg: Config,
@@ -43,7 +45,7 @@ export function createPgBoss(
           user: queue.user,
           password: queue.password.reveal(),
           // A-218: a one-off command needs only a small pool.
-          max: mode === "cli" ? 2 : queue.poolMax,
+          max: mode === "cli" ? 2 : mode === "capture" ? 3 : queue.poolMax,
         }
       : {
           user: cfg.db.user,
@@ -68,7 +70,7 @@ export function createPgBoss(
     schedule: mode === "general",
     // The instance registry prunes with DELETE, which only the schema's owner (budmon_queue) has
     // (F-74 grants budmon_app and budmon_capture SELECT, INSERT and UPDATE).
-    registerInstance: queueLogin,
+    registerInstance: mode === "general" || mode === "cli",
   });
   boss.on("error", (error) => {
     logger?.error("queue_error", describeFailure(error), error);

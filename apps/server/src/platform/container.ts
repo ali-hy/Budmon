@@ -211,8 +211,9 @@ function objectStoreFor(
 ): ObjectStore | null {
   const store = config.objectStore;
   if (store === undefined) return null;
-  if (store.kind === "s3") return createS3ObjectStore(store);
+  if (store.kind === "s3") return createS3ObjectStore(store, { logger: base.logger });
   return createFsObjectStore({
+    logger: base.logger,
     root: store.root,
     publicOrigin: fs.publicOrigin,
     signingKey: fs.signingKey,

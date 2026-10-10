@@ -53,6 +53,10 @@ export function assertObjectKey(bucket: BucketName, key: string): void {
   if (!KEY_PATTERNS[bucket].test(key)) throw new RangeError(`invalid ${bucket} key`);
 }
 
+export function isObjectKey(bucket: BucketName, key: string): boolean {
+  return KEY_PATTERNS[bucket].test(key);
+}
+
 /** Prefixes: `users/<uuid>/` or `users/` (exports), `records/` (erasure-log). */
 export function assertObjectPrefix(bucket: BucketName, prefix: string): void {
   if (!PREFIX_PATTERNS[bucket].some((p) => p.test(prefix))) {
@@ -81,6 +85,18 @@ export function checkPresign(
     throw new RangeError("invalid downloadName");
   }
   return ttlSeconds;
+}
+
+/**
+ * Runs a synchronous store operation as a promise, so a validation error rejects (as every
+ * F-140 method declares) instead of throwing at the call.
+ */
+export function settle<T>(run: () => T): Promise<T> {
+  try {
+    return Promise.resolve(run());
+  } catch (error) {
+    return Promise.reject(error instanceof Error ? error : new Error("store operation failed"));
+  }
 }
 
 /** A-22: the download's Content-Disposition. */

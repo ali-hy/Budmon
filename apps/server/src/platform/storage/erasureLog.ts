@@ -59,10 +59,15 @@ export function createErasureLog(store: ObjectStore): ErasureLog {
       );
     },
     async listSince(since) {
+      // A-305: keys hold whole seconds, so `since` is truncated to its second; replay is
+      // idempotent, so up to one extra second of records is harmless.
+      const from = Temporal.Instant.fromEpochMilliseconds(
+        Math.floor(since.epochMilliseconds / 1000) * 1000,
+      );
       const records: ErasureRecord[] = [];
       for await (const entry of store.list("erasure-log", "records/")) {
         const record = recordOf(entry.key);
-        if (record !== null && Temporal.Instant.compare(record.erasedAt, since) >= 0) {
+        if (record !== null && Temporal.Instant.compare(record.erasedAt, from) >= 0) {
           records.push(record);
         }
       }

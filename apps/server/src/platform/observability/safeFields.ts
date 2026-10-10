@@ -28,6 +28,7 @@ export const SAFE_LOG_FIELDS = Object.freeze(
       "limiter",
       "signal",
       "reason",
+      "bucket",
     ]),
     ...kinds("route", ["route"]),
     ...kinds("count", [
@@ -72,6 +73,7 @@ export type SafeFieldName =
   | "limiter"
   | "signal"
   | "reason"
+  | "bucket"
   | "route"
   | "status"
   | "count"
@@ -90,7 +92,8 @@ export type SafeFieldName =
 export type SafeFields = Partial<Record<SafeFieldName, string | number | boolean>>;
 
 export const TOKEN = /^[A-Za-z0-9_.:-]{1,64}$/;
-export const ROUTE = /^\/[A-Za-z0-9_./:{}-]{0,200}$/;
+/** A-308: one trailing `/*` is allowed (a wildcard route's template, never the matched value). */
+export const ROUTE = /^\/[A-Za-z0-9_./:{}-]{0,200}(\/\*)?$/;
 const UUID_LIKE = /[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/;
 const LONG_DIGITS = /\d{5}/;
 

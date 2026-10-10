@@ -11,11 +11,13 @@ import {
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { Temporal } from "@budmon/shared";
 import type { Config } from "../config/schema.js";
+import type { Logger } from "../observability/logger.js";
 import {
   assertObjectKey,
   assertObjectPrefix,
   checkPresign,
   contentDisposition,
+  isObjectKey,
   ObjectStoreError,
   type BucketName,
   type ObjectStore,
@@ -45,7 +47,10 @@ async function mapped<T>(run: () => Promise<T>): Promise<T> {
   }
 }
 
-export function createS3ObjectStore(cfg: S3Config, deps: { client?: S3Client } = {}): ObjectStore {
+export function createS3ObjectStore(
+  cfg: S3Config,
+  deps: { logger: Logger; client?: S3Client },
+): ObjectStore {
   const client =
     deps.client ??
     new S3Client({
@@ -67,6 +72,7 @@ export function createS3ObjectStore(cfg: S3Config, deps: { client?: S3Client } =
     prefix: string,
   ): AsyncGenerator<{ key: string; lastModified: Temporal.Instant }> {
     let token: string | undefined;
+    let skipped = 0;
     do {
       const page = await mapped(() =>
         client.send(
@@ -80,6 +86,11 @@ export function createS3ObjectStore(cfg: S3Config, deps: { client?: S3Client } =
       );
       for (const object of page.Contents ?? []) {
         if (object.Key === undefined || object.LastModified === undefined) continue;
+        // A-306: a stray key would make callers' delete throw; skip it, counted.
+        if (!isObjectKey(bucket, object.Key)) {
+          skipped += 1;
+          continue;
+        }
         yield {
           key: object.Key,
           lastModified: Temporal.Instant.fromEpochMilliseconds(object.LastModified.getTime()),
@@ -87,6 +98,8 @@ export function createS3ObjectStore(cfg: S3Config, deps: { client?: S3Client } =
       }
       token = page.IsTruncated === true ? page.NextContinuationToken : undefined;
     } while (token !== undefined);
+    // A-306: the count only, never the keys.
+    if (skipped > 0) deps.logger.warn("object_keys_skipped", { bucket, count: skipped });
   }
 
   return {

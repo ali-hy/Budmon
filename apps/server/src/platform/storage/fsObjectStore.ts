@@ -3,11 +3,14 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { mkdir, readdir, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { Temporal, canonicalJson, type Clock } from "@budmon/shared";
+import type { Logger } from "../observability/logger.js";
 import {
   assertObjectKey,
   assertObjectPrefix,
   checkPresign,
   isDownloadName,
+  isObjectKey,
+  settle,
   type BucketName,
   type ObjectStore,
 } from "./objectStore.js";
@@ -99,20 +102,19 @@ export function createFsObjectStore(cfg: {
   /** A-303: null outside the API, where presignGet isn't supported. */
   signingKey: Buffer | null;
   clock: Clock;
+  /** A-306: reports keys a listing skipped. */
+  logger: Logger;
 }): ObjectStore {
   /** The stored keys under `prefix` that match the bucket's key rule. */
   const keysUnder = async (bucket: BucketName, prefix: string): Promise<string[]> => {
     const base = path.join(cfg.root, bucket, ...prefix.split("/").filter((s) => s !== ""));
     const rel = prefix.replace(/\/$/, "");
     const keys = await walk(base, rel);
-    return keys.filter((key) => {
-      try {
-        assertObjectKey(bucket, key);
-        return true;
-      } catch {
-        return false;
-      }
-    });
+    const valid = keys.filter((key) => isObjectKey(bucket, key));
+    const skipped = keys.length - valid.length;
+    // A-306: the count only, never the keys.
+    if (skipped > 0) cfg.logger.warn("object_keys_skipped", { bucket, count: skipped });
+    return valid;
   };
 
   return {
@@ -146,18 +148,21 @@ export function createFsObjectStore(cfg: {
         yield { key, lastModified: Temporal.Instant.fromEpochNanoseconds(mtimeNs) };
       }
     },
-    presignGet(bucket, key, ttlSeconds, opts = {}) {
-      const ttl = checkPresign(bucket, key, ttlSeconds, opts);
-      if (cfg.signingKey === null) throw new TypeError("presignGet needs the API's signing key");
-      // A-290: integer epoch seconds.
-      const exp = Math.floor(cfg.clock.now().epochMilliseconds / 1000) + ttl;
-      const token = signObjectToken(cfg.signingKey, {
-        b: bucket,
-        k: key,
-        exp,
-        ...(opts.downloadName === undefined ? {} : { n: opts.downloadName }),
-      });
-      return Promise.resolve(new URL(`/dev/objects/${token}`, cfg.publicOrigin));
-    },
+    presignGet: (bucket, key, ttlSeconds, opts = {}) =>
+      settle(() => {
+        const ttl = checkPresign(bucket, key, ttlSeconds, opts);
+        if (cfg.signingKey === null) {
+          throw new TypeError("presignGet needs the API's signing key");
+        }
+        // A-290: integer epoch seconds.
+        const exp = Math.floor(cfg.clock.now().epochMilliseconds / 1000) + ttl;
+        const token = signObjectToken(cfg.signingKey, {
+          b: bucket,
+          k: key,
+          exp,
+          ...(opts.downloadName === undefined ? {} : { n: opts.downloadName }),
+        });
+        return new URL(`/dev/objects/${token}`, cfg.publicOrigin);
+      }),
   };
 }
