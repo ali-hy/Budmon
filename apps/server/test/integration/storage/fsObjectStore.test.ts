@@ -15,10 +15,12 @@ import {
   EXPORT_ID,
   USER,
   exportKey,
+  failure,
   keysOf,
   objectStoreOf,
   type ObjectStore,
 } from "../../support/s10.js";
+import { buildWorkerContainer } from "../../support/worker.js";
 
 const NOW = "2026-10-07T12:00:00Z";
 const NOT_FOUND = { defined: true, code: "NOT_FOUND", status: 404, message: "Not found" };
@@ -183,6 +185,28 @@ describe("TP-10.2: the development objects route (F-145, A-22)", () => {
     expect(res.json()).toEqual(NOT_FOUND);
   });
 
+  it("TP-10.2 (A-304): a 100-character downloadName (a token over 100 characters) is served with that name", async () => {
+    const name = `${"a".repeat(96)}.zip`;
+    const url = await store.presignGet("exports", exportKey(), 600, { downloadName: name });
+
+    const res = await app.inject({ method: "GET", url: url.pathname });
+
+    expect(url.pathname.length - "/dev/objects/".length).toBeGreaterThan(100);
+    expect(res.statusCode).toBe(200);
+    expect(res.headers["content-disposition"]).toBe(`attachment; filename="${name}"`);
+  });
+
+  it.each([
+    ["a token with a slash", "/dev/objects/a/b"],
+    ["an empty token", "/dev/objects/"],
+    ["a 2049-character token", `/dev/objects/${"a".repeat(2049)}`],
+  ])("TP-10.2 (A-304): %s is a 404 NOT_FOUND envelope", async (_label, url) => {
+    const res = await injectJson(app, "GET", url);
+
+    expect(res.status).toBe(404);
+    expect(res.json()).toEqual(NOT_FOUND);
+  });
+
   // Last: it moves the shared clock past the expiry.
   it("TP-10.2: GET after expiry is a 404 NOT_FOUND envelope", async () => {
     const url = await store.presignGet("exports", exportKey(), 60);
@@ -192,5 +216,50 @@ describe("TP-10.2: the development objects route (F-145, A-22)", () => {
 
     expect(res.status).toBe(404);
     expect(res.json()).toEqual(NOT_FOUND);
+  });
+});
+
+describe("TP-10.2 (A-303): only the API presigns fs objects", () => {
+  it("TP-10.2 (A-303): an API with APP_ENV=test and the fs store presigns, and GET is 200", async () => {
+    const testRoot = mkdtempSync(path.join(tmpdir(), "budmon-objects-test-env-"));
+    const api = await buildApiContainer(
+      {},
+      { APP_ENV: "test", OBJECT_STORE_KIND: "fs", OBJECT_STORE_FS_ROOT: testRoot },
+      () => {
+        const f = devApi();
+        withFile(f, "DEV_OBJECTS_SIGNING_KEY_FILE", signingKey.toString("base64"));
+        return f;
+      },
+    );
+    const server = await createApiServer(api.container);
+    try {
+      const s = objectStoreOf(api.container);
+      if (s === null) throw new Error("the api container has no objectStore");
+      await s.put("exports", exportKey(), Buffer.from("test-env"), "application/zip");
+      const url = await s.presignGet("exports", exportKey(), 600);
+
+      const res = await server.inject({ method: "GET", url: url.pathname });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body).toBe("test-env");
+    } finally {
+      await server.close();
+      await api.close();
+      rmSync(testRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("TP-10.2 (A-303): a worker container's fs store presignGet throws TypeError", async () => {
+    const worker = await buildWorkerContainer("general");
+    try {
+      const s = objectStoreOf(worker.container);
+      if (s === null) throw new Error("the general worker has no objectStore");
+
+      expect(await failure(() => s.presignGet("exports", exportKey(), 600))).toBeInstanceOf(
+        TypeError,
+      );
+    } finally {
+      await worker.close();
+    }
   });
 });
