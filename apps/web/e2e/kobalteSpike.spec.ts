@@ -89,5 +89,8 @@ test('TP-11.28: "Actions" opens with Enter; ArrowDown to Delete and Enter sets "
   await page.keyboard.press("Enter");
 
   await expect(menu).toBeHidden();
-  await expect(page.getByRole("status")).toHaveText("Picked: Delete");
+  // A-373: other status regions (the offline banner's) are always mounted, so find this one by text.
+  await expect(page.getByRole("status").filter({ hasText: "Picked:" })).toHaveText(
+    "Picked: Delete",
+  );
 });

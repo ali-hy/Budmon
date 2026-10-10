@@ -74,6 +74,8 @@ export default defineConfig({
           environment: "jsdom",
           include: ["test/**/*.test.{ts,tsx}"],
           globalSetup: ["test/setup/pseudoLocales.ts"],
+          // Unmounts renders after each test (globals are off, so the library can't do it itself).
+          setupFiles: ["test/setup/cleanup.ts"],
           env: { VITE_PSEUDO_LOCALES: "1" },
           server: { deps: { inline: [/[\\/]msw[\\/]/, /@mswjs[\\/]interceptors/] } },
         },

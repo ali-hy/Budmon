@@ -52,6 +52,26 @@ describe("TP-11.13: offline and back online (F-211)", () => {
     expect(plain(container.textContent)).not.toMatch(/You're offline\.|Back online\./);
   });
 
+  // A-373: the live region is permanent (empty while online), so its first message is announced.
+  it("TP-11.13 (A-373): before going offline, the empty role=status region (aria-live polite) is already in the DOM, and stays after Back online. clears", async () => {
+    const { OfflineBanner } = await loadOfflineBanner();
+    const { container } = renderWithI18n(() => <OfflineBanner />);
+    await vi.advanceTimersByTimeAsync(0);
+
+    const regions = [...container.querySelectorAll<HTMLElement>('[role="status"]')];
+    expect(regions).toHaveLength(1);
+    const region = regions[0];
+    expect(region?.getAttribute("aria-live")).toBe("polite");
+    expect(plain(region?.textContent)).toBe("");
+
+    await go(false);
+    expect(container.querySelector('[role="status"]')).toBe(region);
+    await go(true);
+    await vi.advanceTimersByTimeAsync(3_100);
+    expect(container.querySelector('[role="status"]')).toBe(region);
+    expect(plain(region?.textContent)).toBe("");
+  });
+
   it("TP-11.13: mounted while navigator.onLine is false, the banner shows You're offline.", async () => {
     online = false;
     const { OfflineBanner } = await loadOfflineBanner();

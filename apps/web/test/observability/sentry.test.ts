@@ -17,6 +17,7 @@ interface InitOptions {
   release?: string;
   environment?: string;
   sendDefaultPii?: boolean;
+  dataCollection?: Record<string, unknown>;
   integrations?: unknown;
   beforeSend?: (e: Record<string, unknown>, hint?: unknown) => unknown;
   beforeBreadcrumb?: (b: Record<string, unknown>, hint?: unknown) => unknown;
@@ -38,7 +39,12 @@ async function initOptions(): Promise<InitOptions> {
 function integrationNames(integrations: unknown): string[] {
   const list: unknown =
     typeof integrations === "function"
-      ? (integrations as (d: unknown[]) => unknown)([])
+      ? // Defaults that include what must be removed, so the filter is exercised.
+        (integrations as (d: unknown[]) => unknown)([
+          { name: "Breadcrumbs" },
+          { name: "Replay" },
+          { name: "BrowserTracing" },
+        ])
       : integrations;
   return Array.isArray(list)
     ? list.map((i) => {
@@ -79,22 +85,38 @@ describe("TP-11.25: web Sentry scrubbing (F-217)", () => {
     expect(JSON.stringify(scrubbed)).not.toContain(CANARY);
   });
 
-  it("TP-11.25: init options: sendDefaultPii false, no Replay, beforeSend scrubs", async () => {
+  it("TP-11.25 (A-371): init options: dataCollection with every flag off, no sendDefaultPii key, no Replay or browser tracing, release and environment as given, beforeSend and beforeBreadcrumb set", async () => {
     const options = await initOptions();
 
-    expect(options.sendDefaultPii).toBe(false);
     expect(options.dsn).toBe("https://k@o1.ingest.sentry.io/2");
     expect(options.release).toBe("web@7");
     expect(options.environment).toBe("test");
-    expect(integrationNames(options.integrations).filter((n) => /replay/i.test(n))).toEqual([]);
-    expect(integrationNames(options.integrations).filter((n) => /tracing/i.test(n))).toEqual([]);
+    expect(Object.keys(options)).not.toContain("sendDefaultPii");
+    const collection = options.dataCollection;
+    expect(collection).toBeDefined();
+    for (const [flag, value] of Object.entries(collection ?? {})) {
+      const off = value === false || value === 0 || (Array.isArray(value) && value.length === 0);
+      expect(off, `dataCollection.${flag} = ${JSON.stringify(value)}`).toBe(true);
+    }
+    const names = integrationNames(options.integrations);
+    expect(names.filter((n) => /replay|tracing/i.test(n))).toEqual([]);
     expect(options.replaysSessionSampleRate ?? 0).toBe(0);
     expect(options.replaysOnErrorSampleRate ?? 0).toBe(0);
+    expect(options.beforeSend).toBeTypeOf("function");
+    expect(options.beforeBreadcrumb).toBeTypeOf("function");
 
     const sent = options.beforeSend?.({
       request: { url: `https://budmon.example/x?q=${CANARY}` },
     });
     expect(JSON.stringify(sent)).not.toContain(CANARY);
+  });
+
+  it("TP-11.25 (A-371): without a DSN, init isn't called", async () => {
+    const { initWebSentry } = await loadSentry();
+
+    initWebSentry({ release: "web@7", environment: "test" });
+
+    expect(sentry.init).not.toHaveBeenCalled();
   });
 
   it("TP-11.32x: beforeBreadcrumb keeps navigation and fetch/xhr with the URL path only, and drops other categories", async () => {

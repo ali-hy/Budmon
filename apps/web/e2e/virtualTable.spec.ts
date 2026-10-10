@@ -53,7 +53,10 @@ test("TP-12.3: Tab lands on row 2; ArrowDown ×3 and End move focus in view; Ent
   expect(last.row).toBe(lastLoaded);
 
   await page.keyboard.press("Enter");
-  await expect(page.getByRole("status")).toHaveText(`Activated row ${String(last.row - 2)}`);
+  // A-373: located by its text; the offline banner's status region is always mounted too.
+  await expect(page.getByRole("status").filter({ hasText: "Activated row" })).toHaveText(
+    `Activated row ${String(last.row - 2)}`,
+  );
 
   await page.keyboard.press("ArrowRight");
   expect(await focused(page)).toMatchObject({ row: last.row, col: 1 });

@@ -1,14 +1,21 @@
 // F-204 createQueryClient: retry rules for queries and mutations. TP-11.4, plus extra cases
 // TP-11.32x. IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   type QueryClient,
   definedError,
+  loadOrpcClient,
   loadQueryClient,
   loadSolidQuery,
 } from "../support/s11b.js";
 
 let client: QueryClient | undefined;
+
+// Load every module before any test fakes timers: a cold dynamic import under fake timers can
+// finish after runAllTimersAsync has already run out of timers, so the first retry never fires.
+beforeAll(async () => {
+  await Promise.all([loadOrpcClient(), loadQueryClient(), loadSolidQuery()]);
+});
 
 beforeEach(() => {
   vi.useFakeTimers();
