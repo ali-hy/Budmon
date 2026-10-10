@@ -1,9 +1,10 @@
 // tools/ci/tagRelease.sh (stage-0 tagging, §4.17, D-12). TP-14.10 (script part): against a fixture
 // repository with an origin, tags v1.2.0 and v1.2.0-hotfix.1, and stub gh and pnpm on PATH.
 //
-// Assumed: the modes are spelled `release` and `hotfix` (§4.17 says `<mode>`), and the script reads
-// the pull request with real gh fields (state, headRefName, baseRefName, headRefOid, mergeCommit),
-// which the stub serves for any `gh pr view … --json` (through jq when `--jq` is given).
+// A-365: the modes are `release` and `hotfix` (any other exits 64 with usage); the script reads the
+// pull request with gh fields state, headRefName, baseRefName, headRefOid and mergeCommit (merge
+// commit `mergeCommit.oid`), which the stub serves for any `gh pr view … --json` (through jq when
+// `--jq` is given); checks are green when `gh pr checks <pr> --required` exits 0.
 import { execFileSync, spawnSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -36,9 +37,13 @@ if [ "$1" = "pr" ] && [ "$2" = "view" ]; then
   if [ -n "$jqexpr" ]; then jq -r "$jqexpr" "$PR_JSON"; else cat "$PR_JSON"; fi
   exit 0
 fi
-if [ "$1" = "pr" ] && [ "$2" = "checks" ]; then
-  echo "checks: exit $GH_CHECKS_EXIT"
-  exit "$GH_CHECKS_EXIT"
+if [ "$1" = "pr" ] && [ "$2" = "checks" ] && [ "$3" = "7" ]; then
+  for a in "$@"; do
+    if [ "$a" = "--required" ]; then
+      echo "checks: exit $GH_CHECKS_EXIT"
+      exit "$GH_CHECKS_EXIT"
+    fi
+  done
 fi
 echo "stub gh: unsupported: $*" >&2
 exit 2
@@ -228,6 +233,15 @@ describe("TP-14.10: tagRelease.sh, hotfix mode", () => {
     expect(r.remoteTag("v1.2.0-hotfix.2")).toBe(f.commits.head2);
   }, 60_000);
 
+  it("TP-14.10 (e) (A-365): the checks come from gh pr checks 7 --required", () => {
+    const f = fixture();
+
+    const r = run(f, "hotfix", hotfixPr(f));
+
+    expect(r.status, r.output).toBe(0);
+    expect(r.log).toMatch(/^gh pr checks 7 .*--required/m);
+  }, 60_000);
+
   it("TP-14.10 (f): the head built on v1.2.0 only: exit 1, not built on v1.2.0-hotfix.1", () => {
     const f = fixture();
 
@@ -273,5 +287,24 @@ describe("TP-14.10: tagRelease.sh, hotfix mode", () => {
 
     expect(r.status).toBe(1);
     expect(r.output).toContain("branch name invalid");
+  }, 60_000);
+});
+
+describe("TP-14.10 (A-365): tagRelease.sh modes", () => {
+  it("TP-14.10: tagRelease.sh deploy 12 exits 64 with the usage text, and pushes nothing", () => {
+    const f = fixture();
+    const before = execFileSync("git", ["ls-remote", "--tags", f.origin], { encoding: "utf8" });
+
+    const r = spawnSync("bash", [SCRIPT, "deploy", "12"], {
+      cwd: f.work,
+      encoding: "utf8",
+      env: { ...process.env, ...GIT_ENV, PATH: `${stubs}:${process.env["PATH"] ?? ""}` },
+    });
+
+    expect(r.status, `${r.stdout}${r.stderr}`).toBe(64);
+    expect(`${r.stdout}${r.stderr}`.toLowerCase()).toContain("usage");
+    expect(execFileSync("git", ["ls-remote", "--tags", f.origin], { encoding: "utf8" })).toBe(
+      before,
+    );
   }, 60_000);
 });

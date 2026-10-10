@@ -235,3 +235,27 @@ describe("TP-0.30: root ignores cover .claude (A-318)", () => {
     expect(lines.some((line) => line === ".claude" || line === ".claude/")).toBe(true);
   });
 });
+
+// TP-0.33 (A-360): build outputs stay ignored, but a source package named `build` doesn't.
+describe("TP-0.33: .gitignore keeps source packages named build (A-360)", () => {
+  const TESTKIT = "apps/android/app/src/test/java/com/budmon/app/build";
+
+  it(`TP-0.33: ${TESTKIT}/AgpPaths.kt isn't ignored`, () => {
+    expect(isIgnored(`${TESTKIT}/AgpPaths.kt`)).toBe(false);
+  });
+
+  it.each([["apps/android/app/build/x"], ["apps/web/build/x"], ["build/x"]])(
+    "TP-0.33: %s is ignored",
+    (relative) => {
+      expect(isIgnored(relative)).toBe(true);
+    },
+  );
+
+  it("TP-0.33: git ls-files lists AgpPaths.kt and BuildPropertiesTest.kt", () => {
+    const tracked = git("ls-files", "--", `${TESTKIT}/`).split("\n");
+
+    expect(tracked).toEqual(
+      expect.arrayContaining([`${TESTKIT}/AgpPaths.kt`, `${TESTKIT}/BuildPropertiesTest.kt`]),
+    );
+  });
+});

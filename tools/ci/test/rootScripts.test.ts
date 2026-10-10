@@ -62,6 +62,8 @@ const SERVER_SCRIPTS: Readonly<Record<string, string>> = {
   "db:pending-report": "tsx tools/releaseMigration.ts pending",
   "db:check-migrations": "tsx tools/checkMigrations.ts",
   "db:check-risky": "tsx tools/checkRisky.ts",
+  // A-368: F-183 runs through the package script.
+  "test:upgrade": "tsx test/upgrade/harness.ts",
 };
 
 function rootScripts(): Record<string, unknown> {

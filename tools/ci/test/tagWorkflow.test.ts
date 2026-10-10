@@ -1,5 +1,6 @@
 // Stage-0 tagging (§4.17 "Stage-0 tagging", D-12): .github/workflows/tag.yml's structure. TP-14.10
-// (workflow part). actionlint isn't installed here; it arrives with S-15's infra-lint job.
+// (workflow part), with actionlint 1.7.12 through tools/ci/setup-actionlint.sh (A-367).
+import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -85,4 +86,21 @@ describe("TP-14.10: tag.yml (stage 0)", () => {
       }
     }
   });
+});
+
+describe("TP-14.10 (A-367): actionlint on tag.yml", () => {
+  it("TP-14.10: actionlint 1.7.12 (tools/ci/setup-actionlint.sh) passes on tag.yml", () => {
+    const setup = spawnSync("bash", [path.join(ROOT, "tools/ci/setup-actionlint.sh")], {
+      cwd: ROOT,
+      encoding: "utf8",
+    });
+    expect(setup.status, `${setup.stdout}${setup.stderr}`).toBe(0);
+
+    const lint = spawnSync(
+      path.join(ROOT, ".tools/actionlint/actionlint"),
+      ["-shellcheck=", "-pyflakes=", ".github/workflows/tag.yml"],
+      { cwd: ROOT, encoding: "utf8" },
+    );
+    expect(lint.status, `${lint.stdout}${lint.stderr}`).toBe(0);
+  }, 120_000);
 });

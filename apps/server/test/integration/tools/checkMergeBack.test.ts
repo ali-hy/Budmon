@@ -1,9 +1,11 @@
-// F-6b checkMergeBack (hotfix merge-back check). TP-14.9. The fixture project is a throwaway copy of
+// F-6b checkMergeBack (hotfix and infra merge-back check; A-364 adds `kind`). TP-14.9. The fixture project is a throwaway copy of
 // the server project with a baseline migration generated from the current schema, plus a hotfix
 // migration; F-181's report is injected. Postgres is a container started for this file.
+import { spawnSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { SERVER_DIR } from "../../support/platform.js";
 import {
   type ServerFixture,
   type StartedPostgres,
@@ -14,7 +16,11 @@ import {
 
 interface CheckMergeBack {
   checkMergeBack: (
-    input: { serverDir: string; hotfixMigrationFiles: readonly string[] },
+    input: {
+      serverDir: string;
+      kind: "hotfix" | "infra";
+      hotfixMigrationFiles: readonly string[];
+    },
     deps: {
       startPostgres: () => Promise<StartedPostgres>;
       pendingReport: (input: {
@@ -69,7 +75,7 @@ describe("TP-14.9: the hotfix merge-back check (F-6b)", () => {
     const { fixture, file } = withHotfix(HOTFIX_OK);
 
     const result = await checkMergeBack(
-      { serverDir: fixture.dir, hotfixMigrationFiles: [file] },
+      { serverDir: fixture.dir, kind: "hotfix", hotfixMigrationFiles: [file] },
       {
         startPostgres: startShared,
         pendingReport: () => Promise.resolve({ sql: "", ambiguities: [] }),
@@ -86,7 +92,7 @@ describe("TP-14.9: the hotfix merge-back check (F-6b)", () => {
       'CREATE TABLE "x" ("id" int);\n--> statement-breakpoint\nALTER TABLE  "idempotency_records"\n  ADD COLUMN "hotfix_probe" text;';
 
     const result = await checkMergeBack(
-      { serverDir: fixture.dir, hotfixMigrationFiles: [file] },
+      { serverDir: fixture.dir, kind: "hotfix", hotfixMigrationFiles: [file] },
       {
         startPostgres: startShared,
         pendingReport: () => Promise.resolve({ sql: pending, ambiguities: [] }),
@@ -102,7 +108,7 @@ describe("TP-14.9: the hotfix merge-back check (F-6b)", () => {
     const { fixture, file } = withHotfix(HOTFIX_BAD);
 
     const result = await checkMergeBack(
-      { serverDir: fixture.dir, hotfixMigrationFiles: [file] },
+      { serverDir: fixture.dir, kind: "hotfix", hotfixMigrationFiles: [file] },
       {
         startPostgres: startShared,
         pendingReport: () => Promise.resolve({ sql: "", ambiguities: [] }),
@@ -113,9 +119,32 @@ describe("TP-14.9: the hotfix merge-back check (F-6b)", () => {
     expect(result.problems.some((p) => p.startsWith("migrations don't apply: "))).toBe(true);
   }, 300_000);
 
-  // F-6b's input has no merge-back kind, so it can't know an infra merge-back from a hotfix one
-  // (question raised with the planner).
-  it.todo(
-    "TP-14.9 (d): an infra merge-back adding a migration is a problem (awaiting the input that marks infra)",
-  );
+  it('TP-14.9 (d) (A-364): an infra merge-back adding a migration is the problem "infra merge-back adds migrations: <files>"', async () => {
+    const { checkMergeBack } = await load();
+    const { fixture, file } = withHotfix(HOTFIX_OK);
+
+    const result = await checkMergeBack(
+      { serverDir: fixture.dir, kind: "infra", hotfixMigrationFiles: [file] },
+      {
+        startPostgres: startShared,
+        pendingReport: () => Promise.resolve({ sql: "", ambiguities: [] }),
+      },
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      problems: [`infra merge-back adds migrations: ${file}`],
+    });
+  }, 300_000);
+
+  it("TP-14.9 (e) (A-364): the CLI with both labels' kinds exits 64 before any check", () => {
+    const root = path.resolve(SERVER_DIR, "../..");
+    const result = spawnSync(
+      path.join(root, "tools/ci/node_modules/.bin/tsx"),
+      ["checkMergeBack.ts", "--kind", "hotfix", "--kind", "infra"],
+      { cwd: path.join(root, "tools/ci"), encoding: "utf8", timeout: 60_000 },
+    );
+
+    expect(result.status, `${result.stdout}${result.stderr}`).toBe(64);
+  }, 90_000);
 });

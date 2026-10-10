@@ -1,6 +1,6 @@
 // F-180 generateReleaseMigration with a fake pty. TP-14.1, plus extra cases TP-14.11x. IDs ending in
 // "x" are test-architect additions, not LLD test-plan IDs.
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -100,6 +100,24 @@ describe("TP-14.1: generateReleaseMigration (F-180)", () => {
     expect(path.resolve(serverDir, result.file ?? "")).toBe(
       path.join(serverDir, "drizzle/0001_v1.2.0.sql"),
     );
+  });
+
+  it("TP-14.1 (A-362): the returned path is absolute and exists", async () => {
+    const { generateReleaseMigration } = await loadReleaseMigration();
+    const { spawn } = fakePty(({ emit, exit }) => {
+      writeFileSync(path.join(serverDir, "drizzle/0001_v1.2.0.sql"), "ALTER TABLE x;");
+      emit("[✓] Your SQL migration file ➜ drizzle/0001_v1.2.0.sql 🚀\r\n");
+      exit(0);
+    });
+
+    const result = await generateReleaseMigration(
+      { version: "v1.2.0", serverDir },
+      { spawnPty: spawn },
+    );
+
+    expect(result.file).toBe(path.resolve(serverDir, "drizzle", "0001_v1.2.0.sql"));
+    expect(path.isAbsolute(result.file ?? "")).toBe(true);
+    expect(existsSync(result.file ?? "")).toBe(true);
   });
 
   it("TP-14.1: spawns pnpm exec drizzle-kit generate --name <version> in serverDir under an 80×24 pty", async () => {

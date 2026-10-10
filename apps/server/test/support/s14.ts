@@ -35,9 +35,9 @@ export interface ReleaseMigrationModule {
     input: { version: string; serverDir: string; timeoutMs?: number },
     deps: { spawnPty: SpawnPty },
   ) => Promise<{ file: string | null; ambiguities: string[] }>;
-  /** F-181's deps are "…" in the LLD; assumed to be F-180's. */
+  /** A-361: F-181's deps are `{ spawnPty }`; input takes an optional timeoutMs. */
   pendingSchemaReport: (
-    input: { serverDir: string },
+    input: { serverDir: string; timeoutMs?: number },
     deps: { spawnPty: SpawnPty },
   ) => Promise<{ sql: string; ambiguities: string[] }>;
 }

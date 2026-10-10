@@ -73,6 +73,21 @@ describe("TP-14.5: checkRiskyStatements (F-184)", () => {
     expect(flagged.map((f) => f.line)).toEqual([7]);
   });
 
+  it("TP-14.5 (A-363): a flagged statement under a 2-line comment block reports its first SQL line (7)", async () => {
+    const { checkRiskyStatements } = await loadCheckRisky();
+    const sql = [
+      'CREATE TABLE "a" ("id" int);',
+      BREAK,
+      'CREATE TABLE "c" ("id" int);',
+      BREAK,
+      "-- the old table is no longer read",
+      "-- since v1.1.0",
+      'DROP TABLE "b";',
+    ].join("\n");
+
+    expect(checkRiskyStatements(sql).map((f) => f.line)).toEqual([7]);
+  });
+
   it("TP-14.11x: the review comment covers only the statement right under it", async () => {
     const { checkRiskyStatements } = await loadCheckRisky();
     const sql = [
