@@ -106,10 +106,16 @@ export function createFsObjectStore(cfg: {
   logger: Logger;
 }): ObjectStore {
   /** The stored keys under `prefix` that match the bucket's key rule. */
+  /** Every file under `prefix`, as keys relative to the bucket. */
+  const allUnder = (bucket: BucketName, prefix: string): Promise<string[]> =>
+    walk(
+      path.join(cfg.root, bucket, ...prefix.split("/").filter((s) => s !== "")),
+      prefix.replace(/\/$/, ""),
+    );
+
+  /** A-306 (`list` only): the conforming keys under `prefix`; strays are counted and logged. */
   const keysUnder = async (bucket: BucketName, prefix: string): Promise<string[]> => {
-    const base = path.join(cfg.root, bucket, ...prefix.split("/").filter((s) => s !== ""));
-    const rel = prefix.replace(/\/$/, "");
-    const keys = await walk(base, rel);
+    const keys = await allUnder(bucket, prefix);
     const valid = keys.filter((key) => isObjectKey(bucket, key));
     const skipped = keys.length - valid.length;
     // A-306: the count only, never the keys.
@@ -130,7 +136,8 @@ export function createFsObjectStore(cfg: {
     },
     async deletePrefix(bucket, prefix) {
       assertObjectPrefix(bucket, prefix);
-      const keys = await keysUnder(bucket, prefix);
+      // Every file under the prefix, strays included (A-306 filters `list` only).
+      const keys = await allUnder(bucket, prefix);
       for (const key of keys) await rm(objectPath(cfg.root, bucket, key), { force: true });
       return keys.length;
     },

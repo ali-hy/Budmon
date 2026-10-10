@@ -67,39 +67,47 @@ export function createS3ObjectStore(
   const bucketName = (bucket: BucketName): string =>
     bucket === "exports" ? cfg.buckets.exports : cfg.buckets.erasureLog;
 
+  /**
+   * Every object under `prefix`. With `conformingOnly` (A-306, `list` only), keys failing the key
+   * rule are skipped and counted; `deletePrefix` lists without it, so strays are deleted too.
+   */
   async function* listKeys(
     bucket: BucketName,
     prefix: string,
+    conformingOnly: boolean,
   ): AsyncGenerator<{ key: string; lastModified: Temporal.Instant }> {
     let token: string | undefined;
     let skipped = 0;
-    do {
-      const page = await mapped(() =>
-        client.send(
-          new ListObjectsV2Command({
-            Bucket: bucketName(bucket),
-            Prefix: prefix,
-            MaxKeys: 1000,
-            ...(token === undefined ? {} : { ContinuationToken: token }),
-          }),
-        ),
-      );
-      for (const object of page.Contents ?? []) {
-        if (object.Key === undefined || object.LastModified === undefined) continue;
-        // A-306: a stray key would make callers' delete throw; skip it, counted.
-        if (!isObjectKey(bucket, object.Key)) {
-          skipped += 1;
-          continue;
+    try {
+      do {
+        const page = await mapped(() =>
+          client.send(
+            new ListObjectsV2Command({
+              Bucket: bucketName(bucket),
+              Prefix: prefix,
+              MaxKeys: 1000,
+              ...(token === undefined ? {} : { ContinuationToken: token }),
+            }),
+          ),
+        );
+        for (const object of page.Contents ?? []) {
+          if (object.Key === undefined || object.LastModified === undefined) continue;
+          // A-306: a stray key would make callers' delete throw; skip it, counted.
+          if (conformingOnly && !isObjectKey(bucket, object.Key)) {
+            skipped += 1;
+            continue;
+          }
+          yield {
+            key: object.Key,
+            lastModified: Temporal.Instant.fromEpochMilliseconds(object.LastModified.getTime()),
+          };
         }
-        yield {
-          key: object.Key,
-          lastModified: Temporal.Instant.fromEpochMilliseconds(object.LastModified.getTime()),
-        };
-      }
-      token = page.IsTruncated === true ? page.NextContinuationToken : undefined;
-    } while (token !== undefined);
-    // A-306: the count only, never the keys.
-    if (skipped > 0) deps.logger.warn("object_keys_skipped", { bucket, count: skipped });
+        token = page.IsTruncated === true ? page.NextContinuationToken : undefined;
+      } while (token !== undefined);
+    } finally {
+      // A-306: the count only, never the keys; also when the consumer stops early or it throws.
+      if (skipped > 0) deps.logger.warn("object_keys_skipped", { bucket, count: skipped });
+    }
   }
 
   return {
@@ -141,7 +149,7 @@ export function createS3ObjectStore(
         if ((result.Errors ?? []).length > 0) throw new ObjectStoreError("unavailable");
         deleted += keys.length;
       };
-      for await (const entry of listKeys(bucket, prefix)) {
+      for await (const entry of listKeys(bucket, prefix, false)) {
         batch.push(entry.key);
         if (batch.length === 1000) await flush();
       }
@@ -150,7 +158,7 @@ export function createS3ObjectStore(
     },
     async *list(bucket, prefix) {
       assertObjectPrefix(bucket, prefix);
-      yield* listKeys(bucket, prefix);
+      yield* listKeys(bucket, prefix, true);
     },
     async presignGet(bucket, key, ttlSeconds, opts = {}) {
       const expiresIn = checkPresign(bucket, key, ttlSeconds, opts);
