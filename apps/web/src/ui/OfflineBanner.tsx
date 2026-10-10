@@ -35,15 +35,16 @@ export function OfflineBanner(): JSX.Element {
     window.removeEventListener("online", online);
   });
 
-  // Rendered only while shown, so an empty status region doesn't sit on every page.
+  // A-373: the live region is always mounted (empty while online); only its content changes, so
+  // screen readers announce it.
   return (
-    <Show when={state() !== "hidden"}>
-      <div role="status" aria-live="polite">
+    <div role="status" aria-live="polite">
+      <Show when={state() !== "hidden"}>
         <p class="flex items-center gap-2 p-2">
           <Icon name={state() === "offline" ? "offline" : "check"} />
           {state() === "offline" ? t(messages.offlineBannerWeb) : t(messages.offlineBack)}
         </p>
-      </div>
-    </Show>
+      </Show>
+    </div>
   );
 }

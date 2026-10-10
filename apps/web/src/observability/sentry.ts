@@ -110,15 +110,23 @@ export function scrubWebEvent(e: Json): Json | null {
   return out;
 }
 
+/** F-10's SENTRY_DSN patterns (A-370): https, or a local http DSN in development and test. */
+const SENTRY_DSN = /^https:\/\/[A-Za-z0-9]{1,64}@[A-Za-z0-9.-]{1,253}(:\d{1,5})?\/\d{1,20}$/;
+const LOCAL_SENTRY_DSN = /^http:\/\/[A-Za-z0-9]{1,64}@(localhost|127\.0\.0\.1):\d{1,5}\/\d{1,20}$/;
+
+export function isValidWebSentryDsn(dsn: string, environment: string): boolean {
+  if (SENTRY_DSN.test(dsn)) return true;
+  return (environment === "development" || environment === "test") && LOCAL_SENTRY_DSN.test(dsn);
+}
+
 export function initWebSentry(cfg: { dsn?: string; release: string; environment: string }): void {
-  if (cfg.dsn === undefined || cfg.dsn === "") return;
+  // A-370: no DSN, or one F-10 wouldn't accept here, leaves Sentry uninitialised.
+  if (cfg.dsn === undefined || !isValidWebSentryDsn(cfg.dsn, cfg.environment)) return;
   const options = {
     dsn: cfg.dsn,
     release: cfg.release,
     environment: cfg.environment,
-    // F-217 names sendDefaultPii; Sentry 11 dropped it for dataCollection, which does the work.
-    // It's passed too, so the intent stays visible in the options.
-    sendDefaultPii: false,
+    // A-371: Sentry 11's form of "no PII": every collection flag off.
     dataCollection: {
       userInfo: false,
       cookies: false,

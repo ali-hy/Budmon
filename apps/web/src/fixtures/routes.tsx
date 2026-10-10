@@ -5,6 +5,7 @@ import { A11yViolationFixture } from "./A11yViolationFixture.js";
 import { flakyLoader, FlakyLoaderFixture } from "./FlakyLoaderFixture.js";
 import { KobalteSpikeFixture } from "./KobalteSpikeFixture.js";
 import { RtlProbeFixture } from "./RtlProbeFixture.js";
+import { startFixtureWorker, VirtualTableFixture } from "./VirtualTableFixture.js";
 
 export function createFixtureRoutes(rootRoute: AnyRoute): AnyRoute[] {
   const route = (path: string, component: () => unknown, loader?: () => unknown) =>
@@ -19,5 +20,6 @@ export function createFixtureRoutes(rootRoute: AnyRoute): AnyRoute[] {
     route("/__fixtures/flaky-loader", FlakyLoaderFixture, flakyLoader),
     route("/__fixtures/a11y-violation", A11yViolationFixture),
     route("/__fixtures/kobalte-spike", KobalteSpikeFixture),
+    route("/__fixtures/virtual-table", VirtualTableFixture, startFixtureWorker),
   ];
 }

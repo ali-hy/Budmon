@@ -1,5 +1,7 @@
 // The web app's Vite configuration (§8.1): F-22's development server, F-207's pseudo-locales and
 // F-221's build number.
+import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import tailwindcss from "@tailwindcss/vite";
@@ -27,6 +29,29 @@ function budmonPseudoLocales(enabled: boolean): Plugin {
   };
 }
 
+/**
+ * A-342: the MSW worker script for the fixture pages, emitted from the installed msw only when
+ * VITE_FIXTURES=1 (served in dev the same way), so production builds never contain it.
+ */
+function budmonFixtures(enabled: boolean): Plugin {
+  const workerSource = () =>
+    readFileSync(createRequire(import.meta.url).resolve("msw/mockServiceWorker.js"), "utf8");
+  return {
+    name: "budmon-fixtures",
+    configureServer(server) {
+      if (!enabled) return;
+      server.middlewares.use("/mockServiceWorker.js", (_req, res) => {
+        res.setHeader("content-type", "text/javascript");
+        res.end(workerSource());
+      });
+    },
+    generateBundle() {
+      if (!enabled) return;
+      this.emitFile({ type: "asset", fileName: "mockServiceWorker.js", source: workerSource() });
+    },
+  };
+}
+
 /** F-221: VITE_BUILD_NUMBER from BUDMON_BUILD_NUMBER (default 0), and dist/version.json. */
 function budmonVersion(): Plugin {
   const raw = process.env["BUDMON_BUILD_NUMBER"] ?? "0";
@@ -50,8 +75,15 @@ function budmonVersion(): Plugin {
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, WEB_DIR, "VITE_");
   const pseudo = (process.env["VITE_PSEUDO_LOCALES"] ?? env["VITE_PSEUDO_LOCALES"]) === "1";
+  const fixtures = (process.env["VITE_FIXTURES"] ?? env["VITE_FIXTURES"]) === "1";
   return {
-    plugins: [solid(), tailwindcss(), budmonPseudoLocales(pseudo), budmonVersion()],
+    plugins: [
+      solid(),
+      tailwindcss(),
+      budmonPseudoLocales(pseudo),
+      budmonFixtures(fixtures),
+      budmonVersion(),
+    ],
     // F-222 (A-329): `vite preview` in e2e:serve proxies the in-process API.
     preview: {
       proxy: {
