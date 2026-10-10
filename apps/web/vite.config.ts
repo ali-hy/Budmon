@@ -30,7 +30,7 @@ function budmonPseudoLocales(enabled: boolean): Plugin {
 /** F-221: VITE_BUILD_NUMBER from BUDMON_BUILD_NUMBER (default 0), and dist/version.json. */
 function budmonVersion(): Plugin {
   const raw = process.env["BUDMON_BUILD_NUMBER"] ?? "0";
-  if (!/^\d{1,9}$/.test(raw)) throw new Error("BUDMON_BUILD_NUMBER must be a non-negative integer");
+  if (!/^\d{1,9}$/.test(raw)) throw new Error("BUDMON_BUILD_NUMBER must be 1 to 9 digits");
   const buildNumber = Number.parseInt(raw, 10);
   return {
     name: "budmon-version",

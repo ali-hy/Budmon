@@ -105,7 +105,6 @@ export function createFsObjectStore(cfg: {
   /** A-306: reports keys a listing skipped. */
   logger: Logger;
 }): ObjectStore {
-  /** The stored keys under `prefix` that match the bucket's key rule. */
   /** Every file under `prefix`, as keys relative to the bucket. */
   const allUnder = (bucket: BucketName, prefix: string): Promise<string[]> =>
     walk(

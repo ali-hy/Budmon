@@ -11,3 +11,4 @@ export * from "./time/clock.js";
 export * from "./ids/ids.js";
 export * from "./i18n/locale.js";
 export * from "./i18n/bidi.js";
+export * from "./i18n/isolateArgs.js";

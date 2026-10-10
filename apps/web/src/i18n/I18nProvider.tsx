@@ -1,9 +1,15 @@
 // F-206: locale, direction, message formatting and locale-aware dates, times and money.
-import { createIntl, createIntlCache, type IntlShape } from "@formatjs/intl";
+import {
+  createIntl,
+  createIntlCache,
+  type IntlShape,
+  type MessageDescriptor,
+} from "@formatjs/intl";
 import {
   directionOf,
   formatMoney as formatMoneyIn,
-  isolate,
+  isolateNamedArguments,
+  simpleArgumentNames,
   resolveLocale,
   type Temporal,
 } from "@budmon/shared";
@@ -48,11 +54,27 @@ function intlFor(locale: string, messages: Catalog): IntlShape {
 }
 
 const DAY_MS = 86_400_000;
+const FUTURE_SKEW_MS = 5 * 60_000;
 
 export function I18nProvider(props: { initialLocale: string; children: JSX.Element }): JSX.Element {
   const [locale, setLocaleSignal] = createSignal("en");
   const [intl, setIntl] = createSignal(intlFor("en", en));
   const dir = () => directionOf(locale());
+
+  // A-319: the names each message uses only as simple {name}, cached per locale and id.
+  const simpleNameCache = new Map<string, ReadonlySet<string>>();
+  const simpleNames = (d: MessageDescriptor): ReadonlySet<string> => {
+    const id = typeof d.id === "string" ? d.id : "";
+    const key = `${locale()}\u0000${id}`;
+    let names = simpleNameCache.get(key);
+    if (names === undefined) {
+      const fromCatalog = intl().messages[id];
+      const source = typeof fromCatalog === "string" ? fromCatalog : d.defaultMessage;
+      names = simpleArgumentNames(typeof source === "string" ? source : "");
+      simpleNameCache.set(key, names);
+    }
+    return names;
+  };
 
   // B-1: only the latest setLocale applies; an earlier one whose catalog arrives later is dropped.
   let latestRequest = 0;
@@ -80,14 +102,7 @@ export function I18nProvider(props: { initialLocale: string; children: JSX.Eleme
     t: (d, v) =>
       intl().formatMessage(
         d,
-        v === undefined
-          ? undefined
-          : (Object.fromEntries(
-              Object.entries(v).map(([k, value]) => [
-                k,
-                typeof value === "string" ? isolate(value) : value,
-              ]),
-            ) as FormatValues),
+        v === undefined ? undefined : (isolateNamedArguments(simpleNames(d), v) as FormatValues),
       ) as string,
     formatMoney: (m, minorUnits) =>
       formatMoneyIn(m, { locale: intlLocaleOf(locale()), minorUnits }),
@@ -100,7 +115,10 @@ export function I18nProvider(props: { initialLocale: string; children: JSX.Eleme
       }).format(new Date(i.epochMilliseconds)),
     formatRelative: (i, now, timeZone) => {
       const diff = now.epochMilliseconds - i.epochMilliseconds;
-      if (diff >= 7 * DAY_MS) {
+      // A-321: a future instant is never relative: up to 5 minutes ahead (clock skew) is "now",
+      // further ahead is the date.
+      const futureIsDate = diff < -FUTURE_SKEW_MS;
+      if (diff >= 7 * DAY_MS || futureIsDate) {
         return formatDate(i.toZonedDateTimeISO(timeZone).toPlainDate());
       }
       // A-311: whole units, truncated toward zero; "now" under a minute.
@@ -109,11 +127,11 @@ export function I18nProvider(props: { initialLocale: string; children: JSX.Eleme
         style: "long",
       });
       const seconds = Math.trunc(diff / 1000);
-      if (Math.abs(seconds) < 60) return rtf.format(0, "second");
+      if (seconds < 60) return rtf.format(0, "second");
       const minutes = Math.trunc(seconds / 60);
-      if (Math.abs(minutes) < 60) return rtf.format(-minutes, "minute");
+      if (minutes < 60) return rtf.format(-minutes, "minute");
       const hours = Math.trunc(minutes / 60);
-      if (Math.abs(hours) < 24) return rtf.format(-hours, "hour");
+      if (hours < 24) return rtf.format(-hours, "hour");
       return rtf.format(-Math.trunc(hours / 24), "day");
     },
     setLocale,

@@ -297,6 +297,9 @@ importers:
 
   packages/shared:
     dependencies:
+      '@formatjs/icu-messageformat-parser':
+        specifier: 3.5.20
+        version: 3.5.20
       '@js-temporal/polyfill':
         specifier: 0.5.1
         version: 0.5.1

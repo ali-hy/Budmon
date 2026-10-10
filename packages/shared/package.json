@@ -10,6 +10,7 @@
     }
   },
   "dependencies": {
+    "@formatjs/icu-messageformat-parser": "3.5.20",
     "@js-temporal/polyfill": "0.5.1",
     "uuid": "14.0.2"
   }

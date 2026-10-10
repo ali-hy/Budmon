@@ -1,5 +1,5 @@
 // F-9: every message ID the web app uses is in every shipped catalog (D-37).
-import { globSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, globSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { extract } from "@formatjs/cli-lib";
@@ -17,9 +17,10 @@ export function checkCatalogs(input: {
 }
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const MESSAGES_DIR = path.join(ROOT, "apps/web/src/i18n/messages");
 /** Shipped catalogs; pseudo-locales are generated, not shipped (F-207). */
 const SHIPPED_LOCALES = ["en"];
+const EXIT_USAGE = 64;
+const USAGE = "Usage: checkCatalogs [--root <dir>]  (default: the repository root)";
 
 /** The IDs used in `apps/web/src/**\/*.{ts,tsx}`, as F-1's formatjs settings see them (A-12). */
 export async function usedMessageIds(root: string = ROOT): Promise<Set<string>> {
@@ -33,24 +34,54 @@ export async function usedMessageIds(root: string = ROOT): Promise<Set<string>> 
   return new Set(Object.keys(extracted));
 }
 
-// CLI: tsx checkCatalogs.ts (exit 1 when any shipped catalog lacks a used ID).
+/**
+ * A-323: `[--root <dir>]` (relative to INIT_CWD, else the working directory). Exit 0 silently;
+ * 1 with `missing <locale>: <id>` lines on stderr; 64 with usage for bad arguments or a root
+ * without apps/web/src.
+ */
+export async function runCheckCatalogsCli(
+  argv: readonly string[],
+  io: { stderr: (line: string) => void; cwd: string },
+): Promise<number> {
+  let root = ROOT;
+  if (argv.length > 0) {
+    const [flag, value, ...rest] = argv;
+    if (flag !== "--root" || value === undefined || value === "" || rest.length > 0) {
+      io.stderr(USAGE);
+      return EXIT_USAGE;
+    }
+    root = path.resolve(io.cwd, value);
+  }
+  if (!existsSync(path.join(root, "apps/web/src"))) {
+    io.stderr(USAGE);
+    return EXIT_USAGE;
+  }
+  const catalogs = Object.fromEntries(
+    SHIPPED_LOCALES.map((locale) => {
+      const file = path.join(root, "apps/web/src/i18n/messages", `${locale}.json`);
+      const catalog = existsSync(file)
+        ? (JSON.parse(readFileSync(file, "utf8")) as Record<string, string>)
+        : {};
+      return [locale, catalog];
+    }),
+  );
+  const { missing } = checkCatalogs({ usedIds: await usedMessageIds(root), catalogs });
+  let failed = false;
+  for (const [locale, ids] of Object.entries(missing)) {
+    for (const id of ids) {
+      io.stderr(`missing ${locale}: ${id}`);
+      failed = true;
+    }
+  }
+  return failed ? 1 : 0;
+}
+
 if (
   process.argv[1] !== undefined &&
   import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href
 ) {
-  const catalogs = Object.fromEntries(
-    SHIPPED_LOCALES.map((locale) => [
-      locale,
-      JSON.parse(readFileSync(path.join(MESSAGES_DIR, `${locale}.json`), "utf8")) as Record<
-        string,
-        string
-      >,
-    ]),
-  );
-  const { missing } = checkCatalogs({ usedIds: await usedMessageIds(), catalogs });
-  const problems = Object.entries(missing).filter(([, ids]) => ids.length > 0);
-  for (const [locale, ids] of problems) {
-    process.stderr.write(`${locale}.json is missing: ${ids.join(", ")}\n`);
-  }
-  process.exitCode = problems.length > 0 ? 1 : 0;
+  process.exitCode = await runCheckCatalogsCli(process.argv.slice(2), {
+    stderr: (line) => process.stderr.write(`${line}\n`),
+    cwd: process.env["INIT_CWD"] ?? process.cwd(),
+  });
 }

@@ -1,6 +1,6 @@
 // F-160: server-side message rendering (emails and pushes).
 import { createIntl, createIntlCache } from "@formatjs/intl";
-import { isolate, resolveLocale } from "@budmon/shared";
+import { isolateSimpleArguments, resolveLocale } from "@budmon/shared";
 import en from "./messages/en.json" with { type: "json" };
 
 type Catalogs = Readonly<Record<string, Readonly<Record<string, string>>>>;
@@ -23,12 +23,11 @@ export function createMessageRenderer(
       { locale: source === english ? "en" : tag, messages: { ...messages } },
       cache,
     );
+    // A-319: only simple {name} arguments are isolated; select, plural and number get raw values.
     const isolated: Values | undefined =
       values === undefined
         ? undefined
-        : Object.fromEntries(
-            Object.entries(values).map(([k, v]) => [k, typeof v === "string" ? isolate(v) : v]),
-          );
+        : (isolateSimpleArguments(messages[id] ?? "", values) as Values);
     return intl.formatMessage({ id }, isolated);
   };
 }

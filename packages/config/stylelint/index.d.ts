@@ -1,5 +1,5 @@
 declare const config: {
-  plugins: string[];
+  plugins: unknown[];
   rules: Record<string, unknown>;
 };
 export default config;
