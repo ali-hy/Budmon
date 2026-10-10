@@ -37,7 +37,8 @@ const ROWS: Readonly<Record<string, string>> = {
   "lint:catalogs": "pnpm --filter @budmon/tools-ci lint:catalogs",
   // S-11b (A-14)
   "test:e2e": "pnpm --filter @budmon/web test:e2e",
-  "check:all": "pnpm check && pnpm test:e2e",
+  // S-13 (A-14): check:all also runs Android's checks.
+  "check:all": "pnpm check && pnpm test:e2e && cd apps/android && ./gradlew check",
 };
 
 /** §2.2.2's package-script column for apps/server, plus F-24's build (A-43). */

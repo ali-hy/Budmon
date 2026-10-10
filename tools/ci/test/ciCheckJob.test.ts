@@ -190,3 +190,30 @@ describe("TP-0.31: ci.yml e2e job (A-334)", () => {
     expect(last?.with?.["path"]).toBe("apps/web/playwright-report/");
   });
 });
+
+// TP-13.18x (test-architect addition): CI step 6 (D-27, §10.1 Android): the android job runs the
+// JVM tests, lint and ktlint. Its path filter and release-candidate trigger wait for the planner.
+describe("TP-13.18x: ci.yml android job (§10.1, S-13)", () => {
+  it("TP-13.18x: an android job runs ./gradlew testDebugUnitTest lint ktlintCheck in apps/android", () => {
+    const workflow = parse(readFileSync(path.join(ROOT, ".github/workflows/ci.yml"), "utf8")) as {
+      jobs?: Record<
+        string,
+        {
+          defaults?: { run?: { "working-directory"?: unknown } };
+          steps?: { run?: unknown; "working-directory"?: unknown }[];
+        }
+      >;
+    };
+    const job = workflow.jobs?.["android"];
+    const steps = (job?.steps ?? []).filter(
+      (s) => typeof s.run === "string" && s.run.includes("testDebugUnitTest"),
+    );
+
+    expect(job).toBeDefined();
+    expect(steps).toHaveLength(1);
+    const step = steps[0];
+    expect(String(step?.run)).toMatch(/\.\/gradlew testDebugUnitTest lint ktlintCheck/);
+    const dir = step?.["working-directory"] ?? job?.defaults?.run?.["working-directory"];
+    expect(dir).toBe("apps/android");
+  });
+});
