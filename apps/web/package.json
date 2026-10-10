@@ -1,0 +1,26 @@
+{
+  "name": "@budmon/web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@formatjs/intl": "6.1.2",
+    "solid-js": "1.9.15"
+  },
+  "devDependencies": {
+    "@budmon/config": "workspace:*",
+    "@budmon/shared": "workspace:*",
+    "@solidjs/testing-library": "0.8.10",
+    "@tailwindcss/vite": "4.3.3",
+    "jsdom": "30.1.2",
+    "msw": "3.0.2",
+    "tailwindcss": "4.3.3",
+    "vite": "8.3.2",
+    "vite-plugin-solid": "2.11.14"
+  }
+}

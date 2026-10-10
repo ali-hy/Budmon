@@ -14,7 +14,7 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "typecheck": "tsc -p tsconfig.json && tsc -p apps/server/tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json && tsc -p apps/server/tsconfig.json && tsc -p apps/web/tsconfig.json",
     "test:coverage": "vitest run --project=shared --coverage",
     "dev": "pnpm --filter @budmon/server dev",
     "db:reset": "pnpm --filter @budmon/server db:reset",
