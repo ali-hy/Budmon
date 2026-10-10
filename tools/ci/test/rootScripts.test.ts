@@ -13,8 +13,8 @@ const ROWS: Readonly<Record<string, string>> = {
   // S-0 (format to test:int)
   format: "prettier --write .",
   "format:check": "prettier --check .",
-  // S-11a (A-14): lint also runs lint:css.
-  lint: "eslint . && pnpm lint:css",
+  // S-11a (A-14, A-316): lint also runs lint:css and lint:catalogs.
+  lint: "eslint . && pnpm lint:css && pnpm lint:catalogs",
   // S-2, S-11a (A-30): typecheck also checks apps/server and apps/web.
   typecheck:
     "tsc -p tsconfig.json && tsc -p apps/server/tsconfig.json && tsc -p apps/web/tsconfig.json",
@@ -33,6 +33,8 @@ const ROWS: Readonly<Record<string, string>> = {
   "contract:openapi": "pnpm --filter @budmon/contract contract:openapi",
   // S-11a (A-14, F-4)
   "lint:css": 'stylelint "apps/web/src/**/*.css"',
+  // S-11a (A-316, F-9)
+  "lint:catalogs": "pnpm --filter @budmon/tools-ci lint:catalogs",
 };
 
 /** §2.2.2's package-script column for apps/server, plus F-24's build (A-43). */

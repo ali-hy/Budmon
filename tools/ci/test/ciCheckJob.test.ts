@@ -1,6 +1,7 @@
 // TP-2.26: ci.yml's check job runs the integration tests after the unit tests (A-31), plus the extra
 // case TP-2.60x: the main-only dev-smoke job runs TP-2.18's script (§10.1 CI jobs, A-55). TP-0.26:
-// Testcontainers pulls Docker Hub images through mirror.gcr.io in CI (A-284).
+// Testcontainers pulls Docker Hub images through mirror.gcr.io in CI (A-284). TP-0.29: the catalog
+// check runs in CI through pnpm lint (A-316).
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -98,5 +99,37 @@ describe("TP-0.26: ci.yml pulls Docker Hub images through mirror.gcr.io (A-284)"
 
     expect(logins).toEqual([]);
     expect(JSON.stringify(check)).not.toContain("secrets.");
+  });
+});
+
+describe("TP-0.29: the catalog check runs in CI through pnpm lint (A-316)", () => {
+  function scripts(relative: string): Record<string, unknown> {
+    const pkg = JSON.parse(readFileSync(path.join(ROOT, relative), "utf8")) as {
+      scripts?: Record<string, unknown>;
+    };
+    return pkg.scripts ?? {};
+  }
+
+  it("TP-0.29: root lint is exactly eslint . && pnpm lint:css && pnpm lint:catalogs", () => {
+    expect(scripts("package.json")["lint"]).toBe("eslint . && pnpm lint:css && pnpm lint:catalogs");
+  });
+
+  it("TP-0.29: root lint:catalogs delegates to @budmon/tools-ci, whose lint:catalogs is tsx checkCatalogs.ts", () => {
+    expect(scripts("package.json")["lint:catalogs"]).toBe(
+      "pnpm --filter @budmon/tools-ci lint:catalogs",
+    );
+    expect(scripts("tools/ci/package.json")["lint:catalogs"]).toBe("tsx checkCatalogs.ts");
+  });
+
+  it("TP-0.29: the check job runs pnpm lint", () => {
+    const workflow = parse(readFileSync(path.join(ROOT, ".github/workflows/ci.yml"), "utf8")) as {
+      jobs?: { check?: { steps?: { run?: unknown }[] } };
+    };
+    const lines = (workflow.jobs?.check?.steps ?? [])
+      .map((step) => step.run)
+      .filter((run): run is string => typeof run === "string")
+      .flatMap((run) => run.split("\n").map((line) => line.trim()));
+
+    expect(lines).toContain("pnpm lint");
   });
 });

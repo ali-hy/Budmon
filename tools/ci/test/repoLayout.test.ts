@@ -1,11 +1,13 @@
 // S-0 repository checks: TP-0.1 (§2.1 removals), plus the extra cases TP-0.13x to TP-0.16x for
 // the S-0 deliverables and acceptance criteria (§2.2, §9 S-0 AC-2 to AC-4). Root scripts are
-// TP-0.21 (rootScripts.test.ts).
+// TP-0.21 (rootScripts.test.ts). TP-0.30: the root ESLint config ignores the agents' .claude worktrees
+// (A-318).
 // IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { ESLint } from "eslint";
 import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
 
@@ -212,5 +214,24 @@ describe("TP-2.58x: no migration files before the first release", () => {
     const files = repositoryFiles().filter((file) => file.startsWith("apps/server/drizzle/"));
 
     expect(files.filter((file) => !/\/\.gitkeep$/.test(file))).toEqual([]);
+  });
+});
+
+describe("TP-0.30: root ignores cover .claude (A-318)", () => {
+  it("TP-0.30: ESLint ignores .claude/worktrees/x/apps/web/src/a.ts and not apps/web/src/a.ts", async () => {
+    const eslint = new ESLint({ cwd: ROOT });
+
+    expect(
+      await eslint.isPathIgnored(path.join(ROOT, ".claude/worktrees/x/apps/web/src/a.ts")),
+    ).toBe(true);
+    expect(await eslint.isPathIgnored(path.join(ROOT, "apps/web/src/a.ts"))).toBe(false);
+  });
+
+  it("TP-0.30: .prettierignore has a .claude line", () => {
+    const lines = readRootFile(".prettierignore")
+      .split("\n")
+      .map((line) => line.trim());
+
+    expect(lines.some((line) => line === ".claude" || line === ".claude/")).toBe(true);
   });
 });
