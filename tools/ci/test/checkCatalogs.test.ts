@@ -25,11 +25,19 @@ describe("TP-11.23: catalog completeness (F-9)", () => {
     });
   });
 
-  it("TP-11.31x: a complete catalog has nothing missing for that locale", async () => {
+  it("TP-11.23 (A-312): used {a} with en {a} is {en: []}: every shipped locale is a key", async () => {
     const check = await checkCatalogs();
 
-    const result = check({ usedIds: new Set(["a", "b"]), catalogs: { en: { a: "A", b: "B" } } });
+    expect(check({ usedIds: new Set(["a"]), catalogs: { en: { a: "A" } } })).toEqual({
+      missing: { en: [] },
+    });
+  });
 
-    expect(result.missing["en"] ?? []).toEqual([]);
+  it("TP-11.31x (A-312): each locale's missing list is sorted", async () => {
+    const check = await checkCatalogs();
+
+    expect(check({ usedIds: new Set(["c", "a", "b"]), catalogs: { en: {} } })).toEqual({
+      missing: { en: ["a", "b", "c"] },
+    });
   });
 });

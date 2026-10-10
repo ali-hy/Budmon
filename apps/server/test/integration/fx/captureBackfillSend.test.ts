@@ -179,10 +179,24 @@ describe("TP-9.22: capture sends to platform.fx-backfill (F-75 6b, A-283)", () =
       ],
       ["blocking true", { blocking: "true" }, 7],
       ["retry_count 5", { retry_count: "5" }, 8],
+      // Review N-2: the remaining pinned columns.
+      ["retry_backoff flipped", { retry_backoff: "NOT COALESCE(q.retry_backoff, false)" }, 9],
+      ["retry_delay_max changed", { retry_delay_max: "COALESCE(q.retry_delay_max, 0) + 1" }, 10],
+      ["deletion_seconds changed", { deletion_seconds: "q.deletion_seconds + 1" }, 11],
+      [
+        "heartbeat_seconds changed",
+        { heartbeat_seconds: "COALESCE(q.heartbeat_seconds, 0) + 30" },
+        12,
+      ],
+      ["group_id set", { group_id: "'g1'" }, 13],
+      ["group_tier set", { group_tier: "'t1'" }, 14],
+      ["blocked true", { blocked: "true" }, 15],
+      ["pending_dependencies 1", { pending_dependencies: "1" }, 16],
     ] as const)(
       `TP-9.22 (A-296): ${table}: an otherwise valid row with %s is 42501 and nothing is queued`,
       async (_label, columns, n) => {
-        const rateDate = `2026-12-${String(offset + n).padStart(2, "0")}`;
+        // One month per table, so every case has its own date.
+        const rateDate = `${table === "job" ? "2027-01" : "2027-02"}-${String(n).padStart(2, "0")}`;
 
         expect(
           await failureState(() =>

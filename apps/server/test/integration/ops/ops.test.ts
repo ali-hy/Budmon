@@ -11,7 +11,9 @@ import type { Database } from "../../../src/platform/db/types.js";
 import { SERVER_DIR, recordingLogger, schemaStepInput } from "../../support/platform.js";
 import { devMigrate, withFile } from "../../support/configEnv.js";
 import { TEST_ROLE_PASSWORDS, query } from "../../support/postgres.js";
-import { s10 } from "../../support/s10.js";
+import { createErasureLog } from "../../../src/platform/storage/erasureLog.js";
+import { createFsObjectStore } from "../../../src/platform/storage/fsObjectStore.js";
+import { verifyRestore } from "../../../src/platform/ops/restoreVerify.js";
 import { createTestDatabase, type TestDatabase } from "../../support/testDatabase.js";
 import { testWorkerEnv } from "../../support/worker.js";
 
@@ -46,14 +48,13 @@ describe("TP-10.8: erasure:replay (F-93, F-151)", () => {
     const root = env["OBJECT_STORE_FS_ROOT"] ?? path.join(dir, "objects");
     mkdirSync(root, { recursive: true });
     // Two records in the worker's filesystem store, as identity's erasure would leave them.
-    const { createFsObjectStore } = await s10.fsObjectStore();
-    const { createErasureLog } = await s10.erasureLog();
     const log = createErasureLog(
       createFsObjectStore({
         root,
         publicOrigin: new URL("http://localhost:5173"),
-        signingKey: Buffer.alloc(32, 1),
+        signingKey: null,
         clock: fixedClock("2026-10-08T00:00:00Z"),
+        logger: recordingLogger(),
       }),
     );
     await log.append({ userId: U1, erasedAt: Temporal.Instant.from("2026-10-05T12:00:00Z") });
@@ -132,8 +133,6 @@ describe("TP-10.9: verifyRestore on a migrated database (F-150, A-229)", () => {
   });
 
   it("TP-10.9: ok, schema ok, no amcheck failures; indexesChecked is the count of leaf B-tree indexes (relkind 'i') in public and pgboss, partitioned parents excluded (A-291); every table counted; pgboss.job counts 3 jobs and job_common isn't listed", async () => {
-    const { verifyRestore } = await s10.restoreVerify();
-
     const report = await verifyRestore({
       database: migrator,
       journal: [{ hash: "h0", when: 1760000000000 }],
@@ -168,8 +167,6 @@ describe("TP-10.9: verifyRestore on a migrated database (F-150, A-229)", () => {
   });
 
   it("TP-10.11x: a journal one entry ahead of the database is schema behind and ok false", async () => {
-    const { verifyRestore } = await s10.restoreVerify();
-
     const report = await verifyRestore({
       database: migrator,
       journal: [
@@ -179,6 +176,66 @@ describe("TP-10.9: verifyRestore on a migrated database (F-150, A-229)", () => {
     });
 
     expect(report.schema).toBe("behind");
+    expect(report.ok).toBe(false);
+  });
+});
+
+// Review B-9: F-150's failure paths. Test files never use the superuser (S-2 AC-3), so the
+// corruption is one budmon_migrator can make: an expression index whose IMMUTABLE function is
+// redefined after the index is built, so heapallindexed finds heap tuples with no matching entry
+// (XX001 data_corrupted; the review's opclass variant, XX002, needs a superuser).
+describe("TP-10.11x (B-9): verifyRestore's failure paths (F-150)", () => {
+  let testDb: TestDatabase;
+  let migrator: Database;
+
+  beforeAll(async () => {
+    testDb = await createTestDatabase();
+    migrator = testDb.connectAs("budmon_migrator");
+    await runSchemaStep(schemaStepInput(migrator, "migrate", recordingLogger(), EMPTY_JOURNAL));
+  }, 120_000);
+
+  afterAll(async () => {
+    await migrator.close();
+    await testDb.drop();
+  });
+
+  it("TP-10.11x (B-9): an index failing bt_index_check is recorded as { index: public.<name>, code }, still counted, and ok is false", async () => {
+    const { verifyRestore } = await import("../../../src/platform/ops/restoreVerify.js");
+    const sql = (text: string) => migrator.handle.executeSql(text);
+    await sql(
+      "CREATE FUNCTION public.amcheck_probe_key(int) RETURNS int LANGUAGE sql IMMUTABLE AS 'SELECT $1'",
+    );
+    await sql("CREATE TABLE public.amcheck_probe (v int NOT NULL)");
+    await sql("INSERT INTO public.amcheck_probe SELECT generate_series(1, 2000)");
+    await sql(
+      "CREATE INDEX amcheck_probe_idx ON public.amcheck_probe (public.amcheck_probe_key(v))",
+    );
+    await sql(
+      "CREATE OR REPLACE FUNCTION public.amcheck_probe_key(int) RETURNS int LANGUAGE sql IMMUTABLE AS 'SELECT $1 + 1000000'",
+    );
+    const report = await verifyRestore({ database: migrator, journal: [] });
+
+    expect(report.ok).toBe(false);
+    expect(report.amcheck.failures).toEqual([{ index: "public.amcheck_probe_idx", code: "XX001" }]);
+    const [leaf] = await query<{ n: number }>(
+      testDb.urlAs("budmon_migrator"),
+      `SELECT count(*)::int AS n FROM pg_index i
+         JOIN pg_class c ON c.oid = i.indexrelid
+         JOIN pg_am am ON am.oid = c.relam
+         JOIN pg_namespace ns ON ns.oid = c.relnamespace
+       WHERE am.amname = 'btree' AND c.relkind = 'i' AND ns.nspname IN ('public', 'pgboss')`,
+    );
+    expect(report.amcheck.indexesChecked).toBe(leaf?.n);
+    expect(report.schema).toBe("ok");
+  });
+
+  it("TP-10.11x (B-9): with drizzle.__drizzle_migrations dropped, schema is not_migrated and ok is false", async () => {
+    const { verifyRestore } = await import("../../../src/platform/ops/restoreVerify.js");
+    await migrator.handle.executeSql("DROP TABLE drizzle.__drizzle_migrations");
+
+    const report = await verifyRestore({ database: migrator, journal: [] });
+
+    expect(report.schema).toBe("not_migrated");
     expect(report.ok).toBe(false);
   });
 });

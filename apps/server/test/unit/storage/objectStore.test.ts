@@ -1,24 +1,22 @@
 // F-140 key, prefix, TTL and download-name rules, F-143 the memory store and F-144 the exports
 // purge. TP-10.1, TP-10.4 and TP-10.5, plus extra cases TP-10.11x. IDs ending in "x" are
 // test-architect additions, not LLD test-plan IDs.
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { Temporal, fixedClock } from "@budmon/shared";
 import { describe, expect, it } from "vitest";
 import { recordingLogger } from "../../support/platform.js";
-import {
-  EXPORT_ID,
-  USER,
-  exportKey,
-  failure,
-  keysOf,
-  s10,
-  type BucketName,
-} from "../../support/s10.js";
+import { purgeExpiredExports } from "../../../src/platform/storage/exportsPurge.js";
+import { createFsObjectStore } from "../../../src/platform/storage/fsObjectStore.js";
+import { createMemoryObjectStore } from "../../../src/platform/storage/memoryObjectStore.js";
+import { assertObjectKey, type BucketName } from "../../../src/platform/storage/objectStore.js";
+import { EXPORT_ID, USER, exportKey, failure, keysOf } from "../../support/s10.js";
 
 const NOW = "2026-10-07T12:00:00Z";
 const RECORD = `records/20261005T120000Z_${USER}.json`;
 
-async function memoryStore(now = NOW) {
-  const { createMemoryObjectStore } = await s10.memoryObjectStore();
+function memoryStore(now = NOW) {
   const clock = fixedClock(now);
   return { store: createMemoryObjectStore(clock), clock };
 }
@@ -30,8 +28,7 @@ describe("TP-10.1: key, prefix, TTL and download-name rules (F-140, A-22)", () =
     ["an exports json", "exports", exportKey(EXPORT_ID, "json")],
     ["an erasure-log record", "erasure-log", RECORD],
   ])("TP-10.1: %s passes assertObjectKey and put", async (_label, bucket, key) => {
-    const { assertObjectKey } = await s10.objectStore();
-    const { store } = await memoryStore();
+    const { store } = memoryStore();
 
     expect(() => {
       assertObjectKey(bucket, key);
@@ -56,8 +53,7 @@ describe("TP-10.1: key, prefix, TTL and download-name rules (F-140, A-22)", () =
   ])(
     "TP-10.1: %s is RangeError from assertObjectKey, put, delete and presignGet",
     async (_label, bucket, key) => {
-      const { assertObjectKey } = await s10.objectStore();
-      const { store } = await memoryStore();
+      const { store } = memoryStore();
 
       expect(() => {
         assertObjectKey(bucket, key);
@@ -75,7 +71,7 @@ describe("TP-10.1: key, prefix, TTL and download-name rules (F-140, A-22)", () =
     ["exports", `users/${USER}/`],
     ["erasure-log", "records/"],
   ])("TP-10.1: prefix %s %j is accepted by list and deletePrefix", async (bucket, prefix) => {
-    const { store } = await memoryStore();
+    const { store } = memoryStore();
 
     expect(await keysOf(store, bucket, prefix)).toEqual([]);
     expect(await store.deletePrefix(bucket, prefix)).toBe(0);
@@ -84,7 +80,7 @@ describe("TP-10.1: key, prefix, TTL and download-name rules (F-140, A-22)", () =
   it.each([[""], ["users"], ["users/abc/"], ["other/"], [`users/${USER}`], ["/users/"]])(
     "TP-10.1: prefix %j is RangeError from list and deletePrefix",
     async (prefix) => {
-      const { store } = await memoryStore();
+      const { store } = memoryStore();
 
       expect(await failure(() => keysOf(store, "exports", prefix))).toBeInstanceOf(RangeError);
       expect(await failure(() => store.deletePrefix("exports", prefix))).toBeInstanceOf(RangeError);
@@ -92,7 +88,7 @@ describe("TP-10.1: key, prefix, TTL and download-name rules (F-140, A-22)", () =
   );
 
   it.each([[30], [901], [59], [0]])("TP-10.1: ttlSeconds %i is RangeError", async (ttl) => {
-    const { store } = await memoryStore();
+    const { store } = memoryStore();
 
     expect(await failure(() => store.presignGet("exports", exportKey(), ttl))).toBeInstanceOf(
       RangeError,
@@ -100,7 +96,7 @@ describe("TP-10.1: key, prefix, TTL and download-name rules (F-140, A-22)", () =
   });
 
   it.each([[60], [900]])("TP-10.11x: ttlSeconds %i is accepted", async (ttl) => {
-    const { store } = await memoryStore();
+    const { store } = memoryStore();
 
     await expect(store.presignGet("exports", exportKey(), ttl)).resolves.toBeInstanceOf(URL);
   });
@@ -108,7 +104,7 @@ describe("TP-10.1: key, prefix, TTL and download-name rules (F-140, A-22)", () =
   it.each([["budmon-export-2026-10-07.zip"], ["a".repeat(100)]])(
     "TP-10.1: downloadName %j passes",
     async (downloadName) => {
-      const { store } = await memoryStore();
+      const { store } = memoryStore();
 
       await expect(
         store.presignGet("exports", exportKey(), 900, { downloadName }),
@@ -119,7 +115,7 @@ describe("TP-10.1: key, prefix, TTL and download-name rules (F-140, A-22)", () =
   it.each([[""], ["a".repeat(101)], ["a b.zip"], ['a"b.zip'], ["x/y.zip"], ["é.zip"]])(
     "TP-10.1: downloadName %j is RangeError",
     async (downloadName) => {
-      const { store } = await memoryStore();
+      const { store } = memoryStore();
 
       expect(
         await failure(() => store.presignGet("exports", exportKey(), 900, { downloadName })),
@@ -130,7 +126,7 @@ describe("TP-10.1: key, prefix, TTL and download-name rules (F-140, A-22)", () =
 
 describe("TP-10.4: the memory store (F-143, A-22)", () => {
   it("TP-10.4: put, list (with lastModified), delete, delete of a missing key, deletePrefix", async () => {
-    const { store, clock } = await memoryStore();
+    const { store, clock } = memoryStore();
     const other = "0190a0b0-1c2d-7e3f-8a4b-5c6d7e8f9a0d";
     await store.put("exports", exportKey(), Buffer.from("zip"), "application/zip");
     clock.advance({ minutes: 1 });
@@ -153,7 +149,7 @@ describe("TP-10.4: the memory store (F-143, A-22)", () => {
   });
 
   it("TP-10.4: presignGet without a name is memory://exports/<key>?exp=<epoch>, with no n parameter", async () => {
-    const { store } = await memoryStore();
+    const { store } = memoryStore();
 
     const url = await store.presignGet("exports", exportKey(), 600);
 
@@ -164,7 +160,7 @@ describe("TP-10.4: the memory store (F-143, A-22)", () => {
   });
 
   it("TP-10.4: presignGet with downloadName adds &n=budmon-export-2026-10-07.zip", async () => {
-    const { store } = await memoryStore();
+    const { store } = memoryStore();
 
     const url = await store.presignGet("exports", exportKey(), 600, {
       downloadName: "budmon-export-2026-10-07.zip",
@@ -175,7 +171,7 @@ describe("TP-10.4: the memory store (F-143, A-22)", () => {
   });
 
   it("TP-10.11x: the snapshot holds the body of what was put", async () => {
-    const { store } = await memoryStore();
+    const { store } = memoryStore();
     await store.put("exports", exportKey(), Buffer.from("zip-bytes"), "application/zip");
 
     const bodies = [...store.snapshot().values()].map((v) => v.body.toString());
@@ -185,11 +181,12 @@ describe("TP-10.4: the memory store (F-143, A-22)", () => {
 });
 
 describe("TP-10.5: exports older than 7 days are purged (F-144)", () => {
-  it("TP-10.5: objects at now − 8 d and now − 6 d: purge deletes 1 and logs exports_purged {count: 1}", async () => {
-    const { purgeExpiredExports } = await s10.exportsPurge();
-    const { store, clock } = await memoryStore("2026-09-29T12:00:00Z");
+  it("TP-10.5: objects at now − 8 d and now − 6 d: purge deletes 1 and logs exports_purged {count: 1}; an erasure-log record at now − 30 d survives (review B-8)", async () => {
+    const { store, clock } = memoryStore("2026-09-07T12:00:00Z");
     const old = exportKey("0190a0b0-1c2d-7e3f-8a4b-000000000008");
     const recent = exportKey("0190a0b0-1c2d-7e3f-8a4b-000000000006");
+    await store.put("erasure-log", RECORD, Buffer.from("{}"), "application/json");
+    clock.advance({ hours: 22 * 24 });
     await store.put("exports", old, Buffer.from("old"), "application/zip");
     clock.advance({ hours: 2 * 24 });
     await store.put("exports", recent, Buffer.from("recent"), "application/zip");
@@ -200,18 +197,103 @@ describe("TP-10.5: exports older than 7 days are purged (F-144)", () => {
 
     expect(count).toBe(1);
     expect(await keysOf(store, "exports", "users/")).toEqual([recent]);
+    expect(await keysOf(store, "erasure-log", "records/")).toEqual([RECORD]);
     expect(logger.lines.filter((l) => l.event === "exports_purged").map((l) => l.fields)).toEqual([
       expect.objectContaining({ fields: { count: 1 } }),
     ]);
   });
 
   it("TP-10.11x: an object exactly 7 days old is kept (lastModified < now − 7 days purges)", async () => {
-    const { purgeExpiredExports } = await s10.exportsPurge();
-    const { store, clock } = await memoryStore("2026-09-30T12:00:00Z");
+    const { store, clock } = memoryStore("2026-09-30T12:00:00Z");
     await store.put("exports", exportKey(), Buffer.from("x"), "application/zip");
     clock.advance({ hours: 7 * 24 });
 
     expect(await purgeExpiredExports({ store, clock, logger: recordingLogger() })).toBe(0);
     expect(await keysOf(store, "exports", "users/")).toEqual([exportKey()]);
+  });
+});
+
+describe("TP-10.5 (A-306): the fs store's list skips a stray key", () => {
+  it("TP-10.5 (A-306): fs: a stray users/x/exports/stray.txt is never yielded, the expired conforming object is purged, and one object_keys_skipped warn {bucket: exports, count: 1} is logged without the key", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "budmon-fs-stray-"));
+    try {
+      const logger = recordingLogger();
+      const store = createFsObjectStore({
+        root,
+        publicOrigin: new URL("http://localhost:5173"),
+        signingKey: null,
+        clock: fixedClock(NOW),
+        logger,
+      });
+      const expired = exportKey("0190a0b0-1c2d-7e3f-8a4b-0000000000e8");
+      await store.put("exports", expired, Buffer.from("old"), "application/zip");
+      // Written around the store; both files are "aged 8 days" by purging with a clock 8 days on.
+      const stray = path.join(root, "exports", "users", "x", "exports", "stray.txt");
+      mkdirSync(path.dirname(stray), { recursive: true });
+      writeFileSync(stray, "stray");
+      const clock = fixedClock(new Date(Date.now() + 8 * 24 * 3_600_000).toISOString());
+
+      const purged = await purgeExpiredExports({ store, clock, logger: recordingLogger() });
+
+      expect(purged).toBe(1);
+      const warned = logger.lines.filter((l) => l.event === "object_keys_skipped");
+      expect(warned).toHaveLength(1);
+      expect(warned[0]?.level).toBe("warn");
+      expect(warned[0]?.fields).toMatchObject({ fields: { bucket: "exports", count: 1 } });
+      expect(JSON.stringify(logger.lines)).not.toContain("stray");
+      expect(await keysOf(store, "exports", "users/")).toEqual([]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+// Review B-1: every method returns a promise; a validation error is a rejection, never a
+// synchronous throw (F-140, F-143 parity with S3).
+describe("TP-10.11x (B-1): validation errors reject", () => {
+  async function rejectsWithoutThrowing(call: () => Promise<unknown>, error: new () => Error) {
+    let promise: Promise<unknown> | undefined;
+    expect(() => {
+      promise = call();
+    }).not.toThrow();
+    await expect(promise).rejects.toThrow(error);
+  }
+
+  it.each<[string, (s: ReturnType<typeof memoryStore>["store"]) => Promise<unknown>]>([
+    ["put with a bad key", (s) => s.put("exports", "bad", Buffer.from("x"), "text/plain")],
+    ["delete with a bad key", (s) => s.delete("exports", "bad")],
+    ["deletePrefix with a bad prefix", (s) => s.deletePrefix("exports", "bad/")],
+    ["presignGet with a bad key", (s) => s.presignGet("exports", "bad")],
+    ["presignGet with a bad ttl", (s) => s.presignGet("exports", exportKey(), 30)],
+    [
+      "presignGet with a bad downloadName",
+      (s) => s.presignGet("exports", exportKey(), 600, { downloadName: "a b" }),
+    ],
+  ])("TP-10.11x (B-1): memory store: %s rejects with RangeError", async (_label, call) => {
+    const { store } = memoryStore();
+
+    await rejectsWithoutThrowing(() => call(store), RangeError);
+  });
+
+  it("TP-10.11x (B-1): fs store: presignGet with a bad key rejects with RangeError; without a signing key (A-303) it rejects with TypeError", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "budmon-fs-reject-"));
+    try {
+      const make = (signingKey: Buffer | null) =>
+        createFsObjectStore({
+          root,
+          publicOrigin: new URL("http://localhost:5173"),
+          signingKey,
+          clock: fixedClock(NOW),
+          logger: recordingLogger(),
+        });
+
+      await rejectsWithoutThrowing(
+        () => make(Buffer.alloc(32, 1)).presignGet("exports", "bad"),
+        RangeError,
+      );
+      await rejectsWithoutThrowing(() => make(null).presignGet("exports", exportKey()), TypeError);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

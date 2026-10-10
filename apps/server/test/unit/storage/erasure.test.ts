@@ -3,7 +3,14 @@
 import { Temporal, canonicalJson, fixedClock } from "@budmon/shared";
 import { describe, expect, it, vi } from "vitest";
 import { recordingLogger } from "../../support/platform.js";
-import { keysOf, s10, type ErasureLog, type ErasureRecord } from "../../support/s10.js";
+import {
+  createErasureLog,
+  type ErasureLog,
+  type ErasureRecord,
+} from "../../../src/platform/storage/erasureLog.js";
+import { NoErasureHandlerError, replayErasures } from "../../../src/platform/ops/erasureReplay.js";
+import { createMemoryObjectStore } from "../../../src/platform/storage/memoryObjectStore.js";
+import { keysOf } from "../../support/s10.js";
 
 const U1 = "0190a0b0-1c2d-7e3f-8a4b-000000000001";
 const U2 = "0190a0b0-1c2d-7e3f-8a4b-000000000002";
@@ -12,16 +19,14 @@ const T1 = Temporal.Instant.from("2026-10-05T12:00:00Z");
 const T2 = Temporal.Instant.from("2026-10-06T08:30:15Z");
 const T3 = Temporal.Instant.from("2026-10-07T23:59:59Z");
 
-async function logOnMemory() {
-  const { createMemoryObjectStore } = await s10.memoryObjectStore();
-  const { createErasureLog } = await s10.erasureLog();
+function logOnMemory() {
   const store = createMemoryObjectStore(fixedClock("2026-10-08T00:00:00Z"));
   return { store, log: createErasureLog(store) };
 }
 
 describe("TP-10.6: the erasure log (F-146)", () => {
   it("TP-10.6: three records appended out of order: keys records/<YYYYMMDDTHHMMSSZ>_<userId>.json; listSince(t2) returns those at or after t2, sorted", async () => {
-    const { store, log } = await logOnMemory();
+    const { store, log } = logOnMemory();
 
     await log.append({ userId: U3, erasedAt: T3 });
     await log.append({ userId: U1, erasedAt: T1 });
@@ -40,7 +45,7 @@ describe("TP-10.6: the erasure log (F-146)", () => {
   });
 
   it("TP-10.11x: the body is canonicalJson({ userId, erasedAt })", async () => {
-    const { store, log } = await logOnMemory();
+    const { store, log } = logOnMemory();
 
     await log.append({ userId: U1, erasedAt: T1 });
 
@@ -50,13 +55,26 @@ describe("TP-10.6: the erasure log (F-146)", () => {
   });
 
   it("TP-10.11x: records with the same erasedAt are sorted by userId; listSince(t) includes t itself", async () => {
-    const { log } = await logOnMemory();
+    const { log } = logOnMemory();
 
     await log.append({ userId: U2, erasedAt: T1 });
     await log.append({ userId: U1, erasedAt: T1 });
 
     expect((await log.listSince(T1)).map((r) => r.userId)).toEqual([U1, U2]);
     expect(await log.listSince(T2)).toEqual([]);
+  });
+});
+
+describe("TP-10.6 (A-305): listSince compares whole seconds", () => {
+  it("TP-10.6 (A-305): a record erased at 03:00:00.900Z is included by listSince(03:00:00.700Z), with erasedAt 03:00:00Z", async () => {
+    const { log } = logOnMemory();
+
+    await log.append({ userId: U1, erasedAt: Temporal.Instant.from("2026-10-05T03:00:00.900Z") });
+    const since = await log.listSince(Temporal.Instant.from("2026-10-05T03:00:00.700Z"));
+
+    expect(since.map((r) => [r.userId, r.erasedAt.toString()])).toEqual([
+      [U1, "2026-10-05T03:00:00Z"],
+    ]);
   });
 });
 
@@ -78,7 +96,6 @@ describe("TP-10.7: replayErasures (F-151)", () => {
   ];
 
   it("TP-10.7: a log with 2 records and a handler spy: called in order, {replayed: 2}, one erasure_replayed line {count: 2}", async () => {
-    const { replayErasures } = await s10.erasureReplay();
     const log = fakeLog(two);
     const handler = vi.fn(() => Promise.resolve());
     const logger = recordingLogger();
@@ -94,23 +111,18 @@ describe("TP-10.7: replayErasures (F-151)", () => {
   });
 
   it("TP-10.7: records with a null handler is NoErasureHandlerError", async () => {
-    const { replayErasures, NoErasureHandlerError } = await s10.erasureReplay();
-
     await expect(
       replayErasures({ log: fakeLog(two), handler: null, logger: recordingLogger() }, T1),
     ).rejects.toBeInstanceOf(NoErasureHandlerError);
   });
 
   it("TP-10.7: an empty log with a null handler is {replayed: 0}", async () => {
-    const { replayErasures } = await s10.erasureReplay();
-
     await expect(
       replayErasures({ log: fakeLog([]), handler: null, logger: recordingLogger() }, T1),
     ).resolves.toEqual({ replayed: 0 });
   });
 
   it("TP-10.7: a handler throwing on the second record: rethrown after 1, logged with replayed 1", async () => {
-    const { replayErasures } = await s10.erasureReplay();
     const boom = new Error("handler failed");
     const handler = vi.fn((userId: string) =>
       userId === U2 ? Promise.reject(boom) : Promise.resolve(),

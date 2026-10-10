@@ -1,12 +1,17 @@
 // F-141 the S3 object store against versitygw (A-287), an S3-compatible Testcontainer. TP-10.3,
 // plus extra cases TP-10.11x. IDs ending in "x" are test-architect additions, not LLD test-plan IDs.
 // Not skipped: it runs in every pnpm test:int, in CI through A-284's mirror prefix.
-import { CreateBucketCommand, S3Client } from "@aws-sdk/client-s3";
+import { CreateBucketCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { fixedClock } from "@budmon/shared";
 import { GenericContainer, Wait, type StartedTestContainer } from "testcontainers";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Secret } from "../../../src/platform/observability/redaction.js";
 import { S3_TEST_IMAGE } from "../../setup/s3Image.js";
-import { USER, exportKey, failure, keysOf, s10, type ObjectStore } from "../../support/s10.js";
+import { recordingLogger } from "../../support/platform.js";
+import { purgeExpiredExports } from "../../../src/platform/storage/exportsPurge.js";
+import { type ObjectStore, ObjectStoreError } from "../../../src/platform/storage/objectStore.js";
+import { createS3ObjectStore } from "../../../src/platform/storage/s3ObjectStore.js";
+import { USER, exportKey, failure, keysOf } from "../../support/s10.js";
 
 const ACCESS = "budmontest";
 const SECRET = "budmontest-secret-key";
@@ -17,6 +22,7 @@ describe("TP-10.3: the S3 store (F-141, A-22, A-287)", () => {
   let container: StartedTestContainer;
   let endpoint: URL;
   let store: ObjectStore;
+  let admin: S3Client;
 
   const cfg = (buckets = BUCKETS) => ({
     kind: "s3" as const,
@@ -35,7 +41,7 @@ describe("TP-10.3: the S3 store (F-141, A-22, A-287)", () => {
       .withWaitStrategy(Wait.forListeningPorts())
       .start();
     endpoint = new URL(`http://${container.getHost()}:${String(container.getMappedPort(7070))}`);
-    const admin = new S3Client({
+    admin = new S3Client({
       endpoint: endpoint.href,
       region: "us-east-1",
       forcePathStyle: true,
@@ -44,12 +50,11 @@ describe("TP-10.3: the S3 store (F-141, A-22, A-287)", () => {
     for (const bucket of Object.values(BUCKETS)) {
       await admin.send(new CreateBucketCommand({ Bucket: bucket }));
     }
-    admin.destroy();
-    const { createS3ObjectStore } = await s10.s3ObjectStore();
-    store = createS3ObjectStore(cfg());
+    store = createS3ObjectStore(cfg(), { logger: recordingLogger() });
   }, 180_000);
 
   afterAll(async () => {
+    admin.destroy();
     await container.stop();
   });
 
@@ -93,10 +98,9 @@ describe("TP-10.3: the S3 store (F-141, A-22, A-287)", () => {
   });
 
   it("TP-10.3: put to a bucket that doesn't exist is ObjectStoreError with reason not_found (A-293)", async () => {
-    const { ObjectStoreError } = await s10.objectStore();
-    const { createS3ObjectStore } = await s10.s3ObjectStore();
     const missing = createS3ObjectStore(
       cfg({ exports: "budmon-no-such-bucket", erasureLog: BUCKETS.erasureLog }),
+      { logger: recordingLogger() },
     );
 
     const error = await failure(() =>
@@ -116,4 +120,79 @@ describe("TP-10.3: the S3 store (F-141, A-22, A-287)", () => {
 
     expect(res.status).toBe(403);
   }, 90_000);
+
+  // Review B-7: F-141's other error mappings, and lastModified from the listing.
+  it("TP-10.11x (B-7): (a) a wrong secretAccessKey: put is ObjectStoreError with reason denied", async () => {
+    const wrong = createS3ObjectStore(
+      { ...cfg(), secretAccessKey: Secret.of("not-the-secret") },
+      { logger: recordingLogger() },
+    );
+
+    const error = await failure(() =>
+      wrong.put("exports", exportKey(), Buffer.from("x"), "application/zip"),
+    );
+
+    expect(error).toBeInstanceOf(ObjectStoreError);
+    expect((error as { reason?: unknown }).reason).toBe("denied");
+  });
+
+  it("TP-10.11x (B-7): (b) an endpoint on a closed port: put is ObjectStoreError with reason unavailable", async () => {
+    const closed = createS3ObjectStore(
+      { ...cfg(), endpoint: new URL("http://127.0.0.1:1") },
+      { logger: recordingLogger() },
+    );
+
+    const error = await failure(() =>
+      closed.put("exports", exportKey(), Buffer.from("x"), "application/zip"),
+    );
+
+    expect(error).toBeInstanceOf(ObjectStoreError);
+    expect((error as { reason?: unknown }).reason).toBe("unavailable");
+  }, 60_000);
+
+  it("TP-10.11x (B-7): (c) list yields a lastModified within a few seconds of the put", async () => {
+    const key = exportKey("0190a0b0-1c2d-7e3f-8a4b-0000000000c3");
+    const before = Date.now();
+    await store.put("exports", key, Buffer.from("x"), "application/zip");
+    const after = Date.now();
+
+    let modified: number | undefined;
+    for await (const entry of store.list("exports", `users/${USER}/`)) {
+      if (entry.key === key) modified = entry.lastModified.epochMilliseconds;
+    }
+
+    expect(modified).toBeDefined();
+    expect(modified ?? 0).toBeGreaterThanOrEqual(before - 2_000);
+    expect(modified ?? 0).toBeLessThanOrEqual(after + 2_000);
+    await store.delete("exports", key);
+  });
+
+  // A-306: a stray object under exports/users/, written around the store, aged 8 days by running
+  // the purge with a clock 8 days ahead.
+  it("TP-10.5 (A-306): S3: a stray users/x/exports/stray.txt is never yielded, the expired conforming object is purged, and one object_keys_skipped warn {bucket: exports, count: 1} is logged without the key", async () => {
+    // Earlier cases may leave exports behind; start from none.
+    await store.deletePrefix("exports", "users/");
+    const logger = recordingLogger();
+    const s3 = createS3ObjectStore(cfg(), { logger });
+    const expired = exportKey("0190a0b0-1c2d-7e3f-8a4b-0000000000e8");
+    await s3.put("exports", expired, Buffer.from("old"), "application/zip");
+    await admin.send(
+      new PutObjectCommand({
+        Bucket: BUCKETS.exports,
+        Key: "users/x/exports/stray.txt",
+        Body: "stray",
+      }),
+    );
+    const clock = fixedClock(new Date(Date.now() + 8 * 24 * 3_600_000).toISOString());
+
+    const purged = await purgeExpiredExports({ store: s3, clock, logger: recordingLogger() });
+
+    expect(purged).toBe(1);
+    const warned = logger.lines.filter((l) => l.event === "object_keys_skipped");
+    expect(warned).toHaveLength(1);
+    expect(warned[0]?.level).toBe("warn");
+    expect(warned[0]?.fields).toMatchObject({ fields: { bucket: "exports", count: 1 } });
+    expect(JSON.stringify(logger.lines)).not.toContain("stray");
+    expect(await keysOf(s3, "exports", "users/")).toEqual([]);
+  });
 });

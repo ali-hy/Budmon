@@ -6,7 +6,8 @@ import { describe, expect, it } from "vitest";
 import { platformMaintenanceJobs } from "../../../src/platform/maintenance/maintenanceJobs.js";
 import { buildHandlerMap } from "../../../src/platform/queue/handlers.js";
 import { buildWorkerContainer } from "../../support/worker.js";
-import { exportKey, keysOf, s10 } from "../../support/s10.js";
+import { createMemoryObjectStore } from "../../../src/platform/storage/memoryObjectStore.js";
+import { exportKey, keysOf } from "../../support/s10.js";
 
 describe("TP-10.11x: platform.exports-purge (F-80, A-215)", () => {
   it("TP-10.11x: the definition is general, cron 15 * * * *, with an empty payload", () => {
@@ -17,7 +18,6 @@ describe("TP-10.11x: platform.exports-purge (F-80, A-215)", () => {
   });
 
   it("TP-10.11x: the general worker's handler purges exports older than 7 days from its objectStore", async () => {
-    const { createMemoryObjectStore } = await s10.memoryObjectStore();
     const clock = fixedClock("2026-09-29T12:00:00Z");
     const store = createMemoryObjectStore(clock);
     const old = exportKey("0190a0b0-1c2d-7e3f-8a4b-000000000008");

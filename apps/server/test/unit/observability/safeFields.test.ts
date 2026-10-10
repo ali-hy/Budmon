@@ -18,6 +18,15 @@ describe("TP-3.1: sanitizeFields", () => {
       dropped: 3,
     });
   });
+
+  it("TP-3.1 (A-308): route /dev/objects/* is kept; /a* and /a/*/b are [invalid]", () => {
+    expect(sanitizeFields({ route: "/dev/objects/*" })).toEqual({
+      fields: { route: "/dev/objects/*" },
+      dropped: 0,
+    });
+    expect(sanitizeFields({ route: "/a*" }).fields).toEqual({ route: "[invalid]" });
+    expect(sanitizeFields({ route: "/a/*/b" }).fields).toEqual({ route: "[invalid]" });
+  });
 });
 
 describe("TP-3.19x: the closed set (F-30)", () => {
@@ -44,6 +53,8 @@ describe("TP-3.19x: the closed set (F-30)", () => {
         "limiter",
         "signal",
         "reason",
+        // A-306: the bucket of object_keys_skipped.
+        "bucket",
       ],
       route: ["route"],
       count: ["status", "count", "attempt", "clientVersion", "dropped", "inserted", "rejected"],
