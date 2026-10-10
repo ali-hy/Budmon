@@ -11,6 +11,8 @@ export default [
       "**/.tools/**",
       "**/playwright-report/**",
       "**/test-results/**",
+      // A-318: review agents' temporary checkouts.
+      ".claude/**",
     ],
   },
   ...createBudmonEslintConfig({ tsconfigRootDir: import.meta.dirname }),

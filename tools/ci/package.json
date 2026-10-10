@@ -3,6 +3,9 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "scripts": {
+    "lint:catalogs": "tsx checkCatalogs.ts"
+  },
   "devDependencies": {
     "@formatjs/cli-lib": "10.0.10",
     "tsx": "4.23.15"

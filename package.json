@@ -11,7 +11,7 @@
     "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm test:coverage && pnpm test:int",
     "test": "vitest run --project=!server-int",
     "test:int": "vitest run --project=server-int",
-    "lint": "eslint . && pnpm lint:css",
+    "lint": "eslint . && pnpm lint:css && pnpm lint:catalogs",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "typecheck": "tsc -p tsconfig.json && tsc -p apps/server/tsconfig.json && tsc -p apps/web/tsconfig.json",
@@ -21,7 +21,8 @@
     "db:seed": "pnpm --filter @budmon/server db:seed",
     "db:migrate": "pnpm --filter @budmon/server db:migrate",
     "contract:openapi": "pnpm --filter @budmon/contract contract:openapi",
-    "lint:css": "stylelint \"apps/web/src/**/*.css\""
+    "lint:css": "stylelint \"apps/web/src/**/*.css\"",
+    "lint:catalogs": "pnpm --filter @budmon/tools-ci lint:catalogs"
   },
   "devDependencies": {
     "@budmon/config": "workspace:*",

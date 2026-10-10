@@ -21,7 +21,8 @@ export function supportedLocales(): readonly string[] {
   return import.meta.env["VITE_PSEUDO_LOCALES"] === "1" ? ["en", ...PSEUDO_LOCALES] : ["en"];
 }
 
-/** Pseudo-locales are English underneath: Intl formats them as `en`. */
+/** A-315: every Intl call (relative times, dates, numbers, money, plural rules in t) formats the
+ * pseudo-locales as `en`; only the catalog, lang and dir change. */
 function intlLocaleOf(locale: string): string {
   return (PSEUDO_LOCALES as readonly string[]).includes(locale) ? "en" : locale;
 }
