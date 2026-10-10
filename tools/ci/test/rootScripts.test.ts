@@ -37,6 +37,11 @@ const ROWS: Readonly<Record<string, string>> = {
   "lint:catalogs": "pnpm --filter @budmon/tools-ci lint:catalogs",
   // S-11b (A-14)
   "test:e2e": "pnpm --filter @budmon/web test:e2e",
+  // S-14 (A-14)
+  "db:release-migration": "pnpm --filter @budmon/server db:release-migration",
+  "db:pending-report": "pnpm --filter @budmon/server db:pending-report",
+  "db:check-migrations": "pnpm --filter @budmon/server db:check-migrations",
+  "db:check-risky": "pnpm --filter @budmon/server db:check-risky",
   // S-13 (A-14): check:all also runs Android's checks.
   "check:all": "pnpm check && pnpm test:e2e && cd apps/android && ./gradlew check",
 };
@@ -49,6 +54,11 @@ const SERVER_SCRIPTS: Readonly<Record<string, string>> = {
   // A-83: the development wrapper.
   "db:migrate": "tsx src/main/devMigrate.ts",
   build: "tsx scripts/build.ts",
+  // S-14 (A-14)
+  "db:release-migration": "tsx tools/releaseMigration.ts generate",
+  "db:pending-report": "tsx tools/releaseMigration.ts pending",
+  "db:check-migrations": "tsx tools/checkMigrations.ts",
+  "db:check-risky": "tsx tools/checkRisky.ts",
 };
 
 function rootScripts(): Record<string, unknown> {
